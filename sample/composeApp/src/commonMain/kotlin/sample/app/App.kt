@@ -36,7 +36,7 @@ fun App() {
             title = "Select a Video File",
             onResult = { file ->
                 file?.let { url = it.getUri() }
-                // file?.let { playerState.openFile(it) }
+                // Or: file?.let { playerState.openFile(it) }
                 // Or: file?.let { playerState.openUri(it.getUri()) }
             }
         )

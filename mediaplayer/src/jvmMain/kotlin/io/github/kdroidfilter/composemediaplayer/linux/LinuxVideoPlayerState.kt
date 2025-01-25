@@ -314,7 +314,6 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         _hasMedia = false
 
         try {
-            println("Opening URI: $uri")
             val uriObj = URI(uri)
             playbin.setURI(uriObj)
             _hasMedia = true
@@ -329,7 +328,6 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     }
 
     override fun play() {
-        println("Playing video")
         try {
             playbin.play()
             playbin.set("volume", volume.toDouble())
@@ -338,7 +336,6 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             isUserPaused = false
             updateLoadingState()
         } catch (e: Exception) {
-            e.printStackTrace()
             _error = VideoPlayerError.UnknownError("Failed to play: ${e.message}")
             _isPlaying = false
         }
