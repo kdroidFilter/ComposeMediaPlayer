@@ -35,7 +35,8 @@ fun App() {
             type = PickerType.Video,
             title = "Select a Video File",
             onResult = { file ->
-                file?.let { playerState.openFile(it) }
+                file?.let { url = it.getUri() }
+                // file?.let { playerState.openFile(it) }
                 // Or: file?.let { playerState.openUri(it.getUri()) }
             }
         )

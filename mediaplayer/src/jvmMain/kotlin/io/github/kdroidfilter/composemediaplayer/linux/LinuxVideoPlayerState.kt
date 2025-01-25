@@ -314,11 +314,8 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         _hasMedia = false
 
         try {
-            val uriObj = if (uri.startsWith("http://") || uri.startsWith("https://")) {
-                URI(uri)
-            } else {
-                File(uri).toURI()
-            }
+            println("Opening URI: $uri")
+            val uriObj = URI(uri)
             playbin.setURI(uriObj)
             _hasMedia = true
             play() // This will set _isPlaying to true if successful
@@ -332,6 +329,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     }
 
     override fun play() {
+        println("Playing video")
         try {
             playbin.play()
             playbin.set("volume", volume.toDouble())
@@ -340,6 +338,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             isUserPaused = false
             updateLoadingState()
         } catch (e: Exception) {
+            e.printStackTrace()
             _error = VideoPlayerError.UnknownError("Failed to play: ${e.message}")
             _isPlaying = false
         }
