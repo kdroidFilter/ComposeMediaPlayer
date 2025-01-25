@@ -183,19 +183,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         resetState()
 
         try {
-            logger.log("Opening URI: $uri") // Ajout de log
-            val hr = when {
-                uri.startsWith("http", ignoreCase = true) -> {
-                    logger.log("Playing URL: $uri")
-                    mediaPlayer.PlayURL(WString(uri))
-                }
-                else -> {
-                    val file = File(uri)
-                    if (!file.exists()) throw FileNotFoundException("File not found: $uri")
-                    logger.log("Playing file: ${file.absolutePath}")
-                    mediaPlayer.PlayFile(WString(file.absolutePath))
-                }
-            }
+            logger.log("Playing URL: $uri")
+            val hr = mediaPlayer.PlayURL(WString(uri))
             logger.log("PlayFile/URL returned HR=0x${hr.toString(16)}") // Ajout de log
             if (hr < 0) {
                 handleError("Unable to open (HR=0x${hr.toString(16)})")

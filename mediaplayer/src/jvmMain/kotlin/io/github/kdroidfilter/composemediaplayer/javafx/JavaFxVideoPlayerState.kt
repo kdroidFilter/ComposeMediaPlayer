@@ -97,10 +97,7 @@ class JavaFxVideoPlayerState : PlatformVideoPlayerState {
                 Thread.sleep(100)
 
                 // Créer le nouveau MediaPlayer
-                val fileOrUrl = if (uri.startsWith("http")) uri else File(uri).toURI().toString()
-                println("Opening media: $fileOrUrl")
-
-                val media = Media(fileOrUrl)
+                val media = Media(uri)
                 MediaPlayer(media).also { player ->
                     mediaPlayer = player
                     setupMediaPlayer(player)
