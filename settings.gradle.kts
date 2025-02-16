@@ -12,6 +12,8 @@ pluginManagement {
         }
         gradlePluginPortal()
         mavenCentral()
+        maven("https://git.karmakrafts.dev/api/v4/projects/358/packages/maven")
+
     }
 }
 
@@ -27,8 +29,10 @@ dependencyResolutionManagement {
         }
         mavenCentral()
         maven("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+        maven("https://git.karmakrafts.dev/api/v4/projects/358/packages/maven")
     }
 }
 include(":mediaplayer")
 include(":sample:composeApp")
+include(":gstreamerwin")
 
