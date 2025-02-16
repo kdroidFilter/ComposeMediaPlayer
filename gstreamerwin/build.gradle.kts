@@ -22,18 +22,11 @@ kotlin {
 
 
     sourceSets {
-        commonMain.dependencies {
-            implementation(libs.kotlin.logging)
-            implementation("io.karma.kmbed:kmbed-runtime:1.8.4.34-SNAPSHOT")
-        }
-
-        commonTest.dependencies {
-            implementation(kotlin("test"))
-        }
-
         jvmMain.dependencies {
+            implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.slf4j.simple)
+            implementation("io.karma.kmbed:kmbed-runtime:1.8.4.34-SNAPSHOT")
         }
     }
 
