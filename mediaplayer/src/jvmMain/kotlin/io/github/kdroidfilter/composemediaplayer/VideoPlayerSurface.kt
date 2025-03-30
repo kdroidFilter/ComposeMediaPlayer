@@ -6,8 +6,8 @@ import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.mac.compose.MacVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.mac.compose.MacVideoPlayerSurface
-import io.github.kdroidfilter.composemediaplayer.windows.compose.WindowsVideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.windows.compose.WindowsVideoPlayerSurface
+import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerSurface
 
 /**
  * Composable function for rendering a video player surface.
