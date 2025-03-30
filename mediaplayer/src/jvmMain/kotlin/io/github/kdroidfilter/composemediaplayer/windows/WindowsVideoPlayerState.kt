@@ -115,8 +115,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     var videoWidth: Int = 0
     var videoHeight: Int = 0
     private var frameRate: Float = 30f
-    private val frameIntervalMs: Long
-        get() = (1000 / frameRate).toLong()
 
     // Reusable Bitmap to avoid allocating a new one for every frame
     private var reusableBitmap: Bitmap? = null
@@ -126,6 +124,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     // Dummy counter to force recomposition when updating the bitmap
     private var _frameCounter by mutableStateOf(0)
+
     // Expose frameCounter so that the composable can observe it
     val frameCounter: Int get() = _frameCounter
 
