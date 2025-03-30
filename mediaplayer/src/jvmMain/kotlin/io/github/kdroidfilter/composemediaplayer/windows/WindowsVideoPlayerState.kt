@@ -44,7 +44,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _volume = value.coerceIn(0f, 1f)
         }
 
-    // Position, durée, etc. (non géré entièrement, c'est un exemple)
+    // Position, durée, etc. (non entièrement géré ici)
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
     private var _progress by mutableStateOf(0f)
@@ -80,10 +80,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val error: VideoPlayerError? get() = _error
 
     override fun clearError() {
-        _error = null; errorMessage = null
+        _error = null
+        errorMessage = null
     }
 
-    // Sous-titres (non gérés ici)
+    // Sous-titres (non gérés)
     override val metadata: VideoMetadata = VideoMetadata()
     override var subtitlesEnabled: Boolean = false
     override var currentSubtitleTrack: SubtitleTrack? = null
@@ -101,7 +102,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override fun showMedia() {
         _hasMedia = true
     }
-
     override fun hideMedia() {
         _hasMedia = false
     }
@@ -180,7 +180,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             player.GetVideoFrameRate(numRef, denomRef)
             val frameRateNum = numRef.value
             val frameRateDenom = denomRef.value
-            val frameDurationMs = if (frameRateNum > 0) (1000.0 * frameRateDenom / frameRateNum).toLong() else 33L // roughly 30 FPS (33ms per frame)
+            val frameDurationMs = if (frameRateNum > 0) {
+                (1000.0 * frameRateDenom / frameRateNum).toLong()
+            } else {
+                33L // roughly 30 FPS
+            }
 
             while (isActive && !player.IsEOF()) {
                 if (_isPlaying) {
@@ -203,7 +207,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                                 // Unlock
                                 player.UnlockVideoFrame()
 
-                                // Conversion en Bitmap Skia, en BGRA
+                                // Conversion en Bitmap Skia (BGRA)
                                 val bmp = Bitmap().apply {
                                     allocPixels(
                                         ImageInfo(
@@ -213,7 +217,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                                             alphaType = ColorAlphaType.OPAQUE
                                         )
                                     )
-                                    installPixels(imageInfo, byteArray, rowBytes = videoWidth * 4)
+                                    installPixels(
+                                        imageInfo,
+                                        byteArray,
+                                        rowBytes = videoWidth * 4
+                                    )
                                 }
 
                                 withContext(Dispatchers.Main) {
@@ -224,7 +232,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                             }
                         }
                     } else {
-                        // Wait a bit before checking again
                         delay(1)
                     }
                 } else {
@@ -250,11 +257,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         _isPlaying = false
         player.StopAudioPlayback()
         currentFrame = null
-        // Pas de "seek" implémenté => on pourrait rouvrir le média pour revenir au début, etc.
+        // Pas de "seek" implémenté : pour revenir à 0, il faudrait rouvrir le média ou faire un seek via SourceReader
     }
 
     override fun seekTo(value: Float) {
-        // Non implémenté ici (SourceReader + setPosition demanderait plus de code).
+        // Non implémenté ici
     }
 
     private fun setError(msg: String) {
