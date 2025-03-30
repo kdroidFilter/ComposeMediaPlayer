@@ -1,3 +1,9 @@
+// WindowsVideoPlayerState.kt
+// This file contains the revised Kotlin implementation for offscreen video playback
+// using the OffscreenPlayer DLL via JNA.
+// The code has been adjusted to reduce CPU usage by synchronizing the video frame rate
+// with the canvas refresh rate and adding appropriate delays.
+
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import androidx.compose.runtime.getValue
@@ -21,20 +27,21 @@ import java.io.File
 
 /**
  * Windows implementation for offscreen video playback using the OffscreenPlayer DLL.
+ * The code has been modified to reduce CPU usage and improve performance.
  */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private val player = MediaFoundationLib.INSTANCE
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // Indicates whether initialization succeeded
+    // Initialization state
     var isInitialized by mutableStateOf(false)
         private set
 
-    // Whether a media is opened
+    // Media open state
     private var _hasMedia by mutableStateOf(false)
     override val hasMedia: Boolean get() = _hasMedia
 
-    // Is playback active
+    // Playback state
     private var _isPlaying by mutableStateOf(false)
     override val isPlaying: Boolean get() = _isPlaying
 
@@ -45,7 +52,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _volume = value.coerceIn(0f, 1f)
         }
 
-    // Playback position, duration, etc.
+    // Playback timing and progress
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
     private var _progress by mutableStateOf(0f)
@@ -58,34 +65,29 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var _userDragging by mutableStateOf(false)
     override var userDragging: Boolean
         get() = _userDragging
-        set(value) {
-            _userDragging = value
-        }
+        set(value) { _userDragging = value }
 
     private var _loop by mutableStateOf(false)
     override var loop: Boolean
         get() = _loop
-        set(value) {
-            _loop = value
-        }
+        set(value) { _loop = value }
 
     override val leftLevel: Float get() = 0f
     override val rightLevel: Float get() = 0f
 
-    // Current frame bitmap
+    // Current video frame to be displayed
     var currentFrame: Bitmap? by mutableStateOf(null)
         private set
 
     // Error handling
     private var _error: VideoPlayerError? = null
     override val error: VideoPlayerError? get() = _error
-
     override fun clearError() {
         _error = null
         errorMessage = null
     }
 
-    // Subtitle tracks (not implemented)
+    // Subtitle support (not implemented)
     override val metadata: VideoMetadata = VideoMetadata()
     override var subtitlesEnabled: Boolean = false
     override var currentSubtitleTrack: SubtitleTrack? = null
@@ -100,23 +102,25 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val durationText: String get() = formatTime(_duration)
 
     // Show/hide media
-    override fun showMedia() {
-        _hasMedia = true
-    }
-    override fun hideMedia() {
-        _hasMedia = false
-    }
+    override fun showMedia() { _hasMedia = true }
+    override fun hideMedia() { _hasMedia = false }
 
-    // Error message for logging
+    // Error message string for logging
     var errorMessage: String? by mutableStateOf(null)
         private set
 
-    // Job for video playback
+    // Video playback coroutine job
     private var videoJob: Job? = null
 
-    // Real video dimensions detected
+    // Detected video dimensions
     var videoWidth: Int = 0
     var videoHeight: Int = 0
+
+    // Frame rate information (frames per second)
+    private var frameRate: Float = 30f
+    // Calculate frame interval in milliseconds (for canvas refresh synchronization)
+    private val defaultFrameIntervalMs: Long
+        get() = (1000 / frameRate).toLong()
 
     init {
         // Initialize Media Foundation
@@ -132,28 +136,27 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         player.CloseMedia()
         isInitialized = false
         _isPlaying = false
-        _hasMedia = false
     }
 
     override fun openUri(uri: String) {
-        // Ensure that the media foundation is initialized
+        // Ensure Media Foundation is initialized
         if (!isInitialized) {
             setError("Player not initialized.")
             return
         }
 
-        // Cancel any existing video job and close previously opened media
+        // Cancel any existing job and close previous media
         videoJob?.cancel()
         player.CloseMedia()
 
-        // Check if the URI is a local file and exists
+        // Check if the URI exists for local files
         val file = File(uri)
         if (!uri.startsWith("http", ignoreCase = true) && !file.exists()) {
             setError("File not found: $uri")
             return
         }
 
-        // Attempt to open the media
+        // Open media using the DLL function
         val hrOpen = player.OpenMedia(WString(uri))
         if (hrOpen < 0) {
             setError("OpenMedia($uri) failed (hr=0x${hrOpen.toString(16)})")
@@ -163,44 +166,42 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         _hasMedia = true
         _isPlaying = false
 
-        // Retrieve the video dimensions
+        // Retrieve video dimensions
         val wRef = IntByReference()
         val hRef = IntByReference()
         player.GetVideoSize(wRef, hRef)
-        videoWidth = wRef.value
-        videoHeight = hRef.value
-        if (videoWidth <= 0 || videoHeight <= 0) {
-            // Set default dimensions if not provided
-            videoWidth = 1280
-            videoHeight = 720
-        }
+        videoWidth = if (wRef.value > 0) wRef.value else 1280
+        videoHeight = if (hRef.value > 0) hRef.value else 720
 
-        // Retrieve the media duration (in 100-nanosecond units) and convert to seconds
+        // Retrieve media duration (convert from 100-ns units to seconds)
         val durationRef = LongByReference()
         val hrDuration = player.GetMediaDuration(durationRef)
         if (hrDuration >= 0) {
             _duration = durationRef.value / 10000000.0
         }
 
-        // Retrieve the video frame rate
+        // Retrieve video frame rate and calculate frame interval
         val numRef = IntByReference()
         val denomRef = IntByReference()
         val hrFrameRate = player.GetVideoFrameRate(numRef, denomRef)
         if (hrFrameRate >= 0 && denomRef.value != 0) {
-            val frameRate = numRef.value.toFloat() / denomRef.value.toFloat()
+            frameRate = numRef.value.toFloat() / denomRef.value.toFloat()
             println("Frame rate: $frameRate fps")
         } else {
-            // Handle error or set default frame rate
-            println("Unable to retrieve frame rate.")
+            println("Unable to retrieve frame rate, defaulting to 30 fps")
+            frameRate = 30f
         }
 
         // Start video playback
         play()
 
-        // Launch a coroutine for the video playback loop
+        // Launch video playback loop coroutine with canvas refresh synchronization
         videoJob = scope.launch {
             while (isActive && !player.IsEOF()) {
                 if (_isPlaying) {
+                    val frameStartTime = System.currentTimeMillis()
+
+                    // Read next video frame
                     val ptrRef = PointerByReference()
                     val sizeRef = IntByReference()
                     val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
@@ -211,10 +212,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                             val byteArray = ByteArray(dataSize)
                             pFrame.read(0, byteArray, 0, dataSize)
 
-                            // Unlock the frame buffer
+                            // Unlock frame buffer after reading
                             player.UnlockVideoFrame()
 
-                            // Convert the raw frame data to a Skia Bitmap (BGRA format)
+                            // Convert raw data to a Skia Bitmap (BGRA format)
                             val bmp = Bitmap().apply {
                                 allocPixels(
                                     ImageInfo(
@@ -224,31 +225,31 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                                         alphaType = ColorAlphaType.OPAQUE
                                     )
                                 )
-                                installPixels(
-                                    imageInfo,
-                                    byteArray,
-                                    rowBytes = videoWidth * 4
-                                )
+                                installPixels(imageInfo, byteArray, rowBytes = videoWidth * 4)
                             }
 
+                            // Update current frame and playback position on Main thread
                             withContext(Dispatchers.Main) {
                                 currentFrame = bmp
-                                // Update the current playback time (approximation)
                                 val posRef = LongByReference()
                                 if (player.GetMediaPosition(posRef) >= 0) {
                                     _currentTime = posRef.value / 10000000.0
                                 }
                             }
                         } else {
-                            // No frame data available, wait briefly
-                            delay(1)
+                            // If no frame data, wait for the next interval
+                            delay(defaultFrameIntervalMs)
                         }
                     } else {
-                        // Frame read error, wait briefly before retrying
-                        delay(1)
+                        delay(defaultFrameIntervalMs)
+                    }
+
+                    // Synchronize with canvas refresh rate if processing was too fast
+                    val elapsed = System.currentTimeMillis() - frameStartTime
+                    if (elapsed < defaultFrameIntervalMs) {
+                        delay(defaultFrameIntervalMs - elapsed)
                     }
                 } else {
-                    // If playback is paused, wait longer before checking again
                     delay(50)
                 }
             }
@@ -270,11 +271,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         _isPlaying = false
         player.StopAudioPlayback()
         currentFrame = null
-        // No seek implementation: to return to start, reopen media or implement seek via SourceReader.
+        // To restart from beginning, either reopen the media or use seekTo(0f)
     }
 
+    /**
+     * Seek to a new position based on a slider value (0 to 1000).
+     * The slider value is converted to a fraction of the total duration.
+     */
     override fun seekTo(value: Float) {
-        // Retrieve the total duration of the media in 100 ns units
         val durationRef = LongByReference()
         val hrDuration = player.GetMediaDuration(durationRef)
         if (hrDuration < 0) {
@@ -282,14 +286,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             return
         }
         val duration100ns = durationRef.value
-
-        // Convert slider value (0 to 1000) to a fraction (0.0 to 1.0)
         val fraction = value / 1000f
-
-        // Calculate new position in 100 ns units
         val newPosition = (duration100ns * fraction).toLong()
-
-        // Call the DLL function to seek to the new position
         val hrSeek = player.SeekMedia(newPosition)
         if (hrSeek < 0) {
             setError("SeekMedia failed (hr=0x${hrSeek.toString(16)})")
