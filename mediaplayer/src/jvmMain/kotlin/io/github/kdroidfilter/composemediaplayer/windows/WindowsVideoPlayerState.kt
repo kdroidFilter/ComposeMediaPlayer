@@ -1,8 +1,7 @@
 // WindowsVideoPlayerState.kt
-// This file contains the revised Kotlin implementation for offscreen video playback
-// using the OffscreenPlayer DLL via JNA.
-// The code has been adjusted to reduce CPU usage by synchronizing the video frame rate
-// with the canvas refresh rate and adding appropriate delays.
+// Revised Kotlin implementation for offscreen video playback.
+// Removed extra delay in the video loop to prevent double synchronization.
+// Comments are in English.
 
 package io.github.kdroidfilter.composemediaplayer.windows
 
@@ -26,8 +25,8 @@ import org.jetbrains.skia.ImageInfo
 import java.io.File
 
 /**
- * Windows implementation for offscreen video playback using the OffscreenPlayer DLL.
- * The code has been modified to reduce CPU usage and improve performance.
+ * Windows implementation for offscreen video playback using the OffscreenPlayer DLL via JNA.
+ * The extra delay for canvas refresh synchronization has been removed to fix the video/audio desync.
  */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private val player = MediaFoundationLib.INSTANCE
@@ -195,12 +194,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         // Start video playback
         play()
 
-        // Launch video playback loop coroutine with canvas refresh synchronization
+        // Launch video playback loop coroutine without additional delay,
+        // since native synchronization is already performed in ReadVideoFrame.
         videoJob = scope.launch {
             while (isActive && !player.IsEOF()) {
                 if (_isPlaying) {
-                    val frameStartTime = System.currentTimeMillis()
-
                     // Read next video frame
                     val ptrRef = PointerByReference()
                     val sizeRef = IntByReference()
@@ -237,17 +235,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                                 }
                             }
                         } else {
-                            // If no frame data, wait for the next interval
-                            delay(defaultFrameIntervalMs)
+                            // If no frame data, wait a short time
+                            delay(5)
                         }
                     } else {
-                        delay(defaultFrameIntervalMs)
-                    }
-
-                    // Synchronize with canvas refresh rate if processing was too fast
-                    val elapsed = System.currentTimeMillis() - frameStartTime
-                    if (elapsed < defaultFrameIntervalMs) {
-                        delay(defaultFrameIntervalMs - elapsed)
+                        delay(5)
                     }
                 } else {
                     delay(50)
