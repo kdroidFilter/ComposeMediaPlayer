@@ -21,7 +21,7 @@ import java.io.File
 
 /**
  * Optimized Windows implementation for offscreen video playback using the OffscreenPlayer DLL via JNA.
- * This version minimizes extra delays and CPU usage for 4K video playback.
+ * This version sets the video output to NV12 and performs a CPU conversion from NV12 to BGRA for rendering.
  */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private val player = MediaFoundationLib.INSTANCE
@@ -197,11 +197,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         val pFrame = ptrRef.value
                         val dataSize = sizeRef.value
                         if (pFrame != null && dataSize > 0) {
-                            val byteArray = ByteArray(dataSize)
-                            pFrame.read(0, byteArray, 0, dataSize)
+                            // Read the NV12 raw data from the native buffer
+                            val nv12ByteArray = ByteArray(dataSize)
+                            pFrame.read(0, nv12ByteArray, 0, dataSize)
                             // Unlock the frame buffer after reading
                             player.UnlockVideoFrame()
-                            // Convert raw data to a Skia Bitmap (BGRA format)
+                            // Convert NV12 data to BGRA data for rendering
+                            val bgraByteArray = convertNV12ToBGRA(nv12ByteArray, videoWidth, videoHeight)
+                            // Create a Skia Bitmap from the BGRA byte array
                             val bmp = Bitmap().apply {
                                 allocPixels(
                                     ImageInfo(
@@ -211,7 +214,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                                         alphaType = ColorAlphaType.OPAQUE
                                     )
                                 )
-                                installPixels(imageInfo, byteArray, rowBytes = videoWidth * 4)
+                                installPixels(imageInfo, bgraByteArray, rowBytes = videoWidth * 4)
                             }
                             // Update current frame and playback position on the main thread
                             withContext(Dispatchers.Main) {
@@ -270,6 +273,42 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         } else {
             _currentTime = newPosition / 10000000.0
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Convert NV12 raw data to BGRA format for Skia Bitmap rendering
+    // ------------------------------------------------------------------
+    private fun convertNV12ToBGRA(nv12: ByteArray, width: Int, height: Int): ByteArray {
+        val frameSize = width * height
+        val bgra = ByteArray(width * height * 4)
+        for (j in 0 until height) {
+            for (i in 0 until width) {
+                // Get Y value
+                val yIndex = j * width + i
+                val Y = (nv12[yIndex].toInt() and 0xFF)
+                // Calculate UV index (each UV pair covers a 2x2 block)
+                val uvIndex = frameSize + ((j shr 1) * width) + ((i shr 1) shl 1)
+                val U = (nv12[uvIndex].toInt() and 0xFF)
+                val V = (nv12[uvIndex + 1].toInt() and 0xFF)
+                // Convert YUV to RGB using standard formula
+                val c = (Y - 16).coerceAtLeast(0)
+                val d = U - 128
+                val e = V - 128
+                var r = ((298 * c + 409 * e + 128) shr 8)
+                var g = ((298 * c - 100 * d - 208 * e + 128) shr 8)
+                var b = ((298 * c + 516 * d + 128) shr 8)
+                r = r.coerceIn(0, 255)
+                g = g.coerceIn(0, 255)
+                b = b.coerceIn(0, 255)
+                // Write BGRA (note: Skia expects BGRA_8888 format)
+                val base = (j * width + i) * 4
+                bgra[base] = b.toByte()         // Blue
+                bgra[base + 1] = g.toByte()     // Green
+                bgra[base + 2] = r.toByte()     // Red
+                bgra[base + 3] = 255.toByte()   // Alpha
+            }
+        }
+        return bgra
     }
 
     private fun setError(msg: String) {
