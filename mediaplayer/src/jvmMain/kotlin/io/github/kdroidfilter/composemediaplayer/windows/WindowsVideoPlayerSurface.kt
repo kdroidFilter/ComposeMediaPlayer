@@ -25,26 +25,31 @@ fun WindowsVideoPlayerSurface(
         contentAlignment = Alignment.Center
     ) {
         val bitmap = playerState.currentFrame
+        // Observe frameCounter to trigger recomposition when it changes
+        val frameCounter = playerState.frameCounter
+
         if (bitmap != null) {
             val ratio = if (playerState.videoWidth != 0 && playerState.videoHeight != 0) {
                 playerState.videoWidth.toFloat() / playerState.videoHeight.toFloat()
             } else 16f / 9f
 
-            Canvas(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .aspectRatio(ratio)
-                    .onSizeChanged { canvasSize = it.toSize() }
-            ) {
-                // Only redraw if bitmap and size are valid
-                if (size.width > 0 && size.height > 0) {
-                    drawImage(
-                        bitmap.asComposeImageBitmap(),
-                        dstSize = IntSize(
-                            width = size.width.toInt(),
-                            height = size.height.toInt()
+            // Wrap the entire Canvas with key to force recomposition when frameCounter changes
+            key(frameCounter) {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .aspectRatio(ratio)
+                        .onSizeChanged { canvasSize = it.toSize() }
+                ) {
+                    if (size.width > 0 && size.height > 0) {
+                        drawImage(
+                            bitmap.asComposeImageBitmap(),
+                            dstSize = IntSize(
+                                width = size.width.toInt(),
+                                height = size.height.toInt()
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
