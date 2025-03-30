@@ -1,8 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import com.sun.jna.Native
-import com.sun.jna.Pointer
-import com.sun.jna.PointerType
 import com.sun.jna.WString
 import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.PointerByReference
@@ -46,5 +44,3 @@ internal interface MediaFoundationLib : StdCallLibrary {
 
 }
 
-// (Optionnel) Petit wrapper si besoin
-class BytePointer(p: Pointer?) : PointerType(p)
