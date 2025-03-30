@@ -41,6 +41,9 @@ internal interface MediaFoundationLib : StdCallLibrary {
 
     // 7) Taille
     fun GetVideoSize(pWidth: IntByReference, pHeight: IntByReference)
+
+    fun GetVideoFrameRate(pNum: IntByReference, pDenom: IntByReference): Int
+
 }
 
 // (Optionnel) Petit wrapper si besoin

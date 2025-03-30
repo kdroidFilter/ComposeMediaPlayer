@@ -40,7 +40,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var _volume by mutableStateOf(1f)
     override var volume: Float
         get() = _volume
-        set(value) { _volume = value.coerceIn(0f,1f) }
+        set(value) {
+            _volume = value.coerceIn(0f, 1f)
+        }
 
     // Position, durée, etc. (non géré entièrement, c'est un exemple)
     private var _currentTime by mutableStateOf(0.0)
@@ -48,17 +50,23 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var _progress by mutableStateOf(0f)
     override var sliderPos: Float
         get() = _progress * 1000f
-        set(value) { _progress = (value / 1000f).coerceIn(0f,1f) }
+        set(value) {
+            _progress = (value / 1000f).coerceIn(0f, 1f)
+        }
 
     private var _userDragging by mutableStateOf(false)
     override var userDragging: Boolean
         get() = _userDragging
-        set(value) { _userDragging = value }
+        set(value) {
+            _userDragging = value
+        }
 
     private var _loop by mutableStateOf(false)
     override var loop: Boolean
         get() = _loop
-        set(value) { _loop = value }
+        set(value) {
+            _loop = value
+        }
 
     override val leftLevel: Float get() = 0f
     override val rightLevel: Float get() = 0f
@@ -71,7 +79,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var _error: VideoPlayerError? = null
     override val error: VideoPlayerError? get() = _error
 
-    override fun clearError() { _error = null ; errorMessage = null }
+    override fun clearError() {
+        _error = null; errorMessage = null
+    }
 
     // Sous-titres (non gérés ici)
     override val metadata: VideoMetadata = VideoMetadata()
@@ -88,8 +98,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val durationText: String get() = formatTime(_duration)
 
     // Pour afficher/masquer la vidéo
-    override fun showMedia() { _hasMedia = true }
-    override fun hideMedia() { _hasMedia = false }
+    override fun showMedia() {
+        _hasMedia = true
+    }
+
+    override fun hideMedia() {
+        _hasMedia = false
+    }
 
     // Pour logs d'erreur
     var errorMessage: String? by mutableStateOf(null)
@@ -156,46 +171,60 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
 
         // Coroutine de lecture vidéo
+// Modify the videoJob coroutine in WindowsVideoPlayerState.kt
         videoJob = scope.launch {
+            var lastFrameTime = 0L
+            val numRef = IntByReference()
+            val denomRef = IntByReference()
+            player.GetVideoFrameRate(numRef, denomRef)
+            val frameRateNum = numRef.value
+            val frameRateDenom = denomRef.value
+            val frameDurationMs = if (frameRateNum > 0) (1000.0 * frameRateDenom / frameRateNum).toLong() else 33L // roughly 30 FPS (33ms per frame)
+
             while (isActive && !player.IsEOF()) {
                 if (_isPlaying) {
-                    val ptrRef = PointerByReference()
-                    val sizeRef = IntByReference()
-                    val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
-                    if (hrFrame >= 0) {
-                        val pFrame = ptrRef.value
-                        val dataSize = sizeRef.value
-                        if (pFrame != null && dataSize > 0) {
-                            val byteArray = ByteArray(dataSize)
-                            pFrame.read(0, byteArray, 0, dataSize)
+                    val currentTime = System.currentTimeMillis()
+                    val elapsedTime = currentTime - lastFrameTime
 
-                            // Unlock
-                            player.UnlockVideoFrame()
+                    // Only process a new frame if enough time has passed
+                    if (elapsedTime >= frameDurationMs) {
+                        val ptrRef = PointerByReference()
+                        val sizeRef = IntByReference()
+                        val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
 
-                            // Conversion en Bitmap Skia, en BGRA
-                            val bmp = Bitmap().apply {
-                                allocPixels(
-                                    ImageInfo(
-                                        width = videoWidth,
-                                        height = videoHeight,
-                                        colorType = ColorType.BGRA_8888,
-                                        alphaType = ColorAlphaType.OPAQUE
+                        if (hrFrame >= 0) {
+                            val pFrame = ptrRef.value
+                            val dataSize = sizeRef.value
+                            if (pFrame != null && dataSize > 0) {
+                                val byteArray = ByteArray(dataSize)
+                                pFrame.read(0, byteArray, 0, dataSize)
+
+                                // Unlock
+                                player.UnlockVideoFrame()
+
+                                // Conversion en Bitmap Skia, en BGRA
+                                val bmp = Bitmap().apply {
+                                    allocPixels(
+                                        ImageInfo(
+                                            width = videoWidth,
+                                            height = videoHeight,
+                                            colorType = ColorType.BGRA_8888,
+                                            alphaType = ColorAlphaType.OPAQUE
+                                        )
                                     )
-                                )
-                                // rowBytes = videoWidth * 4
-                                installPixels(imageInfo, byteArray, rowBytes = videoWidth * 4)
-                            }
+                                    installPixels(imageInfo, byteArray, rowBytes = videoWidth * 4)
+                                }
 
-                            withContext(Dispatchers.Main) {
-                                currentFrame = bmp
+                                withContext(Dispatchers.Main) {
+                                    currentFrame = bmp
+                                }
+
+                                lastFrameTime = currentTime
                             }
-                        } else {
-                            // Frame vide => petite pause
-                            delay(10)
                         }
                     } else {
-                        // Erreur de lecture ?
-                        delay(10)
+                        // Wait a bit before checking again
+                        delay(1)
                     }
                 } else {
                     // En pause => on attend un peu
