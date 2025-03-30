@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.sun.jna.WString
 import com.sun.jna.ptr.IntByReference
+import com.sun.jna.ptr.LongByReference
 import com.sun.jna.ptr.PointerByReference
 import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
@@ -170,6 +171,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             videoHeight = 720
         }
 
+        // Get media duration
+        val durationRef = LongByReference()
+        val hrDuration = player.GetMediaDuration(durationRef)
+        if (hrDuration >= 0) {
+            _duration = durationRef.value / 10000000.0
+        }
+
         play()
 
         // Video playback coroutine
@@ -208,6 +216,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                             withContext(Dispatchers.Main) {
                                 currentFrame = bmp
+                                // Update current playback time (approximation)
+                                val posRef = LongByReference()
+                                if (player.GetMediaPosition(posRef) >= 0) {
+                                    _currentTime = posRef.value / 10000000.0
+                                }
                             }
                         } else {
                             // No frame data available, small delay
@@ -242,7 +255,29 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     override fun seekTo(value: Float) {
-        // Not implemented
+        // Retrieve the total duration of the media in 100 ns units
+        val durationRef = LongByReference()
+        val hrDuration = player.GetMediaDuration(durationRef)
+        if (hrDuration < 0) {
+            setError("GetMediaDuration failed (hr=0x${hrDuration.toString(16)})")
+            return
+        }
+        val duration100ns = durationRef.value
+
+        // Convert slider value (0 to 1000) to a fraction (0.0 to 1.0)
+        val fraction = value / 1000f
+
+        // Calculate new position in 100 ns units
+        val newPosition = (duration100ns * fraction).toLong()
+
+        // Call the DLL function to seek to the new position
+        val hrSeek = player.SeekMedia(newPosition)
+        if (hrSeek < 0) {
+            setError("SeekMedia failed (hr=0x${hrSeek.toString(16)})")
+        } else {
+            // Update current playback time (in seconds)
+            _currentTime = newPosition / 10000000.0
+        }
     }
 
     private fun setError(msg: String) {

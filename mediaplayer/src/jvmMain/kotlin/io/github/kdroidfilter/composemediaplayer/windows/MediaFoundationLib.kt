@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.windows
 import com.sun.jna.Native
 import com.sun.jna.WString
 import com.sun.jna.ptr.IntByReference
+import com.sun.jna.ptr.LongByReference
 import com.sun.jna.ptr.PointerByReference
 import com.sun.jna.win32.StdCallLibrary
 
@@ -42,4 +43,13 @@ internal interface MediaFoundationLib : StdCallLibrary {
 
     // 8) Get video frame rate
     fun GetVideoFrameRate(pNum: IntByReference, pDenom: IntByReference): Int
+
+    // 9) Seek to specific position (in 100-nanosecond units)
+    fun SeekMedia(llPosition: Long): Int
+
+    // 10) Get media duration (in 100-nanosecond units)
+    fun GetMediaDuration(pDuration: LongByReference): Int
+
+    // 11) Get current playback position (in 100-nanosecond units)
+    fun GetMediaPosition(pPosition: LongByReference): Int
 }
