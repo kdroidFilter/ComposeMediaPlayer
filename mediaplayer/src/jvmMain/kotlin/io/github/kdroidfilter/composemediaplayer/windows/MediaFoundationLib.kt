@@ -7,7 +7,7 @@ import com.sun.jna.ptr.PointerByReference
 import com.sun.jna.win32.StdCallLibrary
 
 /**
- * Interface JNA pour la DLL OffscreenPlayer.dll
+ * JNA Interface for the OffscreenPlayer.dll
  */
 internal interface MediaFoundationLib : StdCallLibrary {
 
@@ -17,30 +17,29 @@ internal interface MediaFoundationLib : StdCallLibrary {
         }
     }
 
-    // 1) Init
+    // 1) Initialization
     fun InitMediaFoundation(): Int
 
-    // 2) Ouvrir
+    // 2) Open media
     fun OpenMedia(url: WString): Int
 
-    // 3) Lire frame
+    // 3) Read video frame
     fun ReadVideoFrame(pData: PointerByReference, pDataSize: IntByReference): Int
 
-    // 4) Unlock frame
+    // 4) Unlock video frame
     fun UnlockVideoFrame(): Int
 
-    // 5) Close
+    // 5) Close media
     fun CloseMedia()
 
-    // 6) Contrôles
+    // 6) Controls
     fun IsEOF(): Boolean
     fun StartAudioPlayback(): Int
     fun StopAudioPlayback(): Int
 
-    // 7) Taille
+    // 7) Get video dimensions
     fun GetVideoSize(pWidth: IntByReference, pHeight: IntByReference)
 
+    // 8) Get video frame rate
     fun GetVideoFrameRate(pNum: IntByReference, pDenom: IntByReference): Int
-
 }
-
