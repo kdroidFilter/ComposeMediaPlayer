@@ -4,17 +4,22 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asComposeImageBitmap
-import androidx.compose.ui.unit.toIntSize
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.toSize
 
 @Composable
 fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
     modifier: Modifier = Modifier
 ) {
+    var canvasSize by remember { mutableStateOf(Size.Zero) }
+
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center
@@ -29,14 +34,19 @@ fun WindowsVideoPlayerSurface(
                 modifier = Modifier
                     .fillMaxHeight()
                     .aspectRatio(ratio)
+                    .onSizeChanged { canvasSize = it.toSize() }
             ) {
-                drawImage(
-                    bitmap.asComposeImageBitmap(),
-                    dstSize = size.toIntSize()
-                )
+                // Only redraw if bitmap and size are valid
+                if (size.width > 0 && size.height > 0) {
+                    drawImage(
+                        bitmap.asComposeImageBitmap(),
+                        dstSize = IntSize(
+                            width = size.width.toInt(),
+                            height = size.height.toInt()
+                        )
+                    )
+                }
             }
-        } else {
-            // Pas de frame => rien
         }
     }
 }
