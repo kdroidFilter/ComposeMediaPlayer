@@ -19,21 +19,21 @@ import org.jetbrains.skia.ImageInfo
 import java.io.File
 
 /**
- * Implémentation Windows "offscreen" pour lire une vidéo via la DLL OffscreenPlayer.
+ * Windows implementation for offscreen video playback using the OffscreenPlayer DLL.
  */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private val player = MediaFoundationLib.INSTANCE
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // Indicateur d'init
+    // Indicates whether initialization succeeded
     var isInitialized by mutableStateOf(false)
         private set
 
-    // A-t-on un média ouvert ?
+    // Whether a media is opened
     private var _hasMedia by mutableStateOf(false)
     override val hasMedia: Boolean get() = _hasMedia
 
-    // Lecture en cours ?
+    // Is playback active
     private var _isPlaying by mutableStateOf(false)
     override val isPlaying: Boolean get() = _isPlaying
 
@@ -44,7 +44,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _volume = value.coerceIn(0f, 1f)
         }
 
-    // Position, durée, etc. (non entièrement géré ici)
+    // Playback position, duration, etc.
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
     private var _progress by mutableStateOf(0f)
@@ -71,11 +71,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val leftLevel: Float get() = 0f
     override val rightLevel: Float get() = 0f
 
-    // Frame courante
+    // Current frame bitmap
     var currentFrame: Bitmap? by mutableStateOf(null)
         private set
 
-    // Erreur
+    // Error handling
     private var _error: VideoPlayerError? = null
     override val error: VideoPlayerError? get() = _error
 
@@ -84,7 +84,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         errorMessage = null
     }
 
-    // Sous-titres (non gérés)
+    // Subtitle tracks (not implemented)
     override val metadata: VideoMetadata = VideoMetadata()
     override var subtitlesEnabled: Boolean = false
     override var currentSubtitleTrack: SubtitleTrack? = null
@@ -92,13 +92,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override fun selectSubtitleTrack(track: SubtitleTrack?) {}
     override fun disableSubtitles() {}
 
-    // Divers
+    // Loading indicator and time texts
     override var isLoading by mutableStateOf(false)
         private set
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
 
-    // Pour afficher/masquer la vidéo
+    // Show/hide media
     override fun showMedia() {
         _hasMedia = true
     }
@@ -106,23 +106,23 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         _hasMedia = false
     }
 
-    // Pour logs d'erreur
+    // Error message for logging
     var errorMessage: String? by mutableStateOf(null)
         private set
 
-    // Job de lecture vidéo
+    // Job for video playback
     private var videoJob: Job? = null
 
-    // Taille réelle vidéo (détectée)
+    // Real video dimensions detected
     var videoWidth: Int = 0
     var videoHeight: Int = 0
 
     init {
-        // Init MediaFoundation
+        // Initialize Media Foundation
         val hr = player.InitMediaFoundation()
         isInitialized = (hr >= 0)
         if (!isInitialized) {
-            setError("InitMediaFoundation a échoué (hr=0x${hr.toString(16)})")
+            setError("InitMediaFoundation failed (hr=0x${hr.toString(16)})")
         }
     }
 
@@ -136,106 +136,87 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     override fun openUri(uri: String) {
         if (!isInitialized) {
-            setError("Player non initialisé.")
+            setError("Player not initialized.")
             return
         }
         videoJob?.cancel()
         player.CloseMedia()
 
-        // Vérifier fichier
+        // Check if file exists (if not a URL)
         val file = File(uri)
         if (!uri.startsWith("http", ignoreCase = true) && !file.exists()) {
-            setError("Fichier introuvable : $uri")
+            setError("File not found: $uri")
             return
         }
 
         val hrOpen = player.OpenMedia(WString(uri))
         if (hrOpen < 0) {
-            setError("OpenMedia($uri) a échoué (hr=0x${hrOpen.toString(16)})")
+            setError("OpenMedia($uri) failed (hr=0x${hrOpen.toString(16)})")
             return
         }
 
         _hasMedia = true
         _isPlaying = false
 
-        // Récupérer la taille réelle
+        // Retrieve real video dimensions
         val wRef = IntByReference()
         val hRef = IntByReference()
         player.GetVideoSize(wRef, hRef)
         videoWidth = wRef.value
         videoHeight = hRef.value
         if (videoWidth <= 0 || videoHeight <= 0) {
-            // Valeur par défaut si la vidéo ne fournit pas d'info
+            // Default dimensions if not provided
             videoWidth = 1280
             videoHeight = 720
         }
 
         play()
 
-        // Coroutine de lecture vidéo
+        // Video playback coroutine
         videoJob = scope.launch {
-            var lastFrameTime = 0L
-            val numRef = IntByReference()
-            val denomRef = IntByReference()
-            player.GetVideoFrameRate(numRef, denomRef)
-            val frameRateNum = numRef.value
-            val frameRateDenom = denomRef.value
-            val frameDurationMs = if (frameRateNum > 0) {
-                (1000.0 * frameRateDenom / frameRateNum).toLong()
-            } else {
-                33L // roughly 30 FPS
-            }
-
             while (isActive && !player.IsEOF()) {
                 if (_isPlaying) {
-                    val currentTime = System.currentTimeMillis()
-                    val elapsedTime = currentTime - lastFrameTime
+                    val ptrRef = PointerByReference()
+                    val sizeRef = IntByReference()
+                    val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
+                    if (hrFrame >= 0) {
+                        val pFrame = ptrRef.value
+                        val dataSize = sizeRef.value
+                        if (pFrame != null && dataSize > 0) {
+                            val byteArray = ByteArray(dataSize)
+                            pFrame.read(0, byteArray, 0, dataSize)
 
-                    // Only process a new frame if enough time has passed
-                    if (elapsedTime >= frameDurationMs) {
-                        val ptrRef = PointerByReference()
-                        val sizeRef = IntByReference()
-                        val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
+                            // Unlock the frame buffer
+                            player.UnlockVideoFrame()
 
-                        if (hrFrame >= 0) {
-                            val pFrame = ptrRef.value
-                            val dataSize = sizeRef.value
-                            if (pFrame != null && dataSize > 0) {
-                                val byteArray = ByteArray(dataSize)
-                                pFrame.read(0, byteArray, 0, dataSize)
-
-                                // Unlock
-                                player.UnlockVideoFrame()
-
-                                // Conversion en Bitmap Skia (BGRA)
-                                val bmp = Bitmap().apply {
-                                    allocPixels(
-                                        ImageInfo(
-                                            width = videoWidth,
-                                            height = videoHeight,
-                                            colorType = ColorType.BGRA_8888,
-                                            alphaType = ColorAlphaType.OPAQUE
-                                        )
+                            // Convert to Skia Bitmap (BGRA)
+                            val bmp = Bitmap().apply {
+                                allocPixels(
+                                    ImageInfo(
+                                        width = videoWidth,
+                                        height = videoHeight,
+                                        colorType = ColorType.BGRA_8888,
+                                        alphaType = ColorAlphaType.OPAQUE
                                     )
-                                    installPixels(
-                                        imageInfo,
-                                        byteArray,
-                                        rowBytes = videoWidth * 4
-                                    )
-                                }
-
-                                withContext(Dispatchers.Main) {
-                                    currentFrame = bmp
-                                }
-
-                                lastFrameTime = currentTime
+                                )
+                                installPixels(
+                                    imageInfo,
+                                    byteArray,
+                                    rowBytes = videoWidth * 4
+                                )
                             }
+
+                            withContext(Dispatchers.Main) {
+                                currentFrame = bmp
+                            }
+                        } else {
+                            // No frame data available, small delay
+                            delay(1)
                         }
                     } else {
                         delay(1)
                     }
                 } else {
-                    // En pause => on attend un peu
                     delay(50)
                 }
             }
@@ -245,7 +226,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override fun play() {
         if (!isInitialized || !_hasMedia) return
         _isPlaying = true
-        player.StartAudioPlayback() // Lance l'audio
+        player.StartAudioPlayback() // Start audio playback
     }
 
     override fun pause() {
@@ -257,11 +238,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         _isPlaying = false
         player.StopAudioPlayback()
         currentFrame = null
-        // Pas de "seek" implémenté : pour revenir à 0, il faudrait rouvrir le média ou faire un seek via SourceReader
+        // No seek implementation: to return to start, reopen media or implement seek via SourceReader.
     }
 
     override fun seekTo(value: Float) {
-        // Non implémenté ici
+        // Not implemented
     }
 
     private fun setError(msg: String) {
