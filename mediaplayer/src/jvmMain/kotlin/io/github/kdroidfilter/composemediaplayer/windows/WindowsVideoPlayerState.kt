@@ -136,20 +136,24 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     override fun openUri(uri: String) {
+        // Ensure that the media foundation is initialized
         if (!isInitialized) {
             setError("Player not initialized.")
             return
         }
+
+        // Cancel any existing video job and close previously opened media
         videoJob?.cancel()
         player.CloseMedia()
 
-        // Check if file exists (if not a URL)
+        // Check if the URI is a local file and exists
         val file = File(uri)
         if (!uri.startsWith("http", ignoreCase = true) && !file.exists()) {
             setError("File not found: $uri")
             return
         }
 
+        // Attempt to open the media
         val hrOpen = player.OpenMedia(WString(uri))
         if (hrOpen < 0) {
             setError("OpenMedia($uri) failed (hr=0x${hrOpen.toString(16)})")
@@ -159,28 +163,41 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         _hasMedia = true
         _isPlaying = false
 
-        // Retrieve real video dimensions
+        // Retrieve the video dimensions
         val wRef = IntByReference()
         val hRef = IntByReference()
         player.GetVideoSize(wRef, hRef)
         videoWidth = wRef.value
         videoHeight = hRef.value
         if (videoWidth <= 0 || videoHeight <= 0) {
-            // Default dimensions if not provided
+            // Set default dimensions if not provided
             videoWidth = 1280
             videoHeight = 720
         }
 
-        // Get media duration
+        // Retrieve the media duration (in 100-nanosecond units) and convert to seconds
         val durationRef = LongByReference()
         val hrDuration = player.GetMediaDuration(durationRef)
         if (hrDuration >= 0) {
             _duration = durationRef.value / 10000000.0
         }
 
+        // Retrieve the video frame rate
+        val numRef = IntByReference()
+        val denomRef = IntByReference()
+        val hrFrameRate = player.GetVideoFrameRate(numRef, denomRef)
+        if (hrFrameRate >= 0 && denomRef.value != 0) {
+            val frameRate = numRef.value.toFloat() / denomRef.value.toFloat()
+            println("Frame rate: $frameRate fps")
+        } else {
+            // Handle error or set default frame rate
+            println("Unable to retrieve frame rate.")
+        }
+
+        // Start video playback
         play()
 
-        // Video playback coroutine
+        // Launch a coroutine for the video playback loop
         videoJob = scope.launch {
             while (isActive && !player.IsEOF()) {
                 if (_isPlaying) {
@@ -197,7 +214,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                             // Unlock the frame buffer
                             player.UnlockVideoFrame()
 
-                            // Convert to Skia Bitmap (BGRA)
+                            // Convert the raw frame data to a Skia Bitmap (BGRA format)
                             val bmp = Bitmap().apply {
                                 allocPixels(
                                     ImageInfo(
@@ -216,20 +233,22 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                             withContext(Dispatchers.Main) {
                                 currentFrame = bmp
-                                // Update current playback time (approximation)
+                                // Update the current playback time (approximation)
                                 val posRef = LongByReference()
                                 if (player.GetMediaPosition(posRef) >= 0) {
                                     _currentTime = posRef.value / 10000000.0
                                 }
                             }
                         } else {
-                            // No frame data available, small delay
+                            // No frame data available, wait briefly
                             delay(1)
                         }
                     } else {
+                        // Frame read error, wait briefly before retrying
                         delay(1)
                     }
                 } else {
+                    // If playback is paused, wait longer before checking again
                     delay(50)
                 }
             }
