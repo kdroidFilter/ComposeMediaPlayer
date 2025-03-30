@@ -170,8 +170,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             videoHeight = 720
         }
 
+        play()
+
         // Coroutine de lecture vidéo
-// Modify the videoJob coroutine in WindowsVideoPlayerState.kt
         videoJob = scope.launch {
             var lastFrameTime = 0L
             val numRef = IntByReference()
