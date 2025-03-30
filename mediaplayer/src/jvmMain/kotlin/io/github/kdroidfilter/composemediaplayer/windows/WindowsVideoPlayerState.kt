@@ -282,7 +282,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 isLoading = false
 
                 // Small delay before reading the next frame.
-                delay(1)
+                delay(16)
 
                 // If looping is enabled and the end-of-file is reached, restart playback.
                 if (player.IsEOF() && _loop) {
