@@ -20,14 +20,16 @@ import org.jetbrains.skia.ImageInfo
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
 import java.io.File
+import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
+import kotlin.concurrent.write
 
 /**
  * Windows implementation for offscreen video playback.
- * This version secures access to the reusable Bitmap instance using a lock,
- * and provides a helper function to convert the Bitmap to a Compose ImageBitmap safely.
+ * Uses a ReentrantReadWriteLock to protect the reusable Bitmap instance from concurrent modifications.
  */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
-    // Native MediaFoundation library instance via JNA
+    // Native library instance via JNA.
     private val player = MediaFoundationLib.INSTANCE
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -45,7 +47,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         get() = _volume
         set(value) {
             _volume = value.coerceIn(0f, 1f)
-            // Volume control can be implemented if supported by the native library.
+            // Implement volume control if supported by the native library.
         }
 
     private var _currentTime by mutableStateOf(0.0)
@@ -61,41 +63,33 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var _userDragging by mutableStateOf(false)
     override var userDragging: Boolean
         get() = _userDragging
-        set(value) {
-            _userDragging = value
-        }
+        set(value) { _userDragging = value }
 
     private var _loop by mutableStateOf(false)
     override var loop: Boolean
         get() = _loop
-        set(value) {
-            _loop = value
-        }
+        set(value) { _loop = value }
 
     override val leftLevel: Float get() = 0f // Placeholder for audio level
     override val rightLevel: Float get() = 0f
 
     // Backing field for the current frame (Skia Bitmap)
-    // Access to this Bitmap is synchronized via bitmapLock.
+    // Protected by a Read/Write lock.
     private var _currentFrame: Bitmap? by mutableStateOf(null)
     var currentFrame: Bitmap?
-        get() = synchronized(bitmapLock) { _currentFrame }
-        private set(value) {
-            synchronized(bitmapLock) { _currentFrame = value }
-        }
+        get() = bitmapLock.read { _currentFrame }
+        private set(value) { bitmapLock.write { _currentFrame = value } }
 
-    // Lock object to secure access to the Bitmap
-    private val bitmapLock = Any()
+    // Read/Write lock to secure access to the reusable Bitmap.
+    private val bitmapLock = ReentrantReadWriteLock()
 
-    // Helper function to safely convert the current Bitmap to a Compose ImageBitmap
-    // The conversion is performed inside a synchronized block to prevent concurrent modifications.
-    fun getLockedComposeImageBitmap(): ImageBitmap? {
-        return synchronized(bitmapLock) {
-            _currentFrame?.asComposeImageBitmap()
-        }
+    // Helper function to safely convert the current Bitmap into a Compose ImageBitmap.
+    // The conversion is performed while holding a read lock.
+    fun getLockedComposeImageBitmap(): ImageBitmap? = bitmapLock.read {
+        _currentFrame?.asComposeImageBitmap()
     }
 
-    // Error handling
+    // Error handling.
     private var _error: VideoPlayerError? = null
     override val error: VideoPlayerError? get() = _error
     override fun clearError() {
@@ -115,36 +109,31 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
 
-    override fun showMedia() {
-        _hasMedia = true
-    }
-
-    override fun hideMedia() {
-        _hasMedia = false
-    }
+    override fun showMedia() { _hasMedia = true }
+    override fun hideMedia() { _hasMedia = false }
 
     var errorMessage: String? by mutableStateOf(null)
         private set
 
-    // Coroutine job for the video playback loop
+    // Coroutine job for the video playback loop.
     private var videoJob: Job? = null
 
-    // Video dimensions and frame rate
+    // Video dimensions and frame rate.
     var videoWidth: Int = 0
     var videoHeight: Int = 0
     private var frameRate: Float = 30f
 
-    // Reusable Bitmap and ByteArray for frame data
-    // We update the same Bitmap instance inside a synchronized block.
+    // Reusable Bitmap and ByteArray for frame data.
+    // The Bitmap is updated within a write lock.
     private var reusableBitmap: Bitmap? = null
     private var reusableByteArray: ByteArray? = null
 
-    // Frame counter to trigger UI recomposition
+    // Frame counter used to trigger UI recomposition.
     private var _frameCounter by mutableStateOf(0)
     val frameCounter: Int get() = _frameCounter
 
     init {
-        // Initialize Media Foundation when object is created.
+        // Initialize Media Foundation.
         val hr = player.InitMediaFoundation()
         isInitialized = (hr >= 0)
         if (!isInitialized) {
@@ -167,7 +156,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             return
         }
 
-        // Reset previous state and cancel ongoing playback
+        // Reset previous state and cancel any ongoing playback.
         videoJob?.cancel()
         player.CloseMedia()
         currentFrame = null
@@ -180,7 +169,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             return
         }
 
-        // Open media using the native library.
+        // Open the media using the native library.
         val hrOpen = player.OpenMedia(WString(uri))
         if (hrOpen < 0) {
             setError("OpenMedia($uri) failed (hr=0x${hrOpen.toString(16)})")
@@ -221,7 +210,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         // Start playback.
         play()
 
-        // Launch the video playback loop using a coroutine.
+        // Launch the video playback loop.
         videoJob = scope.launch {
             while (isActive && !player.IsEOF()) {
                 if (!_isPlaying) return@launch
@@ -244,8 +233,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 byteBuffer.get(reusableByteArray, 0, dataSize)
                 player.UnlockVideoFrame()
 
-                // Update the reusable Bitmap in a synchronized block.
-                synchronized(bitmapLock) {
+                // Update the reusable Bitmap within a write lock.
+                bitmapLock.write {
                     if (reusableBitmap == null) {
                         // Allocate the Bitmap if not yet created.
                         reusableBitmap = Bitmap().apply {
@@ -259,7 +248,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                             )
                         }
                     }
-                    // Update the Bitmap with the new frame data.
+                    // Update the Bitmap with new frame data.
                     reusableBitmap!!.installPixels(
                         ImageInfo(
                             width = videoWidth,
@@ -270,13 +259,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         reusableByteArray,
                         videoWidth * 4
                     )
-                    // Also update the currentFrame field.
+                    // Update the current frame reference.
                     _currentFrame = reusableBitmap
                 }
 
-                // Update UI state on the main thread.
+                // Trigger UI recomposition on the main thread.
                 withContext(Dispatchers.Main) {
-                    _frameCounter++ // Trigger UI recomposition.
+                    _frameCounter++
                 }
 
                 // Update playback position.
@@ -287,10 +276,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
                 isLoading = false
 
-                // Small delay to match frame rate.
+                // Delay to roughly match the frame rate.
                 delay(16)
 
-                // Looping: if at end-of-stream and looping is enabled, restart playback.
+                // Looping: restart playback if at end-of-stream and looping is enabled.
                 if (player.IsEOF() && _loop) {
                     player.SeekMedia(0)
                     _currentTime = 0.0
@@ -304,7 +293,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override fun play() {
         if (!isInitialized || !_hasMedia) return
         _isPlaying = true
-        player.StartAudioPlayback() // Start audio to maintain synchronization.
+        player.StartAudioPlayback() // Start audio for sync.
     }
 
     override fun pause() {
