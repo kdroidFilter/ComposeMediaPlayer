@@ -13,15 +13,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asComposeImageBitmap
 import androidx.compose.ui.unit.IntSize
 
+/**
+ * Composable surface to render the video frame.
+ * It safely retrieves the Compose ImageBitmap by calling the helper method
+ * from the WindowsVideoPlayerState that performs the conversion under lock.
+ */
 @Composable
 fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
     modifier: Modifier = Modifier
 ) {
-    // Calculate aspect ratio once and remember it
+    // Calculate aspect ratio based on video dimensions.
     val aspectRatio = remember(playerState.videoWidth, playerState.videoHeight) {
         if (playerState.videoWidth != 0 && playerState.videoHeight != 0) {
             playerState.videoWidth.toFloat() / playerState.videoHeight.toFloat()
@@ -30,14 +34,11 @@ fun WindowsVideoPlayerSurface(
         }
     }
 
-    // Convert bitmap to ComposeImageBitmap once and remember it
     var currentImageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
-    // Only update the ImageBitmap when bitmap or frameCounter changes
+    // When frameCounter changes, update the image by converting the current Bitmap safely.
     LaunchedEffect(playerState.frameCounter) {
-        playerState.currentFrame?.let {
-            currentImageBitmap = it.asComposeImageBitmap()
-        }
+        currentImageBitmap = playerState.getLockedComposeImageBitmap()
     }
 
     Box(
