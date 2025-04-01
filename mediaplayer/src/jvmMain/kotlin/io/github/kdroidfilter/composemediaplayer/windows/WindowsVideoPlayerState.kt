@@ -191,10 +191,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
         _duration = durationRef.value / 10000000.0
 
-        val numRef = IntByReference()
-        val denomRef = IntByReference()
-        val hrFrameRate = player.GetVideoFrameRate(numRef, denomRef)
-
 
         // Start playback
         play()
@@ -272,7 +268,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 isLoading = false
 
                 // Calculate frame delay based on frame rate
-                delay(30)
+                delay(8)
 
                 // If end of media and looping is enabled, restart playback
                 if (player.IsEOF() && _loop) {
