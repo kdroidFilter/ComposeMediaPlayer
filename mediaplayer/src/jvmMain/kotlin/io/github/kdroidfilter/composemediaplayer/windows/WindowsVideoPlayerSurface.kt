@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 
 /**
@@ -19,6 +20,7 @@ fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
     modifier: Modifier = Modifier
 ) {
+    // Calculate aspect ratio based on video dimensions
     val aspectRatio = remember(playerState.videoWidth, playerState.videoHeight) {
         if (playerState.videoWidth != 0 && playerState.videoHeight != 0)
             playerState.videoWidth.toFloat() / playerState.videoHeight.toFloat()
@@ -27,12 +29,16 @@ fun WindowsVideoPlayerSurface(
 
     var currentImageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
 
+    // Update image bitmap when a new frame is available
     LaunchedEffect(playerState.frameCounter) {
         currentImageBitmap = playerState.getLockedComposeImageBitmap()
     }
 
     Box(
-        modifier = modifier,
+        modifier = modifier.onSizeChanged {
+            // Notify player state that a resize event has occurred
+            playerState.onResized()
+        },
         contentAlignment = Alignment.Center
     ) {
         currentImageBitmap?.let { imageBitmap ->

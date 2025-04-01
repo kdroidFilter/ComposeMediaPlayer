@@ -32,7 +32,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private val player = MediaFoundationLib.INSTANCE
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    var isInitialized by mutableStateOf(false)
+    private var isInitialized by mutableStateOf(false)
         private set
 
     private var _hasMedia by mutableStateOf(false)
@@ -118,7 +118,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     var videoWidth: Int = 0
     var videoHeight: Int = 0
-    private var frameRate: Float = 30f
 
     private var reusableBitmap: Bitmap? = null
     private var reusableByteArray: ByteArray? = null
@@ -126,7 +125,15 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var _frameCounter by mutableStateOf(0)
     val frameCounter: Int get() = _frameCounter
 
+    // Flag to indicate if resizing is happening
+    var isResizing by mutableStateOf(false)
+        private set
+
+    // Job to debounce resizing events
+    private var resizeJob: Job? = null
+
     init {
+        // Initialize media foundation
         val hr = player.InitMediaFoundation()
         isInitialized = (hr >= 0)
         if (!isInitialized) {
@@ -187,34 +194,44 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         val numRef = IntByReference()
         val denomRef = IntByReference()
         val hrFrameRate = player.GetVideoFrameRate(numRef, denomRef)
-        frameRate = if (hrFrameRate >= 0 && denomRef.value != 0) {
-            numRef.value.toFloat() / denomRef.value.toFloat()
-        } else {
-            30f
-        }
 
+
+        // Start playback
         play()
 
         videoJob = scope.launch {
             while (isActive && !player.IsEOF()) {
-                if (!_isPlaying) return@launch
+                // If not playing, wait briefly and continue
+                if (!_isPlaying) {
+                    delay(16)
+                    continue
+                }
 
+                // Read the video frame from native player
                 val ptrRef = PointerByReference()
                 val sizeRef = IntByReference()
                 val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
-                if (hrFrame < 0) return@launch
+                if (hrFrame < 0) break
 
                 val pFrame = ptrRef.value
                 val dataSize = sizeRef.value
-                if (pFrame == null || dataSize <= 0) return@launch
+                if (pFrame == null || dataSize <= 0) break
 
+                // Ensure the reusable byte array is large enough
                 if (reusableByteArray == null || reusableByteArray!!.size < dataSize) {
                     reusableByteArray = ByteArray(videoWidth * videoHeight * 4)
                 }
                 val byteBuffer = pFrame.getByteBuffer(0, dataSize.toLong())
                 byteBuffer.get(reusableByteArray, 0, dataSize)
+                // Unlock the frame in the native player
                 player.UnlockVideoFrame()
 
+                // If resizing is in progress, skip updating UI to drop accumulated frames
+                if (isResizing) {
+                    continue
+                }
+
+                // Update the reusable bitmap with the new frame data
                 bitmapLock.write {
                     if (reusableBitmap == null) {
                         reusableBitmap = Bitmap().apply {
@@ -241,10 +258,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _currentFrame = reusableBitmap
                 }
 
+                // Update frame counter on the main thread
                 withContext(Dispatchers.Main) {
                     _frameCounter++
                 }
 
+                // Update current playback position and progress
                 val posRef = LongByReference()
                 if (player.GetMediaPosition(posRef) >= 0) {
                     _currentTime = posRef.value / 10000000.0
@@ -252,8 +271,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
                 isLoading = false
 
-                delay(16)
+                // Calculate frame delay based on frame rate
+                delay(30)
 
+                // If end of media and looping is enabled, restart playback
                 if (player.IsEOF() && _loop) {
                     player.SeekMedia(0)
                     _currentTime = 0.0
@@ -300,6 +321,19 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         } else {
             _currentTime = newPosition / 10000000.0
             _progress = fraction
+        }
+    }
+
+    // Method to be called when a resize event is detected
+    fun onResized() {
+        // Set resizing flag to true
+        isResizing = true
+        // Cancel previous debounce job if any
+        resizeJob?.cancel()
+        // Start a new debounce job to clear resizing flag after 200ms without new resize events
+        resizeJob = scope.launch {
+            delay(200)
+            isResizing = false
         }
     }
 
