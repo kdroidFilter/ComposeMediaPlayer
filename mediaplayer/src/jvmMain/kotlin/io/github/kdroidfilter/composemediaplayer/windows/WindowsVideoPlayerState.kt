@@ -26,14 +26,14 @@ import kotlin.concurrent.write
 
 /**
  * Windows implementation for offscreen video playback.
- * Uses a ReentrantReadWriteLock to protect the reusable Bitmap instance and optimizes memory allocations.
+ * This class optimizes memory allocations by reusing existing objects and ensures thread-safe access to resources.
  */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private val player = MediaFoundationLib.INSTANCE
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
+    // Player state variables
     private var isInitialized by mutableStateOf(false)
-
     private var _hasMedia by mutableStateOf(false)
     override val hasMedia: Boolean get() = _hasMedia
 
@@ -66,16 +66,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override var loop: Boolean
         get() = _loop
         set(value) { _loop = value }
-
-    override val leftLevel: Float get() = 0f
-    override val rightLevel: Float get() = 0f
+    override val leftLevel: Float = 0f
+    override val rightLevel: Float = 0f
 
     // Backing field for the current frame (Skia Bitmap), protected by a lock.
     private var _currentFrame: Bitmap? by mutableStateOf(null)
-    var currentFrame: Bitmap?
-        get() = bitmapLock.read { _currentFrame }
-        private set(value) = bitmapLock.write { _currentFrame = value }
-
     private val bitmapLock = ReentrantReadWriteLock()
 
     // Safely convert the current Bitmap to a Compose ImageBitmap.
@@ -90,6 +85,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         errorMessage = null
     }
 
+    override fun hideMedia() {
+    }
+
+    override fun showMedia() {
+    }
+
+    // Video metadata and subtitle management
     override val metadata: VideoMetadata = VideoMetadata()
     override var subtitlesEnabled: Boolean = false
     override var currentSubtitleTrack: SubtitleTrack? = null
@@ -97,27 +99,20 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override fun selectSubtitleTrack(track: SubtitleTrack?) {}
     override fun disableSubtitles() {}
 
+    // Loading state
     override var isLoading by mutableStateOf(false)
         private set
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
 
-    override fun showMedia() {
-        _hasMedia = true
-    }
-
-    override fun hideMedia() {
-        _hasMedia = false
-    }
-
+    // Error message for user feedback
     var errorMessage: String? by mutableStateOf(null)
         private set
 
+    // Frame handling and resizing
     private var videoJob: Job? = null
-
     var videoWidth: Int = 0
     var videoHeight: Int = 0
-
     private var reusableBitmap: Bitmap? = null
     private var reusableByteArray: ByteArray? = null
 
@@ -132,87 +127,75 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var resizeJob: Job? = null
 
     init {
-        // Initialize Media Foundation
+        // Initialize media foundation
         val hr = player.InitMediaFoundation()
         isInitialized = (hr >= 0)
         if (!isInitialized) {
-            handleError("Failed to initialize Media Foundation", hr)
+            setError("InitMediaFoundation failed (hr=0x${hr.toString(16)})")
         }
     }
 
-    /**
-     * Disposes of the player, cancelling all jobs and releasing resources.
-     */
     override fun dispose() {
         videoJob?.cancel()
         player.CloseMedia()
         isInitialized = false
         _isPlaying = false
-        currentFrame = null
+        _currentFrame = null
         scope.cancel()
     }
 
-    /**
-     * Opens a media file or stream from the given URI.
-     * @param uri The URI of the media to open.
-     */
     override fun openUri(uri: String) {
         if (!isInitialized) {
-            handleError("Player not initialized")
+            setError("Player not initialized.")
             return
         }
+
+        // Reset player state
         videoJob?.cancel()
         player.CloseMedia()
-        currentFrame = null
+        _currentFrame = null
         _currentTime = 0.0
         _progress = 0f
 
         val file = File(uri)
         if (!uri.startsWith("http", ignoreCase = true) && !file.exists()) {
-            handleError("File not found: $uri")
+            setError("File not found: $uri")
             return
         }
+
+        // Open media file
         val hrOpen = player.OpenMedia(WString(uri))
         if (hrOpen < 0) {
-            handleError("Failed to open media: $uri", hrOpen)
+            setError("OpenMedia($uri) failed (hr=0x${hrOpen.toString(16)})")
             return
         }
         _hasMedia = true
         _isPlaying = false
         isLoading = true
 
-        // Retrieve video dimensions
+        // Get video size
         val wRef = IntByReference()
         val hRef = IntByReference()
         player.GetVideoSize(wRef, hRef)
         videoWidth = if (wRef.value > 0) wRef.value else 1280
         videoHeight = if (hRef.value > 0) hRef.value else 720
 
-        // Pre-allocate reusable ByteArray and Bitmap once based on video size
         reusableByteArray = ByteArray(videoWidth * videoHeight * 4)
-        reusableBitmap = Bitmap().apply {
-            allocPixels(
-                ImageInfo(
-                    width = videoWidth,
-                    height = videoHeight,
-                    colorType = ColorType.BGRA_8888,
-                    alphaType = ColorAlphaType.OPAQUE
-                )
-            )
-        }
 
-        // Retrieve media duration
+        // Get video duration
         val durationRef = LongByReference()
         val hrDuration = player.GetMediaDuration(durationRef)
         if (hrDuration < 0) {
-            handleError("Failed to get media duration", hrDuration)
+            setError("GetMediaDuration failed (hr=0x${hrDuration.toString(16)})")
             return
         }
         _duration = durationRef.value / 10000000.0
 
+        // Start playback
         play()
 
-        // Launch coroutine to handle frame reading and playback
+
+        // Frame reading and updating loop
         videoJob = scope.launch {
             while (isActive && !player.IsEOF()) {
                 if (!_isPlaying) {
@@ -220,7 +203,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     continue
                 }
 
-                // Read video frame from native player
+                // Read and process video frame
                 val ptrRef = PointerByReference()
                 val sizeRef = IntByReference()
                 val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
@@ -230,17 +213,35 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 val dataSize = sizeRef.value
                 if (pFrame == null || dataSize <= 0) break
 
-                // Copy frame data into pre-allocated ByteArray
+                // Ensure reusable byte array is large enough
+                if (reusableByteArray == null || reusableByteArray!!.size < dataSize) {
+                    reusableByteArray = ByteArray(videoWidth * videoHeight * 4)
+                }
+
+                // Copy the frame data to the reusable byte array
                 val byteBuffer = pFrame.getByteBuffer(0, dataSize.toLong())
                 byteBuffer.get(reusableByteArray, 0, dataSize)
                 player.UnlockVideoFrame()
 
+                // Skip frame update if resizing is in progress
                 if (isResizing) {
                     continue
                 }
 
-                // Update Bitmap with frame data, reusing the same object
+                // Update current frame using reusable bitmap
                 bitmapLock.write {
+                    if (reusableBitmap == null) {
+                        reusableBitmap = Bitmap().apply {
+                            allocPixels(
+                                ImageInfo(
+                                    width = videoWidth,
+                                    height = videoHeight,
+                                    colorType = ColorType.BGRA_8888,
+                                    alphaType = ColorAlphaType.OPAQUE
+                                )
+                            )
+                        }
+                    }
                     reusableBitmap!!.installPixels(
                         ImageInfo(
                             width = videoWidth,
@@ -254,12 +255,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _currentFrame = reusableBitmap
                 }
 
-                // Update UI-related state on the main thread
+                // Update frame counter on the main thread
                 withContext(Dispatchers.Main) {
                     _frameCounter++
                 }
 
-                // Update playback position and progress
+                // Update current playback position and progress
                 val posRef = LongByReference()
                 if (player.GetMediaPosition(posRef) >= 0) {
                     _currentTime = posRef.value / 10000000.0
@@ -267,7 +268,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
                 isLoading = false
 
-                delay(8) // Frame delay for smooth playback
+                // Wait for next frame based on frame rate
+                delay(8)
 
                 // Handle looping
                 if (player.IsEOF() && _loop) {
@@ -280,44 +282,31 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    /**
-     * Starts or resumes playback.
-     */
     override fun play() {
         if (!isInitialized || !_hasMedia) return
         _isPlaying = true
         player.StartAudioPlayback()
     }
 
-    /**
-     * Pauses playback.
-     */
     override fun pause() {
         if (!_isPlaying) return
         _isPlaying = false
         player.StopAudioPlayback()
     }
 
-    /**
-     * Stops playback and releases resources.
-     */
     override fun stop() {
         _isPlaying = false
         player.StopAudioPlayback()
-        currentFrame = null
+        _currentFrame = null
         videoJob?.cancel()
     }
 
-    /**
-     * Seeks to a specific position in the media.
-     * @param value The position to seek to, in milliseconds.
-     */
     override fun seekTo(value: Float) {
         if (!_hasMedia) return
         val durationRef = LongByReference()
         val hrDuration = player.GetMediaDuration(durationRef)
         if (hrDuration < 0) {
-            handleError("Failed to get media duration", hrDuration)
+            setError("GetMediaDuration failed (hr=0x${hrDuration.toString(16)})")
             return
         }
         val duration100ns = durationRef.value
@@ -325,16 +314,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         val newPosition = (duration100ns * fraction).toLong()
         val hrSeek = player.SeekMedia(newPosition)
         if (hrSeek < 0) {
-            handleError("Failed to seek media", hrSeek)
+            setError("SeekMedia failed (hr=0x${hrSeek.toString(16)})")
         } else {
             _currentTime = newPosition / 10000000.0
             _progress = fraction
         }
     }
 
-    /**
-     * Handles resizing events to debounce and manage frame updates.
-     */
+    // Method to handle resize events with debounce
     fun onResized() {
         isResizing = true
         resizeJob?.cancel()
@@ -344,15 +331,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    /**
-     * Centralized error handling function.
-     * @param message The error message.
-     * @param hr The HRESULT code, if applicable.
-     */
-    private fun handleError(message: String, hr: Int? = null) {
-        val errorMsg = if (hr != null) "$message (hr=0x${hr.toString(16)})" else message
-        _error = VideoPlayerError.UnknownError(errorMsg)
-        errorMessage = errorMsg
+    private fun setError(msg: String) {
+        _error = VideoPlayerError.UnknownError(msg)
+        errorMessage = msg
         isLoading = false
     }
 }
