@@ -149,12 +149,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
 
     // Circular queue for frame processing
-    private val frameQueueCapacity = 1 // Adjust based on memory constraints and playback needs
+    private val frameQueueCapacity = 5 // Adjust based on memory constraints and playback needs
     private val frameQueue = ArrayBlockingQueue<FrameData>(frameQueueCapacity)
     private val queueMutex = Mutex()
 
     // Pools for reusing Bitmap and ByteArray objects
-    private val poolCapacity = 1
+    private val poolCapacity = 5
     private val bitmapPool = ArrayBlockingQueue<Bitmap>(poolCapacity)
     private val byteArrayPool = ArrayBlockingQueue<ByteArray>(poolCapacity)
 
@@ -588,24 +588,35 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             if (wasPlaying) {
                 pause()
             }
+
+            // Clear frame queue and reset current frame
+            scope.launch {
+                queueMutex.withLock {
+                    frameQueue.forEach { frameData ->
+                        bitmapPool.offer(frameData.bitmap)
+                        byteArrayPool.offer(frameData.buffer)
+                    }
+                    frameQueue.clear()
+                }
+                bitmapLock.write {
+                    _currentFrame = null
+                }
+            }
+
             val durationRef = LongByReference()
             val hrDuration = player.GetMediaDuration(durationRef)
-            if (hrDuration < 0) {
-                setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
-                return
-            }
-            val duration100ns = durationRef.value
-            val fraction = value / 1000f
-            val newPosition = (duration100ns * fraction).toLong()
+            if (hrDuration < 0) return
+
+            val newPosition = (durationRef.value * (value / 1000f)).toLong()
             val hrSeek = player.SeekMedia(newPosition)
-            if (hrSeek < 0) {
-                setError("Failed to seek (hr=0x${hrSeek.toString(16)})")
-            } else {
+
+            if (hrSeek >= 0) {
                 _currentTime = newPosition / 10000000.0
-                _progress = fraction
-                if (wasPlaying) {
-                    play()
-                }
+                _progress = value / 1000f
+            }
+
+            if (wasPlaying) {
+                play()
             }
         } catch (e: Exception) {
             setError("Exception during seeking: ${e.message}")

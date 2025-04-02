@@ -42,7 +42,7 @@ internal interface MediaFoundationLib : StdCallLibrary {
     fun GetVideoFrameRate(pNum: IntByReference, pDenom: IntByReference): Int
 
     // 9) Seek to a specific position (in 100-nanosecond units)
-    fun SeekMedia(llPosition: Long): Int
+    fun SeekMedia(lPosition: Long): Int
 
     // 10) Get total media duration (in 100-nanosecond units)
     fun GetMediaDuration(pDuration: LongByReference): Int
