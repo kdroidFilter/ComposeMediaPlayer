@@ -3,6 +3,8 @@ package io.github.kdroidfilter.composemediaplayer.windows
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asComposeImageBitmap
 import com.sun.jna.WString
 import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.LongByReference
@@ -13,20 +15,17 @@ import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asComposeImageBitmap
-import kotlinx.coroutines.NonCancellable.isActive
 import java.io.File
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
-import java.util.concurrent.ArrayBlockingQueue
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * Windows implementation for offscreen video playback using Media Foundation,
@@ -149,7 +148,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     var videoHeight: Int = 0
 
     // Circular queue for frame processing
-    private val frameQueueCapacity = 5 // Adjust based on memory constraints and playback needs
+    private val frameQueueCapacity = 10 // Adjust based on memory constraints and playback needs
     private val frameQueue = ArrayBlockingQueue<FrameData>(frameQueueCapacity)
     private val queueMutex = Mutex()
 
