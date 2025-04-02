@@ -148,7 +148,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     var videoHeight: Int = 0
 
     // Circular queue for frame processing
-    private val frameQueueCapacity = 10 // Adjust based on memory constraints and playback needs
+    private val frameQueueCapacity = 2 // Adjust based on memory constraints and playback needs
     private val frameQueue = ArrayBlockingQueue<FrameData>(frameQueueCapacity)
     private val queueMutex = Mutex()
 
