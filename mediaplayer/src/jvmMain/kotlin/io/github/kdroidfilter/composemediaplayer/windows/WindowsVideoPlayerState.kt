@@ -176,9 +176,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    // Frame counter (for debugging or statistics)
-    private var _frameCounter by mutableStateOf(0)
-    val frameCounter: Int get() = _frameCounter
 
     // Indicates if a resizing operation is in progress
     private var isResizing by mutableStateOf(false)
@@ -520,10 +517,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 _currentTime = frameData!!.timestamp
                 _progress = (_currentTime / _duration).toFloat()
 
-                // Increment the frame counter on the main thread
-                withContext(Dispatchers.Main) {
-                    _frameCounter++
-                }
                 // End the loading state
                 isLoading = false
 
