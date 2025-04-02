@@ -144,8 +144,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var videoJob: Job? = null
 
     // Video dimensions
-    var videoWidth: Int = 0
-    var videoHeight: Int = 0
+    var videoWidth by mutableStateOf(0)
+    var videoHeight by mutableStateOf(0)
+
 
     // Circular queue for frame processing
     private val frameQueueCapacity = 2 // Adjust based on memory constraints and playback needs
