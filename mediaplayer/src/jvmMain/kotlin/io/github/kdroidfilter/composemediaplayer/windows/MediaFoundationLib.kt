@@ -34,8 +34,6 @@ internal interface MediaFoundationLib : StdCallLibrary {
 
     // 6) Check if end-of-stream has been reached, and control audio playback
     fun IsEOF(): Boolean
-    fun StartAudioPlayback(): Int
-    fun StopAudioPlayback(): Int
 
     // 7) Get video dimensions
     fun GetVideoSize(pWidth: IntByReference, pHeight: IntByReference)
@@ -51,4 +49,8 @@ internal interface MediaFoundationLib : StdCallLibrary {
 
     // 11) Get current playback position (in 100-nanosecond units)
     fun GetMediaPosition(pPosition: LongByReference): Int
+
+
+    fun SetPlaybackState(isPlaying: Boolean): Int
+
 }
