@@ -19,39 +19,45 @@ import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
+import kotlinx.coroutines.NonCancellable.isActive
 import java.io.File
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
+import java.util.concurrent.ArrayBlockingQueue
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
- * Windows implementation for offscreen video playback using Media Foundation.
- * The following code tries to be more robust in handling crashes and unexpected conditions:
- * - Added try/catch for native calls
- * - Enhanced protection with read/write locks
- * - Improved coroutine management for playback
- * - Better player state handling
+ * Windows implementation for offscreen video playback using Media Foundation,
+ * with an object pooling system for reusing Bitmap and ByteArray objects.
+ *
+ * Improvements include:
+ * - Robust handling of native calls and exceptions
+ * - Read/Write locks for bitmap synchronization
+ * - Coroutine-based video reading and rendering
+ * - Circular queue for frame processing with pooling to limit allocations
  */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     // Reference to the native Media Foundation library (via JNA)
     private val player = MediaFoundationLib.INSTANCE
 
-    // Scope for managing video playback coroutine
+    // Coroutine scope for managing video playback
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    // Initialization state of Media Foundation
+    // Indicates whether Media Foundation has been successfully initialized
     private var isInitialized by mutableStateOf(false)
 
     // Indicates if a media file is loaded
     private var _hasMedia by mutableStateOf(false)
     override val hasMedia: Boolean get() = _hasMedia
 
-    // Indicates if playback is ongoing
+    // Indicates if playback is currently active
     private var _isPlaying by mutableStateOf(false)
     override val isPlaying: Boolean get() = _isPlaying
 
-    // Audio volume (0f..1f)
+    // Audio volume (range 0f..1f)
     private var _volume by mutableStateOf(1f)
     override var volume: Float
         get() = _volume
@@ -59,14 +65,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _volume = value.coerceIn(0f, 1f)
         }
 
-    // Current time (in seconds) and total media duration
+    // Current playback time (in seconds) and total media duration
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
 
-    // Progress of the media (0f..1f)
+    // Media progress (range 0f..1f)
     private var _progress by mutableStateOf(0f)
 
-    // Handling the slider for the seekBar
+    // Slider position for the seek bar
     override var sliderPos: Float
         get() = _progress * 1000f
         set(value) {
@@ -76,7 +82,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             }
         }
 
-    // Indicator for whether the user is manually dragging the slider
+    // Flag to indicate if the user is interacting with the slider
     private var _userDragging by mutableStateOf(false)
     override var userDragging: Boolean
         get() = _userDragging
@@ -84,7 +90,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _userDragging = value
         }
 
-    // Indicates if playback should loop when it reaches the end
+    // Indicates whether the media should loop
     private var _loop by mutableStateOf(false)
     override var loop: Boolean
         get() = _loop
@@ -92,11 +98,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _loop = value
         }
 
-    // Left/right audio levels (not implemented here)
+    // Audio levels for left/right channels (not implemented here)
     override val leftLevel: Float = 0f
     override val rightLevel: Float = 0f
 
-    // Error handling
+    // Error management
     private var _error: VideoPlayerError? = null
     override val error: VideoPlayerError?
         get() = _error
@@ -106,16 +112,16 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         errorMessage = null
     }
 
-    // Variables related to video (current bitmap, lock, etc.)
+    // Variables related to the video (current bitmap, synchronization lock, etc.)
     private var _currentFrame: Bitmap? by mutableStateOf(null)
     private val bitmapLock = ReentrantReadWriteLock()
 
-    // Converts Skia Bitmap to Compose ImageBitmap (read-protected)
+    // Converts Skia Bitmap to Compose ImageBitmap (protected by a read lock)
     fun getLockedComposeImageBitmap(): ImageBitmap? = bitmapLock.read {
         _currentFrame?.asComposeImageBitmap()
     }
 
-    // Metadata and subtitles (not handled for now)
+    // Metadata and subtitles (currently not handled)
     override val metadata: VideoMetadata = VideoMetadata()
     override var subtitlesEnabled: Boolean = false
     override var currentSubtitleTrack: SubtitleTrack? = null
@@ -127,34 +133,59 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override var isLoading by mutableStateOf(false)
         private set
 
-    // Display current time and duration as text
+    // Display texts for current position and total duration
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
 
-    // Error message (text) for the UI
-    var errorMessage: String? by mutableStateOf(null)
+    // Error message for the user interface
+    private var errorMessage: String? by mutableStateOf(null)
         private set
 
     // Job managing video playback in a coroutine
     private var videoJob: Job? = null
 
-    // Video size
+    // Video dimensions
     var videoWidth: Int = 0
     var videoHeight: Int = 0
 
-    // Reusable memory area for each new frame
-    private var reusableBitmap: Bitmap? = null
-    private var reusableByteArray: ByteArray? = null
+    // Circular queue for frame processing
+    private val frameQueueCapacity = 5 // Adjust based on memory constraints and playback needs
+    private val frameQueue = ArrayBlockingQueue<FrameData>(frameQueueCapacity)
+    private val queueMutex = Mutex()
 
-    // Frame read counter (for debug or stats)
+    // Pools for reusing Bitmap and ByteArray objects
+    private val poolCapacity = 10
+    private val bitmapPool = ArrayBlockingQueue<Bitmap>(poolCapacity)
+    private val byteArrayPool = ArrayBlockingQueue<ByteArray>(poolCapacity)
+
+    // Data class to store information for each frame
+    data class FrameData(
+        val bitmap: Bitmap,
+        val timestamp: Double,
+        val buffer: ByteArray
+    ) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is FrameData) return false
+            return bitmap == other.bitmap &&
+                    timestamp == other.timestamp
+        }
+        override fun hashCode(): Int {
+            var result = bitmap.hashCode()
+            result = 31 * result + timestamp.hashCode()
+            return result
+        }
+    }
+
+    // Frame counter (for debugging or statistics)
     private var _frameCounter by mutableStateOf(0)
     val frameCounter: Int get() = _frameCounter
 
-    // Indicates if resizing is in progress
-    var isResizing by mutableStateOf(false)
+    // Indicates if a resizing operation is in progress
+    private var isResizing by mutableStateOf(false)
         private set
 
-    // For debouncing the resize event
+    // To prevent multiple rapid resize events
     private var resizeJob: Job? = null
 
     init {
@@ -163,7 +194,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             val hr = player.InitMediaFoundation()
             isInitialized = (hr >= 0)
             if (!isInitialized) {
-                setError("Media Foundation initialization failed (hr=0x${hr.toString(16)})")
+                setError("Failed to initialize Media Foundation (hr=0x${hr.toString(16)})")
             }
         } catch (e: Exception) {
             setError("Exception during initialization: ${e.message}")
@@ -172,14 +203,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     /**
      * Cleanup and release resources.
-     * Call when the player is no longer needed.
+     * Call this method when the player is no longer needed.
      */
     override fun dispose() {
         try {
             videoJob?.cancel()
             player.CloseMedia()
         } catch (e: Exception) {
-            // Ignore or log exception
+            // Ignore or log the exception
         } finally {
             isInitialized = false
             _isPlaying = false
@@ -197,22 +228,29 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             return
         }
 
-        // Cancel previous video playback (if any)
+        // Cancel any previous playback job
         videoJob?.cancel()
         videoJob = null
 
-        // Attempt to close the previous media
+        // Clear the frame queue
+        runBlocking {
+            queueMutex.withLock {
+                frameQueue.clear()
+            }
+        }
+
+        // Close the previous media, if any
         try {
             player.CloseMedia()
         } catch (e: Exception) {
-            // Ignore or log exception
+            // Ignore or log the exception
         }
 
         _currentFrame = null
         _currentTime = 0.0
         _progress = 0f
 
-        // Check file existence if local path
+        // Check file existence for local paths
         val file = File(uri)
         if (!uri.startsWith("http", ignoreCase = true) && !file.exists()) {
             setError("File not found: $uri")
@@ -223,18 +261,18 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         try {
             val hrOpen = player.OpenMedia(WString(uri))
             if (hrOpen < 0) {
-                setError("Failed to open media (hr=0x${hrOpen.toString(16)}) : $uri")
+                setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                 return
             }
             _hasMedia = true
             _isPlaying = false
             isLoading = true
         } catch (e: Exception) {
-            setError("Exception during media opening: ${e.message}")
+            setError("Exception while opening media: ${e.message}")
             return
         }
 
-        // Retrieve media size
+        // Retrieve video dimensions
         try {
             val wRef = IntByReference()
             val hRef = IntByReference()
@@ -246,9 +284,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             videoHeight = 720
         }
 
-        // Allocate reusable buffer
-        reusableByteArray = ByteArray(videoWidth * videoHeight * 4)
-
         // Retrieve media duration
         try {
             val durationRef = LongByReference()
@@ -259,132 +294,195 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             }
             _duration = durationRef.value / 10000000.0
         } catch (e: Exception) {
-            setError("Exception during duration retrieval: ${e.message}")
+            setError("Exception while retrieving duration: ${e.message}")
             return
         }
 
         // Start playback
         play()
 
-        // Create video playback job
+        // Create the video playback job with a circular queue and pooling
         videoJob = scope.launch {
-            while (isActive) {
-                // Check if media has ended
-                try {
-                    if (player.IsEOF()) {
-                        // If end of file and loop is active, restart from the beginning
-                        if (loop) {
-                            try {
-                                player.SeekMedia(0)
-                                _currentTime = 0.0
-                                _progress = 0f
-                                play()
-                            } catch (e: Exception) {
-                                setError("Error during SeekMedia for loop: ${e.message}")
-                            }
-                        }
-                        // If no loop, exit the loop
-                        if (!loop) break
-                    }
-                } catch (e: Exception) {
-                    setError("Exception during EOF check: ${e.message}")
-                    break
-                }
+            // Launch a producer coroutine to fill the frame queue
+            launch { produceFrames() }
+            // Launch a consumer coroutine to display frames
+            launch { consumeFrames() }
+        }
+    }
 
-                // If not playing, wait briefly
-                if (!_isPlaying) {
+    /**
+     * Producer coroutine that reads video frames and adds them to the frame queue.
+     * Uses object pools to retrieve reusable ByteArray and Bitmap objects.
+     */
+    private suspend fun produceFrames() {
+        // Calculate the required buffer size
+        val requiredBufferSize = videoWidth * videoHeight * 4
+        while (scope.isActive) {
+            // Check for end-of-media and handle looping
+            try {
+                if (player.IsEOF()) {
+                    if (loop) {
+                        try {
+                            player.SeekMedia(0)
+                            _currentTime = 0.0
+                            _progress = 0f
+                            play()
+                        } catch (e: Exception) {
+                            setError("Error during SeekMedia for looping: ${e.message}")
+                        }
+                    }
+                    if (!loop) break
+                }
+            } catch (e: Exception) {
+                setError("Exception while checking end of media: ${e.message}")
+                break
+            }
+
+            // If playback is not active, wait briefly
+            if (!_isPlaying) {
+                delay(16)
+                continue
+            }
+
+            // If the frame queue is full, wait a bit
+            if (frameQueue.size >= frameQueueCapacity) {
+                delay(16)
+                continue
+            }
+
+            try {
+                val ptrRef = PointerByReference()
+                val sizeRef = IntByReference()
+                val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
+                if (hrFrame < 0) {
                     delay(16)
                     continue
                 }
 
-                // Read a video frame
-                try {
-                    val ptrRef = PointerByReference()
-                    val sizeRef = IntByReference()
-                    val hrFrame = player.ReadVideoFrame(ptrRef, sizeRef)
-                    if (hrFrame < 0) {
-                        delay(16)
-                        continue
-                    }
+                val pFrame = ptrRef.value
+                val dataSize = sizeRef.value
+                if (pFrame == null || dataSize <= 0) {
+                    delay(16)
+                    continue
+                }
 
-                    val pFrame = ptrRef.value
-                    val dataSize = sizeRef.value
-                    if (pFrame == null || dataSize <= 0) {
-                        delay(16)
-                        continue
-                    }
+                // Retrieve or create a reusable buffer
+                val frameBytes = byteArrayPool.poll()?.let {
+                    if (it.size >= requiredBufferSize) it else ByteArray(requiredBufferSize)
+                } ?: ByteArray(requiredBufferSize)
 
-                    // Ensure buffer is large enough
-                    if (reusableByteArray == null || reusableByteArray!!.size < dataSize) {
-                        reusableByteArray = ByteArray(videoWidth * videoHeight * 4)
-                    }
+                // Copy data from native memory into the buffer
+                val byteBuffer = pFrame.getByteBuffer(0, dataSize.toLong())
+                byteBuffer.get(frameBytes, 0, dataSize)
 
-                    // Copy data to reusable buffer
-                    val byteBuffer = pFrame.getByteBuffer(0, dataSize.toLong())
-                    byteBuffer.get(reusableByteArray, 0, dataSize)
+                // Signal that the native frame is no longer needed
+                player.UnlockVideoFrame()
 
-                    // Signal that the native frame is no longer needed
-                    player.UnlockVideoFrame()
-
-                    // Skip update if resizing
-                    if (isResizing) {
-                        delay(8)
-                        continue
-                    }
-
-                    // Update shared bitmap
-                    bitmapLock.write {
-                        if (reusableBitmap == null) {
-                            reusableBitmap = Bitmap().apply {
-                                allocPixels(
-                                    ImageInfo(
-                                        width = videoWidth,
-                                        height = videoHeight,
-                                        colorType = ColorType.BGRA_8888,
-                                        alphaType = ColorAlphaType.OPAQUE
-                                    )
-                                )
-                            }
-                        }
-                        reusableBitmap!!.installPixels(
-                            ImageInfo(
-                                width = videoWidth,
-                                height = videoHeight,
-                                colorType = ColorType.BGRA_8888,
-                                alphaType = ColorAlphaType.OPAQUE
-                            ),
-                            reusableByteArray,
-                            videoWidth * 4
+                // Retrieve or create a reusable Bitmap
+                val frameBitmap = bitmapPool.poll() ?: Bitmap().apply {
+                    allocPixels(
+                        ImageInfo(
+                            width = videoWidth,
+                            height = videoHeight,
+                            colorType = ColorType.BGRA_8888,
+                            alphaType = ColorAlphaType.OPAQUE
                         )
-                        _currentFrame = reusableBitmap
-                    }
-
-                    // Update frame counter
-                    withContext(Dispatchers.Main) {
-                        _frameCounter++
-                    }
-                } catch (e: Exception) {
-                    setError("Error during frame read: ${e.message}")
-                    delay(16)
-                    continue
+                    )
                 }
+                // Install the buffer content into the Bitmap
+                frameBitmap.installPixels(
+                    ImageInfo(
+                        width = videoWidth,
+                        height = videoHeight,
+                        colorType = ColorType.BGRA_8888,
+                        alphaType = ColorAlphaType.OPAQUE
+                    ),
+                    frameBytes,
+                    videoWidth * 4
+                )
 
-                // Update current time and progress
+                // Get the current time for this frame
+                var frameTime = 0.0
                 try {
                     val posRef = LongByReference()
                     if (player.GetMediaPosition(posRef) >= 0) {
-                        _currentTime = posRef.value / 10000000.0
-                        _progress = (_currentTime / _duration).toFloat()
+                        frameTime = posRef.value / 10000000.0
                     }
                 } catch (e: Exception) {
-                    // Ignore or log error
+                    // Ignore timing errors
                 }
 
-                // No longer loading if we reach here
+                // Create a FrameData object with the reusable Bitmap and buffer
+                val frameData = FrameData(frameBitmap, frameTime, frameBytes)
+                queueMutex.withLock {
+                    // If the queue is full, remove the oldest frame and recycle its resources
+                    if (frameQueue.remainingCapacity() == 0) {
+                        val oldFrame = frameQueue.poll()
+                        oldFrame?.let {
+                            bitmapPool.offer(it.bitmap)
+                            byteArrayPool.offer(it.buffer)
+                        }
+                    }
+                    frameQueue.offer(frameData)
+                }
+            } catch (e: Exception) {
+                setError("Error reading frame: ${e.message}")
+                delay(16)
+                continue
+            }
+
+            delay(16) // Small pause to limit CPU usage
+        }
+    }
+
+    /**
+     * Consumer coroutine that displays frames from the frame queue.
+     * After displaying, the resources of the previous frame are returned to the pools.
+     */
+    private suspend fun consumeFrames() {
+        while (true) {
+            // Ensure the coroutine has not been cancelled
+            scope.ensureActive()
+
+            if (!_isPlaying || isResizing) {
+                delay(16)
+                continue
+            }
+
+            var frameData: FrameData? = null
+            queueMutex.withLock {
+                if (frameQueue.isNotEmpty()) {
+                    frameData = frameQueue.poll()
+                }
+            }
+
+            if (frameData != null) {
+                // Update the current frame by recycling the old bitmap
+                bitmapLock.write {
+                    val oldBitmap = _currentFrame
+                    _currentFrame = frameData!!.bitmap
+                    if (oldBitmap != null) {
+                        bitmapPool.offer(oldBitmap)
+                    }
+                }
+                // Update current time and progress
+                _currentTime = frameData!!.timestamp
+                _progress = (_currentTime / _duration).toFloat()
+
+                // Increment the frame counter on the main thread
+                withContext(Dispatchers.Main) {
+                    _frameCounter++
+                }
+                // End the loading state
                 isLoading = false
 
-                delay(16)
+                // Return the buffer of the consumed frame to the pool
+                queueMutex.withLock {
+                    byteArrayPool.offer(frameData!!.buffer)
+                }
             }
+
+            delay(16) // Approximately 60 FPS
         }
     }
 
@@ -398,7 +496,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             }
             _isPlaying = true
         } catch (e: Exception) {
-            setError("Error during audio playback start: ${e.message}")
+            setError("Error starting audio playback: ${e.message}")
         }
     }
 
@@ -407,17 +505,17 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         try {
             val result = player.SetPlaybackState(false)
             if (result < 0) {
-                setError("Error pausing playback (hr=0x${result.toString(16)})")
+                setError("Error pausing (hr=0x${result.toString(16)})")
                 return
             }
             _isPlaying = false
         } catch (e: Exception) {
-            setError("Error during pause: ${e.message}")
+            setError("Error pausing: ${e.message}")
         }
     }
 
     /**
-     * Stops playback and resets certain states.
+     * Stops playback and resets relevant states.
      */
     override fun stop() {
         try {
@@ -425,22 +523,20 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _currentFrame = null
             videoJob?.cancel()
         } catch (e: Exception) {
-            setError("Error during stop: ${e.message}")
+            setError("Error stopping playback: ${e.message}")
         }
     }
 
     /**
-     * Seeks to a certain point (value is based on sliderPos).
+     * Seeks to a specific position (value based on sliderPos).
      */
     override fun seekTo(value: Float) {
         if (!_hasMedia) return
         try {
-            // First pause any current playback
             val wasPlaying = _isPlaying
             if (wasPlaying) {
                 pause()
             }
-
             val durationRef = LongByReference()
             val hrDuration = player.GetMediaDuration(durationRef)
             if (hrDuration < 0) {
@@ -450,39 +546,49 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             val duration100ns = durationRef.value
             val fraction = value / 1000f
             val newPosition = (duration100ns * fraction).toLong()
-
             val hrSeek = player.SeekMedia(newPosition)
             if (hrSeek < 0) {
-                setError("SeekMedia failed (hr=0x${hrSeek.toString(16)})")
+                setError("Failed to seek (hr=0x${hrSeek.toString(16)})")
             } else {
                 _currentTime = newPosition / 10000000.0
                 _progress = fraction
-
-                // Resume playback if it was playing
                 if (wasPlaying) {
                     play()
                 }
             }
         } catch (e: Exception) {
-            setError("Exception during SeekMedia: ${e.message}")
+            setError("Exception during seeking: ${e.message}")
         }
     }
 
     /**
-     * To be called when the window is resized. Introduces a small delay before resuming frame updates.
+     * Called when the window is resized.
+     * Introduces a short delay before resuming frame updates.
      */
     fun onResized() {
         isResizing = true
+        // Clear the frame queue to discard frames generated during resizing
+        scope.launch {
+            queueMutex.withLock {
+                while (frameQueue.isNotEmpty()) {
+                    val oldFrame = frameQueue.poll()
+                    oldFrame?.let {
+                        // Recycle the bitmap and buffer back into their pools
+                        bitmapPool.offer(it.bitmap)
+                        byteArrayPool.offer(it.buffer)
+                    }
+                }
+            }
+        }
         resizeJob?.cancel()
         resizeJob = scope.launch {
-            // Wait 200 ms before resuming frame updates
             delay(200)
             isResizing = false
         }
     }
 
     /**
-     * Utility method for setting error message in a centralized way.
+     * Utility method to centralize error handling.
      */
     private fun setError(msg: String) {
         _error = VideoPlayerError.UnknownError(msg)
@@ -490,7 +596,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         isLoading = false
     }
 
-    // Empty methods (or not needed in this context)
+    // Empty methods (not needed in this context)
     override fun hideMedia() {}
     override fun showMedia() {}
 }
