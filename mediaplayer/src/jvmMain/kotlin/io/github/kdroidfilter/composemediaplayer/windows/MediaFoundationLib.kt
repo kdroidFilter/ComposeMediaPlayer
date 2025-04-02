@@ -53,4 +53,6 @@ internal interface MediaFoundationLib : StdCallLibrary {
 
     fun SetPlaybackState(isPlaying: Boolean): Int
 
+    fun ShutdownMediaFoundation()
+
 }
