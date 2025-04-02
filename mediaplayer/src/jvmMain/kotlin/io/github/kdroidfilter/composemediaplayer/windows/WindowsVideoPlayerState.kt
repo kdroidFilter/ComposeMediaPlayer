@@ -206,14 +206,31 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      */
     override fun dispose() {
         try {
-            videoJob?.cancel()
+            // Annuler les coroutines et attendre qu'elles terminent
+            runBlocking {
+                videoJob?.cancelAndJoin()
+            }
+
+            // Vider les pools
+            runBlocking {
+                queueMutex.withLock {
+                    _currentFrame = null
+                    frameQueue.clear()
+                    bitmapPool.clear()
+                    byteArrayPool.clear()
+                }
+            }
+
+            // Fermer Media Foundation
             player.CloseMedia()
+
         } catch (e: Exception) {
-            // Ignore or log the exception
+            // Logger l'exception
+            println("Error during dispose: ${e.message}")
         } finally {
             isInitialized = false
             _isPlaying = false
-            _currentFrame = null
+            _hasMedia = false
             scope.cancel()
         }
     }
@@ -228,22 +245,35 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
 
         // Cancel any previous playback job
-        videoJob?.cancel()
-        videoJob = null
+        runBlocking {
+            videoJob?.cancelAndJoin()
+            videoJob = null
+        }
 
         // Clear the frame queue
         runBlocking {
             queueMutex.withLock {
-                frameQueue.clear()
+                // Recycler correctement toutes les frames
+                while (frameQueue.isNotEmpty()) {
+                    val oldFrame = frameQueue.poll()
+                    oldFrame?.let {
+                        bitmapPool.offer(it.bitmap)
+                        byteArrayPool.offer(it.buffer)
+                    }
+                }
             }
         }
 
         // Close the previous media, if any
         try {
             player.CloseMedia()
+            // Ajouter un petit délai pour laisser le temps au backend natif de se nettoyer
+            runBlocking { delay(100) }
         } catch (e: Exception) {
-            // Ignore or log the exception
+            // Log l'exception
+            println("Error closing previous media: ${e.message}")
         }
+
 
         _currentFrame = null
         _currentTime = 0.0
