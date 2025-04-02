@@ -153,7 +153,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private val queueMutex = Mutex()
 
     // Pools for reusing Bitmap and ByteArray objects
-    private val poolCapacity = 10
+    private val poolCapacity = 2
     private val bitmapPool = ArrayBlockingQueue<Bitmap>(poolCapacity)
     private val byteArrayPool = ArrayBlockingQueue<ByteArray>(poolCapacity)
 
@@ -478,8 +478,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 delay(16)
                 continue
             }
-
-            delay(16) // Small pause to limit CPU usage
         }
     }
 
