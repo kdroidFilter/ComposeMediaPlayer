@@ -565,6 +565,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _isPlaying = false
             _currentFrame = null
             videoJob?.cancel()
+            player.SetPlaybackState(false)
+            _hasMedia = false
+            _isPlaying = false
+            _progress = 0f
+            _currentTime = 0.0
+            isLoading = false
+            errorMessage = null
+            _error = null
         } catch (e: Exception) {
             setError("Error stopping playback: ${e.message}")
         }
