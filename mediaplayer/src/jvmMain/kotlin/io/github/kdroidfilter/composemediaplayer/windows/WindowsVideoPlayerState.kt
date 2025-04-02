@@ -383,33 +383,34 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 // No longer loading if we reach here
                 isLoading = false
 
-                // Brief delay at the end of loop
                 delay(16)
             }
         }
     }
 
-    /**
-     * Starts playback of the current media.
-     */
     override fun play() {
         if (!isInitialized || !_hasMedia) return
         try {
+            val result = player.SetPlaybackState(true)
+            if (result < 0) {
+                setError("Error starting playback (hr=0x${result.toString(16)})")
+                return
+            }
             _isPlaying = true
-            player.StartAudioPlayback()
         } catch (e: Exception) {
             setError("Error during audio playback start: ${e.message}")
         }
     }
 
-    /**
-     * Pauses playback.
-     */
     override fun pause() {
         if (!_isPlaying) return
         try {
+            val result = player.SetPlaybackState(false)
+            if (result < 0) {
+                setError("Error pausing playback (hr=0x${result.toString(16)})")
+                return
+            }
             _isPlaying = false
-            player.StopAudioPlayback()
         } catch (e: Exception) {
             setError("Error during pause: ${e.message}")
         }
@@ -421,7 +422,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override fun stop() {
         try {
             _isPlaying = false
-            player.StopAudioPlayback()
             _currentFrame = null
             videoJob?.cancel()
         } catch (e: Exception) {
@@ -435,6 +435,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override fun seekTo(value: Float) {
         if (!_hasMedia) return
         try {
+            // First pause any current playback
+            val wasPlaying = _isPlaying
+            if (wasPlaying) {
+                pause()
+            }
+
             val durationRef = LongByReference()
             val hrDuration = player.GetMediaDuration(durationRef)
             if (hrDuration < 0) {
@@ -451,6 +457,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             } else {
                 _currentTime = newPosition / 10000000.0
                 _progress = fraction
+
+                // Resume playback if it was playing
+                if (wasPlaying) {
+                    play()
+                }
             }
         } catch (e: Exception) {
             setError("Exception during SeekMedia: ${e.message}")
