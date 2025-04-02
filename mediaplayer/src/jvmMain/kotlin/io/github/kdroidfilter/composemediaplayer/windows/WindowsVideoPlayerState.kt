@@ -206,31 +206,53 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      */
     override fun dispose() {
         try {
-            // Annuler les coroutines et attendre qu'elles terminent
-            runBlocking {
-                videoJob?.cancelAndJoin()
+            // D'abord, arrêter la lecture
+            _isPlaying = false
+            try {
+                player.SetPlaybackState(false)
+            } catch (e: Exception) {
+                println("Error stopping playback during dispose: ${e.message}")
             }
 
-            // Vider les pools
-            runBlocking {
+            // Ensuite, annuler les coroutines sans bloquer
+            videoJob?.cancel()
+
+            // Nettoyer les ressources Media Foundation
+            try {
+                player.CloseMedia()
+            } catch (e: Exception) {
+                println("Error closing media: ${e.message}")
+            }
+
+            // Nettoyer les structures de données
+            bitmapLock.write {
+                _currentFrame = null
+            }
+
+            // Vider les pools sans bloquer
+            scope.launch {
                 queueMutex.withLock {
-                    _currentFrame = null
                     frameQueue.clear()
                     bitmapPool.clear()
                     byteArrayPool.clear()
                 }
             }
 
-            // Fermer Media Foundation
-            player.CloseMedia()
-
+            // Finaliser Media Foundation en dernier
+            try {
+                player.ShutdownMediaFoundation()
+            } catch (e: Exception) {
+                println("Error shutting down Media Foundation: ${e.message}")
+            }
         } catch (e: Exception) {
-            // Logger l'exception
             println("Error during dispose: ${e.message}")
         } finally {
+            // Mettre à jour l'état
             isInitialized = false
             _isPlaying = false
             _hasMedia = false
+
+            // Annuler le scope principal en dernier
             scope.cancel()
         }
     }
