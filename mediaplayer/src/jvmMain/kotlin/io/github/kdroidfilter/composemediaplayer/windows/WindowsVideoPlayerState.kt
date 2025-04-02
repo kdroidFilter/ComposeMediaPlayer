@@ -149,12 +149,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
 
     // Circular queue for frame processing
-    private val frameQueueCapacity = 2 // Adjust based on memory constraints and playback needs
+    private val frameQueueCapacity = 1 // Adjust based on memory constraints and playback needs
     private val frameQueue = ArrayBlockingQueue<FrameData>(frameQueueCapacity)
     private val queueMutex = Mutex()
 
     // Pools for reusing Bitmap and ByteArray objects
-    private val poolCapacity = 2
+    private val poolCapacity = 1
     private val bitmapPool = ArrayBlockingQueue<Bitmap>(poolCapacity)
     private val byteArrayPool = ArrayBlockingQueue<ByteArray>(poolCapacity)
 
