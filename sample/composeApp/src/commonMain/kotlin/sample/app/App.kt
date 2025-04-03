@@ -361,7 +361,6 @@ fun App() {
 
             // Subtitle management dialog
             if (showSubtitleDialog) {
-                playerState.hideMedia()
                 SubtitleManagementDialog(
                     subtitleTracks = subtitleTracks,
                     selectedSubtitleTrack = selectedSubtitleTrack,
@@ -376,7 +375,6 @@ fun App() {
                     subtitleFileLauncher = { subtitleFileLauncher.launch() },
                     onDismiss = {
                         showSubtitleDialog = false
-                        playerState.showMedia()
                     }
                 )
             }

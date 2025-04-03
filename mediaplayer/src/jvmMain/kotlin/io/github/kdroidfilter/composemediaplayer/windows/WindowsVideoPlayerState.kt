@@ -585,12 +585,20 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         if (!_hasMedia) return
         try {
             val wasPlaying = _isPlaying
+
+            // 1. Pause la lecture et attends que la pause soit effective
             if (wasPlaying) {
                 pause()
+                // Petit délai pour s'assurer que la pause est effective
+                runBlocking { delay(50) }
             }
 
-            // Clear frame queue and reset current frame
-            scope.launch {
+            // 2. Marquer comme en chargement pendant le seek
+            isLoading = true
+
+            // 3. Vider la file d'attente des frames - utiliser runBlocking pour s'assurer
+            // que l'opération est terminée avant de continuer
+            runBlocking {
                 queueMutex.withLock {
                     frameQueue.forEach { frameData ->
                         bitmapPool.offer(frameData.bitmap)
@@ -603,23 +611,60 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
             }
 
+            // 4. Calculer la nouvelle position
             val durationRef = LongByReference()
             val hrDuration = player.GetMediaDuration(durationRef)
             if (hrDuration < 0) return
 
             val newPosition = (durationRef.value * (value / 1000f)).toLong()
+
+            // 5. Réaliser le seek et attendre qu'il soit terminé
             val hrSeek = player.SeekMedia(newPosition)
-
-            if (hrSeek >= 0) {
-                _currentTime = newPosition / 10000000.0
-                _progress = value / 1000f
+            if (hrSeek < 0) {
+                setError("Seek failed with error code: 0x${hrSeek.toString(16)}")
+                return
             }
 
+            // 6. Vérifier que la position a bien été mise à jour côté natif
+            val posRef = LongByReference()
+            if (player.GetMediaPosition(posRef) >= 0) {
+                // Confirmer que la position demandée a bien été atteinte
+                _currentTime = posRef.value / 10000000.0
+                _progress = (_currentTime / _duration).toFloat()
+            }
+
+            // 7. Attendre un court délai pour laisser le temps au moteur natif
+            // de se synchroniser avant de reprendre la lecture
+            runBlocking { delay(100) }
+
+            // 8. Reprendre la lecture si nécessaire, mais seulement après
+            // avoir laissé le temps au pipeline vidéo/audio de se synchroniser
             if (wasPlaying) {
-                play()
+                scope.launch {
+                    // Attendre un peu pour permettre au moteur de charger les premières frames
+                    delay(200)
+
+                    // S'assurer que l'audio et la vidéo reprennent au même moment
+                    try {
+                        val result = player.SetPlaybackState(true)
+                        if (result >= 0) {
+                            _isPlaying = true
+                        }
+                    } catch (e: Exception) {
+                        setError("Error resuming playback after seek: ${e.message}")
+                    }
+
+                    // Mettre fin à l'état de chargement une fois que tout est prêt
+                    isLoading = false
+                }
+            } else {
+                // Si on ne redémarre pas la lecture, on peut désactiver l'état de chargement
+                isLoading = false
             }
+
         } catch (e: Exception) {
             setError("Exception during seeking: ${e.message}")
+            isLoading = false
         }
     }
 
