@@ -149,12 +149,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
 
     // Circular queue for frame processing
-    private val frameQueueCapacity = 5 // Adjust based on memory constraints and playback needs
+    private val frameQueueCapacity = 3 // Adjust based on memory constraints and playback needs
     private val frameQueue = ArrayBlockingQueue<FrameData>(frameQueueCapacity)
     private val queueMutex = Mutex()
 
     // Pools for reusing Bitmap and ByteArray objects
-    private val poolCapacity = 5
+    private val poolCapacity = 2
     private val bitmapPool = ArrayBlockingQueue<Bitmap>(poolCapacity)
     private val byteArrayPool = ArrayBlockingQueue<ByteArray>(poolCapacity)
 
@@ -525,7 +525,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
             }
 
-            delay(16) // Approximately 60 FPS
+            delay(1) // Approximately 60 FPS
         }
     }
 
@@ -581,24 +581,32 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     /**
      * Seeks to a specific position (value based on sliderPos).
      */
+    /**
+     * Seeks to a specific position in the media.
+     * @param value The target position as a normalized value (0-1000)
+     */
+    /**
+     * Seeks to a specific position in the media and ensures both audio and video are properly synchronized.
+     * @param value The target position as a normalized value (0-1000)
+     */
     override fun seekTo(value: Float) {
         if (!_hasMedia) return
-        try {
-            val wasPlaying = _isPlaying
 
-            // 1. Pause la lecture et attends que la pause soit effective
-            if (wasPlaying) {
-                pause()
-                // Petit délai pour s'assurer que la pause est effective
-                runBlocking { delay(50) }
-            }
+        // Capture current state
+        val wasPlaying = _isPlaying
 
-            // 2. Marquer comme en chargement pendant le seek
-            isLoading = true
+        scope.launch {
+            try {
+                // 1. Pause playback
+                if (_isPlaying) {
+                    pause()
+                    delay(50) // Allow pause to take effect
+                }
 
-            // 3. Vider la file d'attente des frames - utiliser runBlocking pour s'assurer
-            // que l'opération est terminée avant de continuer
-            runBlocking {
+                // 2. Signal loading state
+                isLoading = true
+
+                // 3. Clear frame queue with proper unlocking
                 queueMutex.withLock {
                     frameQueue.forEach { frameData ->
                         bitmapPool.offer(frameData.bitmap)
@@ -606,65 +614,91 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
                     frameQueue.clear()
                 }
-                bitmapLock.write {
-                    _currentFrame = null
+
+                // Ensure any potentially locked frame is unlocked
+                try {
+                    player.UnlockVideoFrame()
+                } catch (e: Exception) {
+                    // Ignore - just making sure we don't have locked frames
                 }
-            }
 
-            // 4. Calculer la nouvelle position
-            val durationRef = LongByReference()
-            val hrDuration = player.GetMediaDuration(durationRef)
-            if (hrDuration < 0) return
+                // 4. Calculate target position
+                val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
 
-            val newPosition = (durationRef.value * (value / 1000f)).toLong()
+                // 5. Perform seek operation with retry
+                var seekSuccess = false
+                var retryCount = 0
+                val maxRetries = 3
 
-            // 5. Réaliser le seek et attendre qu'il soit terminé
-            val hrSeek = player.SeekMedia(newPosition)
-            if (hrSeek < 0) {
-                setError("Seek failed with error code: 0x${hrSeek.toString(16)}")
-                return
-            }
+                while (!seekSuccess && retryCount < maxRetries) {
+                    val hrSeek = player.SeekMedia(targetPos)
+                    if (hrSeek >= 0) {
+                        seekSuccess = true
+                    } else {
+                        retryCount++
+                        delay(50) // Wait before retry
+                    }
+                }
 
-            // 6. Vérifier que la position a bien été mise à jour côté natif
-            val posRef = LongByReference()
-            if (player.GetMediaPosition(posRef) >= 0) {
-                // Confirmer que la position demandée a bien été atteinte
-                _currentTime = posRef.value / 10000000.0
-                _progress = (_currentTime / _duration).toFloat()
-            }
+                if (!seekSuccess) {
+                    setError("Seek failed after $maxRetries attempts")
+                    return@launch
+                }
 
-            // 7. Attendre un court délai pour laisser le temps au moteur natif
-            // de se synchroniser avant de reprendre la lecture
-            runBlocking { delay(100) }
+                // 6. Wait for Media Foundation to stabilize after seek
+                delay(100)
 
-            // 8. Reprendre la lecture si nécessaire, mais seulement après
-            // avoir laissé le temps au pipeline vidéo/audio de se synchroniser
-            if (wasPlaying) {
-                scope.launch {
-                    // Attendre un peu pour permettre au moteur de charger les premières frames
-                    delay(200)
+                // 7. Update current position from actual position after seek
+                val posRef = LongByReference()
+                if (player.GetMediaPosition(posRef) >= 0) {
+                    _currentTime = posRef.value / 10000000.0
+                    _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
+                }
 
-                    // S'assurer que l'audio et la vidéo reprennent au même moment
-                    try {
-                        val result = player.SetPlaybackState(true)
-                        if (result >= 0) {
-                            _isPlaying = true
+                // 8. Resume playback if needed, with error handling
+                if (wasPlaying) {
+                    delay(100) // Additional delay to ensure everything is ready
+
+                    var resumeSuccess = false
+                    retryCount = 0
+
+                    while (!resumeSuccess && retryCount < maxRetries) {
+                        try {
+                            val result = player.SetPlaybackState(true)
+                            if (result >= 0) {
+                                _isPlaying = true
+                                resumeSuccess = true
+                            } else {
+                                retryCount++
+                                delay(50)
+                            }
+                        } catch (e: Exception) {
+                            retryCount++
+                            delay(50)
                         }
-                    } catch (e: Exception) {
-                        setError("Error resuming playback after seek: ${e.message}")
                     }
 
-                    // Mettre fin à l'état de chargement une fois que tout est prêt
-                    isLoading = false
+                    if (!resumeSuccess) {
+                        setError("Failed to resume playback after seek")
+                    }
                 }
-            } else {
-                // Si on ne redémarre pas la lecture, on peut désactiver l'état de chargement
+
+            } catch (e: Exception) {
+                setError("Exception during seeking: ${e.message}")
+                // Try to restore state
+                if (wasPlaying) {
+                    try {
+                        player.SetPlaybackState(true)
+                        _isPlaying = true
+                    } catch (ex: Exception) {
+                        // Ignore - already in error state
+                    }
+                }
+            } finally {
+                // Always ensure loading state is cleared
+                delay(200)
                 isLoading = false
             }
-
-        } catch (e: Exception) {
-            setError("Exception during seeking: ${e.message}")
-            isLoading = false
         }
     }
 
