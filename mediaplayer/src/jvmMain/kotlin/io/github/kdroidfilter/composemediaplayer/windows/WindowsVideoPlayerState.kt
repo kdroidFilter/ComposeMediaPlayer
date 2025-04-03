@@ -525,7 +525,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
             }
 
-            delay(1) // Approximately 60 FPS
+            delay(16) // Approximately 60 FPS
         }
     }
 
