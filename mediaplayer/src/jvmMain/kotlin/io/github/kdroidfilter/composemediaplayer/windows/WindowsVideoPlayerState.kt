@@ -112,11 +112,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     // Variables related to the video (current bitmap, synchronization lock, etc.)
-    private var _currentFrame: Bitmap? by mutableStateOf(null)
-    private val bitmapLock = ReentrantReadWriteLock()
+    var _currentFrame: Bitmap? by mutableStateOf(null)
+    val bitmapLock = ReentrantReadWriteLock()
 
     // Converts Skia Bitmap to Compose ImageBitmap (protected by a read lock)
-    fun getLockedComposeImageBitmap(): ImageBitmap? = bitmapLock.read {
+   inline fun getLockedComposeImageBitmap(): ImageBitmap? = bitmapLock.read {
         _currentFrame?.asComposeImageBitmap()
     }
 
@@ -363,7 +363,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * Producer coroutine that reads video frames and adds them to the frame queue.
      * Uses object pools to retrieve reusable ByteArray and Bitmap objects.
      */
-    private suspend fun produceFrames() {
+    private suspend inline fun produceFrames() {
         // Calculate the required buffer size
         val requiredBufferSize = videoWidth * videoHeight * 4
         while (scope.isActive) {
@@ -486,7 +486,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * Consumer coroutine that displays frames from the frame queue.
      * After displaying, the resources of the previous frame are returned to the pools.
      */
-    private suspend fun consumeFrames() {
+    private suspend inline fun consumeFrames() {
         while (true) {
             // Ensure the coroutine has not been cancelled
             scope.ensureActive()
@@ -731,7 +731,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     /**
      * Utility method to centralize error handling.
      */
-    private fun setError(msg: String) {
+    private inline fun setError(msg: String) {
         _error = VideoPlayerError.UnknownError(msg)
         errorMessage = msg
         isLoading = false
