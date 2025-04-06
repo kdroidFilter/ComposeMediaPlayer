@@ -29,10 +29,27 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val hasMedia get() = _hasMedia
     private var _isPlaying by mutableStateOf(false)
     override val isPlaying get() = _isPlaying
+
+    // Volume management: Changing this property triggers the native SetAudioVolume call
     private var _volume by mutableStateOf(1f)
     override var volume: Float
         get() = _volume
-        set(value) { _volume = value.coerceIn(0f, 1f) }
+        set(value) {
+            val newVolume = value.coerceIn(0f, 1f)
+            if (_volume != newVolume) {
+                _volume = newVolume
+                // Update the volume in the player via the native function
+                scope.launch {
+                    mediaOperationMutex.withLock {
+                        val hr = player.SetAudioVolume(newVolume)
+                        if (hr < 0) {
+                            setError("Error updating volume (hr=0x${hr.toString(16)})")
+                        }
+                    }
+                }
+            }
+        }
+
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
     private var _progress by mutableStateOf(0f)

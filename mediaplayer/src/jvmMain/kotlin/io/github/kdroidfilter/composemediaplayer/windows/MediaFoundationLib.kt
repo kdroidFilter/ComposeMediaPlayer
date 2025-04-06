@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer.windows
 
 import com.sun.jna.Native
 import com.sun.jna.WString
+import com.sun.jna.ptr.FloatByReference
 import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.LongByReference
 import com.sun.jna.ptr.PointerByReference
@@ -35,24 +36,15 @@ internal interface MediaFoundationLib : StdCallLibrary {
     // 6) Check if end-of-stream has been reached, and control audio playback
     fun IsEOF(): Boolean
 
-    // 7) Get video dimensions
     fun GetVideoSize(pWidth: IntByReference, pHeight: IntByReference)
-
-    // 8) Get video frame rate
     fun GetVideoFrameRate(pNum: IntByReference, pDenom: IntByReference): Int
-
-    // 9) Seek to a specific position (in 100-nanosecond units)
     fun SeekMedia(lPosition: Long): Int
-
-    // 10) Get total media duration (in 100-nanosecond units)
     fun GetMediaDuration(pDuration: LongByReference): Int
-
-    // 11) Get current playback position (in 100-nanosecond units)
     fun GetMediaPosition(pPosition: LongByReference): Int
-
-
     fun SetPlaybackState(isPlaying: Boolean): Int
-
     fun ShutdownMediaFoundation()
+    fun SetAudioVolume(volume: Float): Int
+    fun GetAudioVolume(volume: FloatByReference): Int
+
 
 }
