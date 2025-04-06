@@ -74,7 +74,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     // Video properties
     var videoWidth by mutableStateOf(0)
     var videoHeight by mutableStateOf(0)
-    private var frameBufferSize = 0
+    private var frameBufferSize = 1
 
     // Synchronization
     private val mediaOperationMutex = Mutex()
