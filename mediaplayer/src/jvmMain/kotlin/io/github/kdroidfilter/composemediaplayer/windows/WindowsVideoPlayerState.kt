@@ -10,6 +10,8 @@ import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import org.jetbrains.skia.*
 import java.io.File
 import java.util.concurrent.ArrayBlockingQueue
@@ -53,7 +55,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override fun clearError() { _error = null; errorMessage = null }
     var _currentFrame: Bitmap? by mutableStateOf(null)
     val bitmapLock = ReentrantReadWriteLock()
-    inline fun getLockedComposeImageBitmap(): ImageBitmap? =
+    fun getLockedComposeImageBitmap(): ImageBitmap? =
         bitmapLock.read { _currentFrame?.asComposeImageBitmap() }
     override val metadata = VideoMetadata()
     override var subtitlesEnabled = false
@@ -70,8 +72,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     var videoWidth by mutableStateOf(0)
     var videoHeight by mutableStateOf(0)
 
-    // Remplacement de l'ArrayBlockingQueue par un Channel avec capacité fixe et comportement de "DROP_OLDEST"
-    private val frameChannelCapacity = 2
+    // Channel pour la gestion des images, avec capacité fixe et stratégie DROP_OLDEST
+    private val frameChannelCapacity = 10
     private val frameChannel = Channel<FrameData>(
         capacity = frameChannelCapacity,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -126,7 +128,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             videoJob = null
             clearFrameChannel()
         }
-        try { player.CloseMedia(); runBlocking { delay(100) } }
+        try { player.CloseMedia(); runBlocking { delay(50) } }
         catch (e: Exception) { println("Error closing previous media: ${e.message}") }
         _currentFrame = null; _currentTime = 0.0; _progress = 0f
         if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
@@ -171,8 +173,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    // Vide le channel en récupérant et renvoyant les ressources dans les pools
-    private suspend fun clearFrameChannel() {
+    // Vide le channel en recyclant les ressources dans les pools
+    private fun clearFrameChannel() {
         while (true) {
             val result = frameChannel.tryReceive()
             val frameData = result.getOrNull() ?: break
@@ -180,6 +182,24 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             byteArrayPool.offer(frameData.buffer)
         }
     }
+
+    // --- Fonctions d'attente réactive pour la synchronisation ---
+
+    // Attend que l'état de lecture corresponde à la valeur attendue
+    private suspend fun awaitPlaybackState(expected: Boolean) {
+        snapshotFlow { _isPlaying }
+            .filter { it == expected }
+            .first()
+    }
+
+    // Attend la fin du redimensionnement
+    private suspend fun awaitNotResizing() {
+        snapshotFlow { isResizing }
+            .filter { !it }
+            .first()
+    }
+
+    // --- Production et consommation des frames ---
 
     private suspend fun produceFrames() {
         val reqSize = videoWidth * videoHeight * 4
@@ -195,14 +215,15 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 } else break
             }
             if (!_isPlaying) {
-                delay(16)
+                // Attendre que la lecture reprenne plutôt que d'utiliser un délai fixe
+                awaitPlaybackState(true)
                 continue
             }
             try {
                 val ptrRef = PointerByReference()
                 val sizeRef = IntByReference()
                 if (player.ReadVideoFrame(ptrRef, sizeRef) < 0 || ptrRef.value == null || sizeRef.value <= 0) {
-                    delay(16)
+                    yield() // cède le contrôle sans délai arbitraire
                     continue
                 }
                 val frameBytes = byteArrayPool.poll()?.takeIf { it.size >= reqSize } ?: ByteArray(reqSize)
@@ -218,11 +239,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 val posRef = LongByReference()
                 val frameTime = if (player.GetMediaPosition(posRef) >= 0) posRef.value / 10000000.0 else 0.0
                 val frameData = FrameData(frameBitmap, frameTime, frameBytes)
-                // Envoi dans le channel – en cas de débordement, le plus ancien sera supprimé
                 frameChannel.trySend(frameData)
             } catch (e: Exception) {
                 setError("Error reading frame: ${e.message}")
-                delay(16)
+                yield()
             }
         }
     }
@@ -230,12 +250,17 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private suspend fun consumeFrames() {
         while (true) {
             scope.ensureActive()
-            if (!_isPlaying || isResizing) {
-                delay(16)
+            if (!_isPlaying) {
+                awaitPlaybackState(true)
                 continue
             }
-            // Tentative de récupération d'une trame sans blocage
-            frameChannel.tryReceive().getOrNull()?.let { frameData ->
+            if (isResizing) {
+                awaitNotResizing()
+                continue
+            }
+            val result = frameChannel.tryReceive()
+            val frameData = result.getOrNull()
+            if (frameData != null) {
                 bitmapLock.write {
                     _currentFrame?.also { bitmapPool.offer(it) }
                     _currentFrame = frameData.bitmap
@@ -244,6 +269,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 _progress = (_currentTime / _duration).toFloat()
                 isLoading = false
                 byteArrayPool.offer(frameData.buffer)
+            } else {
+                yield()
             }
             delay(16)
         }
@@ -299,10 +326,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         val wasPlaying = _isPlaying
         scope.launch {
             try {
-                // Si en lecture, mettre en pause rapidement
                 if (_isPlaying) {
                     pause()
-                    delay(30)
+                    awaitPlaybackState(false)
                 }
                 isLoading = true
 
@@ -310,13 +336,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 while (frameChannel.tryReceive().isSuccess) { /* vider le channel */ }
                 player.UnlockVideoFrame()
 
-                // Calcul de la position cible en fonction de la durée
                 val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
-
-                // Tenter le seek une fois, avec une éventuelle seconde tentative rapide
                 var hr = player.SeekMedia(targetPos)
                 if (hr < 0) {
-                    delay(30)
+                    // Tentative immédiate sans délai fixe
                     hr = player.SeekMedia(targetPos)
                 }
                 if (hr < 0) {
@@ -324,7 +347,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     return@launch
                 }
 
-                delay(50)
+                // Mise à jour de la position actuelle
                 val posRef = LongByReference()
                 if (player.GetMediaPosition(posRef) >= 0) {
                     _currentTime = posRef.value / 10000000.0
@@ -332,12 +355,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
 
                 if (wasPlaying) {
-                    delay(50)
                     hr = player.SetPlaybackState(true)
                     if (hr < 0) {
                         setError("Impossible de reprendre la lecture après le seek (hr=0x${hr.toString(16)})")
                     } else {
                         _isPlaying = true
+                        awaitPlaybackState(true)
                     }
                 }
             } catch (e: Exception) {
@@ -347,7 +370,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _isPlaying = true
                 }
             } finally {
-                delay(100)
+                // Petit délai pour finaliser l'opération, si nécessaire
+                delay(50)
                 isLoading = false
             }
         }

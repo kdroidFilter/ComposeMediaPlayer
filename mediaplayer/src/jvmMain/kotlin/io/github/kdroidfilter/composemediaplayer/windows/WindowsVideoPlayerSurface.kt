@@ -11,36 +11,35 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 
 /**
- * Composable surface to render the video frame.
- * Uses a more efficient approach to update frames without relying on the frame counter.
+ * Surface de rendu pour afficher la frame vidéo.
+ * Une approche réactive est utilisée afin de n’avoir besoin que d’observer les mises à jour d’état pertinentes.
  */
 @Composable
 fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
     modifier: Modifier = Modifier
 ) {
-    // Calculate aspect ratio based on video dimensions
+    // Calcul de l'aspect ratio basé sur la taille de la vidéo
     val aspectRatio = remember(playerState.videoWidth, playerState.videoHeight) {
         if (playerState.videoWidth > 0 && playerState.videoHeight > 0)
             playerState.videoWidth.toFloat() / playerState.videoHeight.toFloat()
         else 16f / 9f
     }
 
-    // Use derived state to directly observe the _currentFrame property from playerState
-    // This is more efficient than using the frame counter as a trigger
+    // Observation réactive de la frame courante
     val currentFrame by remember {
         derivedStateOf {
             playerState.getLockedComposeImageBitmap()
         }
     }
 
-    // Observe hasMedia and isPlaying to ensure recomposition on these state changes
+    // Observation des états de présence de média et de lecture
     val hasMedia by remember { derivedStateOf { playerState.hasMedia } }
     val isPlaying by remember { derivedStateOf { playerState.isPlaying } }
 
     Box(
         modifier = modifier.onSizeChanged {
-            // Notify player state that a resize event has occurred
+            // Notification de redimensionnement
             playerState.onResized()
         },
         contentAlignment = Alignment.Center
@@ -51,7 +50,6 @@ fun WindowsVideoPlayerSurface(
                 .aspectRatio(aspectRatio)
         ) {
             try {
-                // Only attempt to draw if we have a valid frame and dimensions
                 if (size.width > 0 && size.height > 0 && hasMedia) {
                     currentFrame?.let { bitmap ->
                         drawImage(
@@ -64,18 +62,14 @@ fun WindowsVideoPlayerSurface(
                     }
                 }
             } catch (e: Throwable) {
-                // Ignore rendering exceptions during resizing
-                // In production, you might want to log this for debugging
+                // Ignorer les exceptions de rendu lors du redimensionnement
             }
         }
     }
 
-    // Use LaunchedEffect to handle frame updates more efficiently
-    // This triggers recompositions based on playback state changes
     LaunchedEffect(hasMedia, isPlaying) {
         if (hasMedia && isPlaying) {
-            // This empty block is sufficient to trigger recomposition
-            // when the playback state changes
+            // Bloc vide pour déclencher la recomposition lors des changements d'état
         }
     }
 }
