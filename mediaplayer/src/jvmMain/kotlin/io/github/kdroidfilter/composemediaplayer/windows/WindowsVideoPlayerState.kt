@@ -74,7 +74,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     var videoWidth by mutableStateOf(0)
     var videoHeight by mutableStateOf(0)
     private var frameBufferSize = 0
-    private var isHighDefinition = false
 
     // Synchronization
     private val mediaOperationMutex = kotlinx.coroutines.sync.Mutex()
@@ -213,9 +212,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         videoWidth = 1280
                         videoHeight = 720
                     }
-
-                    // Determine if this is HD and adjust strategy
-                    isHighDefinition = videoWidth * videoHeight > 1280 * 720
 
                     // Calculate buffer size needed for frames
                     frameBufferSize = videoWidth * videoHeight * 4
@@ -370,7 +366,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             try {
                 val frameData = frameChannel.tryReceive().getOrNull() ?: run {
                     // Consistent delay when no frame is available
-                    delay(if (isHighDefinition) 20 else 16)
+                    delay(16)
                     return@run null
                 } ?: continue
 
