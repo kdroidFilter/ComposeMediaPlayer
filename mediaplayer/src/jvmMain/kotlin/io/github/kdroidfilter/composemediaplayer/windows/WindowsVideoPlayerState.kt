@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.read
 import kotlin.concurrent.write
 import kotlin.math.max
+import kotlin.math.min
 
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private val player = MediaFoundationLib.INSTANCE
@@ -295,8 +296,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 val sharedBuffer = sharedFrameBuffer!!
 
                 // Copy frame data to shared buffer
-                ptrRef.value.getByteBuffer(0, sizeRef.value.toLong()).get(sharedBuffer, 0,
-                    max(sizeRef.value, frameBufferSize))
+                ptrRef.value.getByteBuffer(0, sizeRef.value.toLong()).get(sharedBuffer, 0, min(sizeRef.value, frameBufferSize))
+
                 player.UnlockVideoFrame()
 
                 // Create or reuse bitmap
@@ -490,7 +491,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
 
                 // Give the system time to stabilize after seeking
-                delay(100)
+                delay(16)
 
             } catch (e: Exception) {
                 setError("Error seeking: ${e.message}")
