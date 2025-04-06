@@ -83,13 +83,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var resizeJob: Job? = null
 
     // Memory-optimized frame processing
-    private val frameQueueSize = 2 // Reduced queue size
+    private val frameQueueSize = 1 // Minimal queue size to reduce memory usage
     private val frameChannel = Channel<FrameData>(
         capacity = frameQueueSize,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    // Reusable frame data structure
+    // Memory-efficient frame data structure
     private data class FrameData(
         val bitmap: Bitmap,
         val timestamp: Double
@@ -291,9 +291,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     continue
                 }
 
-                val sharedBuffer = sharedFrameBuffer ?: ByteArray(frameBufferSize).also {
-                    sharedFrameBuffer = it
+                // Ensure shared buffer is available to avoid allocations
+                if (sharedFrameBuffer == null || sharedFrameBuffer!!.size < frameBufferSize) {
+                    sharedFrameBuffer = ByteArray(frameBufferSize)
                 }
+                val sharedBuffer = sharedFrameBuffer!!
 
                 // Copy frame data to shared buffer
                 ptrRef.value.getByteBuffer(0, sizeRef.value.toLong()).get(sharedBuffer, 0,
@@ -317,14 +319,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         videoWidth * 4
                     )
 
-                    // Clone the bitmap for safe passing to consumer
-                    val frameBitmap = if (isHighDefinition) {
-                        // For HD, reuse bitmap and just pass reference
-                        bitmap
-                    } else {
-                        // For non-HD, we can afford to make a copy
-                        bitmap.makeClone()
-                    }
+                    // Use bitmap reference for all resolutions to reduce memory usage
+                    val frameBitmap = bitmap
 
                     // Get timestamp
                     val posRef = LongByReference()
@@ -337,24 +333,16 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     // Send frame to channel
                     frameChannel.trySend(FrameData(frameBitmap, frameTime))
 
-                    // For HD videos, we need to create a new bitmap for the next frame
-                    if (isHighDefinition) {
-                        frameBitmapRecycler = null
-                    }
+                    // Always keep bitmap for recycling to reduce allocations
+                    frameBitmapRecycler = null
 
                 } catch (e: Exception) {
-                    // Recover from bitmap errors
-                    if (isHighDefinition) {
-                        frameBitmapRecycler = bitmap
-                    }
+                    // Recover from bitmap errors by recycling the bitmap
+                    frameBitmapRecycler = bitmap
                 }
 
-                // Adaptive delay based on resolution
-                if (isHighDefinition) {
-                    delay(16)
-                } else {
-                    yield()
-                }
+                // Unified delay strategy to reduce CPU usage and indirectly help memory pressure
+                delay(8)
 
             } catch (e: CancellationException) {
                 break
@@ -381,17 +369,20 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
             try {
                 val frameData = frameChannel.tryReceive().getOrNull() ?: run {
-                    delay(16)
+                    // Consistent delay when no frame is available
+                    delay(if (isHighDefinition) 20 else 16)
                     return@run null
                 } ?: continue
 
                 // Update the current frame with proper locking
                 bitmapLock.write {
-                    // Release previous frame
+                    // Release previous frame and recycle it if possible
                     _currentFrame?.let { oldBitmap ->
-                        if (!isHighDefinition && frameBitmapRecycler == null) {
+                        if (frameBitmapRecycler == null) {
+                            // Recycle bitmap to reduce allocations
                             frameBitmapRecycler = oldBitmap
                         } else {
+                            // If we already have a recycled bitmap, close this one
                             oldBitmap.close()
                         }
                     }
@@ -405,8 +396,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                 isLoading = false
 
-                // Adaptive rendering delay based on resolution
-                delay(16)
+                // Consistent with producer delay strategy to balance performance and resource usage
+                delay(8)
 
             } catch (e: CancellationException) {
                 break
