@@ -142,7 +142,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     // Vide le channel en recyclant les ressources dans les pools
-    private suspend fun clearFrameChannel() {
+    private fun clearFrameChannel() {
         try {
             // Vider d'abord le channel existant
             while (true) {
