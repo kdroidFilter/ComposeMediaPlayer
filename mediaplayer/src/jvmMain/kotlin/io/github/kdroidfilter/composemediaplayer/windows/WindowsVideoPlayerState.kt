@@ -123,11 +123,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             setError("Player is not initialized.")
             return
         }
-        runBlocking {
-            videoJob?.cancelAndJoin()
-            videoJob = null
-            clearFrameChannel()
-        }
+        stop()
         try { player.CloseMedia(); runBlocking { delay(50) } }
         catch (e: Exception) { println("Error closing previous media: ${e.message}") }
         _currentFrame = null; _currentTime = 0.0; _progress = 0f
@@ -186,14 +182,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     // --- Fonctions d'attente réactive pour la synchronisation ---
 
     // Attend que l'état de lecture corresponde à la valeur attendue
-    private suspend fun awaitPlaybackState(expected: Boolean) {
+    private suspend inline fun awaitPlaybackState(expected: Boolean) {
         snapshotFlow { _isPlaying }
             .filter { it == expected }
             .first()
     }
 
     // Attend la fin du redimensionnement
-    private suspend fun awaitNotResizing() {
+    private suspend inline fun awaitNotResizing() {
         snapshotFlow { isResizing }
             .filter { !it }
             .first()
@@ -201,7 +197,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     // --- Production et consommation des frames ---
 
-    private suspend fun produceFrames() {
+    private suspend inline fun produceFrames() {
         val reqSize = videoWidth * videoHeight * 4
         while (scope.isActive) {
             if (player.IsEOF()) {
@@ -247,7 +243,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    private suspend fun consumeFrames() {
+    private suspend inline fun consumeFrames() {
         while (true) {
             scope.ensureActive()
             if (!_isPlaying) {
