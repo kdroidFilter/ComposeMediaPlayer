@@ -342,7 +342,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
 
                 // Unified delay strategy to reduce CPU usage and indirectly help memory pressure
-                delay(8)
+                delay(1)
 
             } catch (e: CancellationException) {
                 break
@@ -397,7 +397,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 isLoading = false
 
                 // Consistent with producer delay strategy to balance performance and resource usage
-                delay(8)
+                delay(1)
 
             } catch (e: CancellationException) {
                 break
