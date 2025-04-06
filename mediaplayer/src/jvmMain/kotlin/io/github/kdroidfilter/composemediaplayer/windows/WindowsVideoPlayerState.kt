@@ -4,7 +4,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
 import com.sun.jna.WString
-import com.sun.jna.ptr.*
+import com.sun.jna.ptr.FloatByReference
+import com.sun.jna.ptr.IntByReference
+import com.sun.jna.ptr.LongByReference
+import com.sun.jna.ptr.PointerByReference
 import io.github.kdroidfilter.composemediaplayer.*
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import kotlinx.coroutines.*
@@ -30,7 +33,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var _isPlaying by mutableStateOf(false)
     override val isPlaying get() = _isPlaying
 
-    // Volume management: Changing this property triggers the native SetAudioVolume call
+    // Gestion du volume : toute modification déclenche l'appel natif SetAudioVolume
     private var _volume by mutableStateOf(1f)
     override var volume: Float
         get() = _volume
@@ -38,7 +41,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             val newVolume = value.coerceIn(0f, 1f)
             if (_volume != newVolume) {
                 _volume = newVolume
-                // Update the volume in the player via the native function
                 scope.launch {
                     mediaOperationMutex.withLock {
                         val hr = player.SetAudioVolume(newVolume)
@@ -67,17 +69,22 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override var loop: Boolean
         get() = _loop
         set(value) { _loop = value }
-    override val leftLevel: Float = 0f
-    override val rightLevel: Float = 0f
+
+    // Mise à jour des niveaux audio via GetAudioLevels (mutable)
+    private var _leftLevel by mutableStateOf(0f)
+    override val leftLevel: Float get() = _leftLevel
+    private var _rightLevel by mutableStateOf(0f)
+    override val rightLevel: Float get() = _rightLevel
+
     private var _error: VideoPlayerError? = null
     override val error get() = _error
     override fun clearError() { _error = null; errorMessage = null }
 
-    // Managing current image
+    // Gestion de l'image actuelle
     private var _currentFrame: Bitmap? by mutableStateOf(null)
     private val bitmapLock = java.util.concurrent.locks.ReentrantReadWriteLock()
 
-    // Metadata and UI state
+    // Métadonnées et état UI
     override val metadata = VideoMetadata()
     override var subtitlesEnabled = false
     override var currentSubtitleTrack: SubtitleTrack? = null
@@ -88,31 +95,33 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val durationText: String get() = formatTime(_duration)
     private var errorMessage: String? by mutableStateOf(null)
 
-    // Video properties
+    // Propriétés vidéo
     var videoWidth by mutableStateOf(0)
     var videoHeight by mutableStateOf(0)
     private var frameBufferSize = 1
 
-    // Synchronization
+    // Synchronisation
     private val mediaOperationMutex = Mutex()
     private val isResizing = AtomicBoolean(false)
     private var videoJob: Job? = null
     private var resizeJob: Job? = null
+    // Job pour mettre à jour périodiquement les niveaux audio
+    private var audioLevelsJob: Job? = null
 
-    // Memory optimization for frame processing
+    // Optimisation mémoire pour le traitement des images
     private val frameQueueSize = 1
     private val frameChannel = Channel<FrameData>(
         capacity = frameQueueSize,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    // Data structure for frames
+    // Structure de données pour une frame
     private data class FrameData(
         val bitmap: Bitmap,
         val timestamp: Double
     )
 
-    // Singleton buffer to reduce allocations
+    // Buffer singleton pour limiter les allocations
     private var sharedFrameBuffer: ByteArray? = null
     private var frameBitmapRecycler: Bitmap? = null
 
@@ -136,6 +145,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _isPlaying = false
                     player.SetPlaybackState(false)
                     videoJob?.cancelAndJoin()
+                    audioLevelsJob?.cancel() // Annule le job de mise à jour audio
                     player.CloseMedia()
                     releaseAllResources()
                     player.ShutdownMediaFoundation()
@@ -153,6 +163,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private fun releaseAllResources() {
         videoJob?.cancel()
         resizeJob?.cancel()
+        audioLevelsJob?.cancel()
         runBlocking { clearFrameChannel() }
         bitmapLock.write {
             _currentFrame?.close()
@@ -175,7 +186,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 try {
                     isLoading = true
 
-                    // Stop playback and release existing resources
+                    // Arrêter la lecture et libérer les ressources existantes
                     val wasPlaying = _isPlaying
                     if (wasPlaying) {
                         player.SetPlaybackState(false)
@@ -200,12 +211,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     val hrOpen = player.OpenMedia(WString(uri))
                     if (hrOpen < 0) {
                         setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
+                        println("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                         return@withLock
                     }
 
                     _hasMedia = true
 
-                    // Retrieve video dimensions
+                    // Récupérer les dimensions vidéo
                     val wRef = IntByReference()
                     val hRef = IntByReference()
                     player.GetVideoSize(wRef, hRef)
@@ -217,13 +229,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         videoHeight = 720
                     }
 
-                    // Calculate the required buffer for frames
+                    // Calculer la taille du buffer pour les frames
                     frameBufferSize = videoWidth * videoHeight * 4
 
-                    // Allocate shared buffer
+                    // Allouer le buffer partagé
                     sharedFrameBuffer = ByteArray(frameBufferSize)
 
-                    // Retrieve media duration
+                    // Récupérer la durée du média
                     val durationRef = LongByReference()
                     val hrDuration = player.GetMediaDuration(durationRef)
                     if (hrDuration < 0) {
@@ -232,10 +244,18 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
                     _duration = durationRef.value / 10000000.0
 
-                    // Start video processing
+                    // Démarrer le traitement vidéo
                     videoJob = scope.launch {
                         launch { produceFrames() }
                         launch { consumeFrames() }
+                    }
+
+                    // Lancer un job pour mettre à jour périodiquement les niveaux audio
+                    audioLevelsJob = scope.launch {
+                        while (isActive && _hasMedia) {
+                            updateAudioLevels()
+                            delay(50)
+                        }
                     }
 
                     delay(100)
@@ -247,6 +267,19 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 } finally {
                     if (!_hasMedia) isLoading = false
                 }
+            }
+        }
+    }
+
+    private suspend fun updateAudioLevels() {
+        mediaOperationMutex.withLock {
+            // Créer des références pour les niveaux audio
+            val leftRef = FloatByReference()
+            val rightRef = FloatByReference()
+            val hr = player.GetAudioLevels(leftRef, rightRef)
+            if (hr >= 0) {
+                _leftLevel = leftRef.value
+                _rightLevel = rightRef.value
             }
         }
     }
@@ -431,17 +464,17 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             try {
                 isLoading = true
 
-                // Cancel video processing to avoid concurrency during seek
+                // Annuler le traitement vidéo pour éviter les conflits pendant le seek
                 videoJob?.cancelAndJoin()
 
-                // Empty the frame channel and reallocate the shared buffer
+                // Vider le channel de frames et réallouer le buffer partagé
                 clearFrameChannel()
                 sharedFrameBuffer = ByteArray(frameBufferSize)
 
-                // Calculate the target position
+                // Calculer la position cible
                 val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
 
-                // Perform seek with a second attempt in case of failure
+                // Effectuer le seek avec une seconde tentative en cas d'échec
                 var hr = player.SeekMedia(targetPos)
                 if (hr < 0) {
                     delay(50)
@@ -452,14 +485,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
                 }
 
-                // Update current position
+                // Mettre à jour la position courante
                 val posRef = LongByReference()
                 if (player.GetMediaPosition(posRef) >= 0) {
                     _currentTime = posRef.value / 10000000.0
                     _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                 }
 
-                // Restart the video processing job after seek
+                // Redémarrer le job de traitement vidéo après le seek
                 videoJob = scope.launch {
                     launch { produceFrames() }
                     launch { consumeFrames() }
@@ -496,7 +529,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     private fun clearFrameChannel() {
-        while (frameChannel.tryReceive().isSuccess) { /* empty the channel */ }
+        while (frameChannel.tryReceive().isSuccess) { /* vider le channel */ }
     }
 
     private fun createVideoImageInfo() =

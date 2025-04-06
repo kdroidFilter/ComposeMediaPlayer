@@ -45,6 +45,7 @@ internal interface MediaFoundationLib : StdCallLibrary {
     fun ShutdownMediaFoundation()
     fun SetAudioVolume(volume: Float): Int
     fun GetAudioVolume(volume: FloatByReference): Int
+    fun GetAudioLevels(pLeftLevel: FloatByReference, pRightLevel: FloatByReference): Int
 
 
 }
