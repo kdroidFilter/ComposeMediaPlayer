@@ -19,7 +19,6 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.read
 import kotlin.concurrent.write
-import kotlin.math.max
 import kotlin.math.min
 
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
@@ -57,11 +56,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val error get() = _error
     override fun clearError() { _error = null; errorMessage = null }
 
-    // Current frame management
+    // Gestion de l'image courante
     private var _currentFrame: Bitmap? by mutableStateOf(null)
     private val bitmapLock = java.util.concurrent.locks.ReentrantReadWriteLock()
 
-    // Metadata and UI state
+    // Métadonnées et état UI
     override val metadata = VideoMetadata()
     override var subtitlesEnabled = false
     override var currentSubtitleTrack: SubtitleTrack? = null
@@ -72,31 +71,31 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val durationText: String get() = formatTime(_duration)
     private var errorMessage: String? by mutableStateOf(null)
 
-    // Video properties
+    // Propriétés de la vidéo
     var videoWidth by mutableStateOf(0)
     var videoHeight by mutableStateOf(0)
     private var frameBufferSize = 0
 
-    // Synchronization
+    // Synchronisation
     private val mediaOperationMutex = Mutex()
     private val isResizing = AtomicBoolean(false)
     private var videoJob: Job? = null
     private var resizeJob: Job? = null
 
-    // Memory-optimized frame processing
+    // Optimisation mémoire pour le traitement des frames
     private val frameQueueSize = 1
     private val frameChannel = Channel<FrameData>(
         capacity = frameQueueSize,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    // Memory-efficient frame data structure
+    // Structure de données pour les frames
     private data class FrameData(
         val bitmap: Bitmap,
         val timestamp: Double
     )
 
-    // Singleton buffer for frame data to minimize allocations
+    // Buffer singleton pour réduire les allocations
     private var sharedFrameBuffer: ByteArray? = null
     private var frameBitmapRecycler: Bitmap? = null
 
@@ -104,9 +103,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         try {
             val hr = player.InitMediaFoundation()
             isInitialized = hr >= 0
-            if (!isInitialized) setError("Failed to initialize Media Foundation (hr=0x${hr.toString(16)})")
+            if (!isInitialized) setError("Échec de l'initialisation de Media Foundation (hr=0x${hr.toString(16)})")
         } catch (e: Exception) {
-            setError("Exception during initialization: ${e.message}")
+            setError("Exception lors de l'initialisation: ${e.message}")
         }
     }
 
@@ -125,7 +124,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     player.ShutdownMediaFoundation()
                 }
             } catch (e: Exception) {
-                println("Error during dispose: ${e.message}")
+                println("Erreur lors du dispose: ${e.message}")
             } finally {
                 isInitialized = false
                 _hasMedia = false
@@ -135,32 +134,22 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     private fun releaseAllResources() {
-        // Cancel ongoing jobs
         videoJob?.cancel()
         resizeJob?.cancel()
-
-        // Clear frame channel
         runBlocking { clearFrameChannel() }
-
-        // Release bitmap resources
         bitmapLock.write {
             _currentFrame?.close()
             _currentFrame = null
-
             frameBitmapRecycler?.close()
             frameBitmapRecycler = null
         }
-
-        // Release shared buffer
         sharedFrameBuffer = null
-
-        // Reset state
         frameBufferSize = 0
     }
 
     override fun openUri(uri: String) {
         if (!isInitialized) {
-            setError("Player is not initialized.")
+            setError("Le lecteur n'est pas initialisé.")
             return
         }
 
@@ -169,7 +158,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 try {
                     isLoading = true
 
-                    // Stop playback and clear existing resources
+                    // Arrêter la lecture et libérer les ressources existantes
                     val wasPlaying = _isPlaying
                     if (wasPlaying) {
                         player.SetPlaybackState(false)
@@ -181,32 +170,28 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     releaseAllResources()
                     player.CloseMedia()
 
-                    // Reset state
                     _currentTime = 0.0
                     _progress = 0f
                     _duration = 0.0
                     _hasMedia = false
 
-                    // Validate file exists
                     if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
-                        setError("File not found: $uri")
+                        setError("Fichier non trouvé: $uri")
                         return@withLock
                     }
 
-                    // Open the media
                     val hrOpen = player.OpenMedia(WString(uri))
                     if (hrOpen < 0) {
-                        setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
+                        setError("Échec de l'ouverture du média (hr=0x${hrOpen.toString(16)}): $uri")
                         return@withLock
                     }
 
                     _hasMedia = true
 
-                    // Get video dimensions
+                    // Récupérer les dimensions de la vidéo
                     val wRef = IntByReference()
                     val hRef = IntByReference()
                     player.GetVideoSize(wRef, hRef)
-
                     if (wRef.value > 0 && hRef.value > 0) {
                         videoWidth = wRef.value
                         videoHeight = hRef.value
@@ -215,33 +200,32 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         videoHeight = 720
                     }
 
-                    // Calculate buffer size needed for frames
+                    // Calcul du buffer nécessaire pour les frames
                     frameBufferSize = videoWidth * videoHeight * 4
 
-                    // Allocate shared buffer for frame processing
+                    // Allocation du buffer partagé
                     sharedFrameBuffer = ByteArray(frameBufferSize)
 
-                    // Get media duration
+                    // Récupérer la durée du média
                     val durationRef = LongByReference()
                     val hrDuration = player.GetMediaDuration(durationRef)
                     if (hrDuration < 0) {
-                        setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
+                        setError("Échec de la récupération de la durée (hr=0x${hrDuration.toString(16)})")
                         return@withLock
                     }
                     _duration = durationRef.value / 10000000.0
 
-                    // Start video processing jobs
+                    // Lancer le traitement vidéo
                     videoJob = scope.launch {
                         launch { produceFrames() }
                         launch { consumeFrames() }
                     }
 
                     delay(100)
-
                     play()
 
                 } catch (e: Exception) {
-                    setError("Error opening media: ${e.message}")
+                    setError("Erreur lors de l'ouverture du média: ${e.message}")
                     _hasMedia = false
                 } finally {
                     if (!_hasMedia) isLoading = false
@@ -260,7 +244,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         _progress = 0f
                         play()
                     } catch (e: Exception) {
-                        setError("Error during SeekMedia for looping: ${e.message}")
+                        setError("Erreur lors du SeekMedia pour la boucle: ${e.message}")
                     }
                 } else {
                     pause()
@@ -279,7 +263,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             }
 
             try {
-                // Memory-efficient frame reading using shared buffer
                 val ptrRef = PointerByReference()
                 val sizeRef = IntByReference()
                 val readResult = player.ReadVideoFrame(ptrRef, sizeRef)
@@ -289,18 +272,16 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     continue
                 }
 
-                // Ensure shared buffer is available to avoid allocations
                 if (sharedFrameBuffer == null || sharedFrameBuffer!!.size < frameBufferSize) {
                     sharedFrameBuffer = ByteArray(frameBufferSize)
                 }
                 val sharedBuffer = sharedFrameBuffer!!
 
-                // Copy frame data to shared buffer
-                ptrRef.value.getByteBuffer(0, sizeRef.value.toLong()).get(sharedBuffer, 0, min(sizeRef.value, frameBufferSize))
+                ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
+                    .get(sharedBuffer, 0, min(sizeRef.value, frameBufferSize))
 
                 player.UnlockVideoFrame()
 
-                // Create or reuse bitmap
                 var bitmap = frameBitmapRecycler
                 if (bitmap == null) {
                     bitmap = Bitmap().apply {
@@ -309,46 +290,34 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     frameBitmapRecycler = bitmap
                 }
 
-                // Safely install pixels into the bitmap
                 try {
                     bitmap.installPixels(
                         createVideoImageInfo(),
                         sharedBuffer,
                         videoWidth * 4
                     )
-
-                    // Use bitmap reference for all resolutions to reduce memory usage
                     val frameBitmap = bitmap
-
-                    // Get timestamp
                     val posRef = LongByReference()
                     val frameTime = if (player.GetMediaPosition(posRef) >= 0) {
                         posRef.value / 10000000.0
                     } else {
                         0.0
                     }
-
-                    // Send frame to channel
                     frameChannel.trySend(FrameData(frameBitmap, frameTime))
-
-                    // Always keep bitmap for recycling to reduce allocations
                     frameBitmapRecycler = null
-
                 } catch (e: Exception) {
-                    // Recover from bitmap errors by recycling the bitmap
                     frameBitmapRecycler = bitmap
                 }
 
-                // Unified delay strategy to reduce CPU usage and indirectly help memory pressure
                 delay(1)
 
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
                 if (scope.isActive && _hasMedia) {
-                    setError("Error reading frame: ${e.message}")
+                    setError("Erreur lors de la lecture d'une frame: ${e.message}")
                 }
-                delay(100) // Recovery delay
+                delay(100)
             }
         }
     }
@@ -367,41 +336,32 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
             try {
                 val frameData = frameChannel.tryReceive().getOrNull() ?: run {
-                    // Consistent delay when no frame is available
                     delay(16)
                     return@run null
                 } ?: continue
 
-                // Update the current frame with proper locking
                 bitmapLock.write {
-                    // Release previous frame and recycle it if possible
                     _currentFrame?.let { oldBitmap ->
                         if (frameBitmapRecycler == null) {
-                            // Recycle bitmap to reduce allocations
                             frameBitmapRecycler = oldBitmap
                         } else {
-                            // If we already have a recycled bitmap, close this one
                             oldBitmap.close()
                         }
                     }
-
-                    // Set new frame
                     _currentFrame = frameData.bitmap
                 }
 
-                // Update playback state
                 _currentTime = frameData.timestamp
                 _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                 isLoading = false
 
-                // Consistent with producer delay strategy to balance performance and resource usage
                 delay(1)
 
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
                 if (scope.isActive && _hasMedia) {
-                    setError("Error processing frame: ${e.message}")
+                    setError("Erreur lors du traitement d'une frame: ${e.message}")
                 }
                 delay(100)
             }
@@ -414,7 +374,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             precondition = isInitialized && _hasMedia
         ) {
             if (!_isPlaying) {
-                setPlaybackState(true, "Error starting playback")
+                setPlaybackState(true, "Erreur lors du démarrage de la lecture")
             }
         }
     }
@@ -424,7 +384,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             operation = "pause",
             precondition = _isPlaying
         ) {
-            setPlaybackState(false, "Error pausing")
+            setPlaybackState(false, "Erreur lors de la pause")
         }
     }
 
@@ -432,72 +392,69 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         executeMediaOperation(
             operation = "stop"
         ) {
-            // Stop playback
-            setPlaybackState(false, "Error stopping playback")
+            setPlaybackState(false, "Erreur lors de l'arrêt")
             delay(50)
-
-            // Cancel video processing
             videoJob?.cancelAndJoin()
-
-            // Release resources
             releaseAllResources()
-
-            // Reset state
             _hasMedia = false
             _progress = 0f
             _currentTime = 0.0
             isLoading = false
             errorMessage = null
             _error = null
-
-            // Close media
             player.CloseMedia()
         }
     }
 
+    // MÉTHODE MODIFIÉE POUR LE SEEK :
+    // Pour éviter des conflits en 4K, on annule temporairement le job vidéo, on réinitialise le buffer et
+    // on redémarre le traitement après la seek.
     override fun seekTo(value: Float) {
         executeMediaOperation(
             operation = "seek",
             precondition = _hasMedia
         ) {
             try {
-                // Pause during seek
                 isLoading = true
 
-                // Clear frame channel before seeking
+                // Annuler le traitement vidéo pour éviter toute concurrence pendant la seek
+                videoJob?.cancelAndJoin()
+
+                // Vider le canal des frames et réallouer le buffer partagé
                 clearFrameChannel()
+                sharedFrameBuffer = ByteArray(frameBufferSize)
 
-                // Signal to frame processors that we're seeking
-                isResizing.set(true)
-
-                // Perform seek
+                // Calculer la position cible
                 val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
-                var hr = player.SeekMedia(targetPos)
 
+                // Effectuer la seek avec une seconde tentative en cas d'échec
+                var hr = player.SeekMedia(targetPos)
                 if (hr < 0) {
-                    delay(50) // Wait briefly and try again
+                    delay(50)
                     hr = player.SeekMedia(targetPos)
                     if (hr < 0) {
-                        setError("Seek failed (hr=0x${hr.toString(16)})")
+                        setError("La seek a échoué (hr=0x${hr.toString(16)})")
                         return@executeMediaOperation
                     }
                 }
 
-                // Update position
+                // Mettre à jour la position actuelle
                 val posRef = LongByReference()
                 if (player.GetMediaPosition(posRef) >= 0) {
                     _currentTime = posRef.value / 10000000.0
                     _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                 }
 
-                // Give the system time to stabilize after seeking
-                delay(16)
+                // Redémarrer le job de traitement vidéo après la seek
+                videoJob = scope.launch {
+                    launch { produceFrames() }
+                    launch { consumeFrames() }
+                }
 
+                delay(8)
             } catch (e: Exception) {
-                setError("Error seeking: ${e.message}")
+                setError("Erreur lors du seek: ${e.message}")
             } finally {
-                // End resize state
-                isResizing.set(false)
                 isLoading = false
             }
         }
@@ -507,13 +464,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         isResizing.set(true)
         scope.launch {
             try {
-                // Clear frame channel during resize
                 clearFrameChannel()
             } finally {
-                // Cancel previous resize job
                 resizeJob?.cancel()
-
-                // Schedule end of resize state
                 resizeJob = scope.launch {
                     delay(200)
                     isResizing.set(false)
@@ -528,16 +481,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         isLoading = false
     }
 
-    // Helper method to clear frame channel
     private fun clearFrameChannel() {
-        while (frameChannel.tryReceive().isSuccess) { /* empty the channel */ }
+        while (frameChannel.tryReceive().isSuccess) { /* vider le canal */ }
     }
 
-    // Helper method to create ImageInfo with standard parameters
-    private fun createVideoImageInfo() = 
+    private fun createVideoImageInfo() =
         ImageInfo(videoWidth, videoHeight, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
 
-    // Helper method to set playback state with error handling
     private fun setPlaybackState(playing: Boolean, errorMessage: String): Boolean {
         val res = player.SetPlaybackState(playing)
         if (res < 0) {
@@ -548,7 +498,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         return true
     }
 
-    // Helper method to wait for playback state change
     private suspend fun waitForPlaybackState() {
         if (!_isPlaying) {
             try {
@@ -559,7 +508,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    // Helper method to wait if resizing
     private suspend fun waitIfResizing(): Boolean {
         if (isResizing.get()) {
             try {
@@ -572,7 +520,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         return false
     }
 
-    // Helper method to execute media operations with proper locking and error handling
     private fun executeMediaOperation(
         operation: String,
         precondition: Boolean = true,
@@ -585,7 +532,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 try {
                     block()
                 } catch (e: Exception) {
-                    setError("Error during $operation: ${e.message}")
+                    setError("Erreur lors de $operation: ${e.message}")
                 }
             }
         }
