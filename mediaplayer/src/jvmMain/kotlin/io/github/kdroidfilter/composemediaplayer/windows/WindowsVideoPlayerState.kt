@@ -12,6 +12,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.skia.*
 import java.io.File
@@ -76,13 +77,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var frameBufferSize = 0
 
     // Synchronization
-    private val mediaOperationMutex = kotlinx.coroutines.sync.Mutex()
+    private val mediaOperationMutex = Mutex()
     private val isResizing = AtomicBoolean(false)
     private var videoJob: Job? = null
     private var resizeJob: Job? = null
 
     // Memory-optimized frame processing
-    private val frameQueueSize = 1 // Minimal queue size to reduce memory usage
+    private val frameQueueSize = 1
     private val frameChannel = Channel<FrameData>(
         capacity = frameQueueSize,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -458,34 +459,23 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             operation = "seek",
             precondition = _hasMedia
         ) {
-            val wasPlaying = _isPlaying
             try {
                 // Pause during seek
-                if (_isPlaying) {
-                    setPlaybackState(false, "Error pausing for seek")
-                    delay(50)
-                }
-
                 isLoading = true
 
-                // Clear frame channel
+                // Clear frame channel before seeking
                 clearFrameChannel()
 
-                // Ensure frame is unlocked
-                try {
-                    player.UnlockVideoFrame()
-                } catch (e: Exception) {
-                    // Ignore errors if frame wasn't locked
-                }
+                // Signal to frame processors that we're seeking
+                isResizing.set(true)
 
                 // Perform seek
                 val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
                 var hr = player.SeekMedia(targetPos)
 
                 if (hr < 0) {
-                    delay(50)
+                    delay(50) // Wait briefly and try again
                     hr = player.SeekMedia(targetPos)
-
                     if (hr < 0) {
                         setError("Seek failed (hr=0x${hr.toString(16)})")
                         return@executeMediaOperation
@@ -499,25 +489,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                 }
 
-                delay(50)
+                // Give the system time to stabilize after seeking
+                delay(100)
 
-                // Resume playback if needed
-                if (wasPlaying) {
-                    setPlaybackState(true, "Failed to resume playback after seek")
-                }
             } catch (e: Exception) {
-                throw e  // Let executeMediaOperation handle the error
+                setError("Error seeking: ${e.message}")
             } finally {
-                // Try to resume playback on error if needed
-                if (wasPlaying && !_isPlaying) {
-                    try {
-                        setPlaybackState(true, "Failed to resume playback after seek error")
-                    } catch (e: Exception) {
-                        // Ignore additional errors
-                    }
-                }
-
-                delay(50)
+                // End resize state
+                isResizing.set(false)
                 isLoading = false
             }
         }
