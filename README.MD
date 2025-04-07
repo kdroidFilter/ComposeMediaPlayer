@@ -5,7 +5,7 @@
 **Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations. The library leverages:
 
 - **GStreamer** for Linux
-- **MFPlayer** for Windows
+- **Media Foundation** for Windows
 - **AVPlayer** for macOS and iOS
 - **Media3** for Android
 - **HTML5 Player** for WASMJS
@@ -24,17 +24,17 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 - **Error handling** Simple error handling for network or playback issues.
 
 ## ✨ Supported Video Formats
-| Format | Windows | Linux  | macOS & iOS                                                       | Android | WasmJS |
-|--------|-----------------|-------------------|-----------------------------------------------------------------------------|-----------------|-------------------|
-| **Player** | [MFPlay](https://learn.microsoft.com/en-us/windows/win32/medfound/using-mfplay-for-audio-video-playback) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | [HTML5 Video](https://www.w3schools.com/html/html5_video.asp) |
-| MP4 (H.264) | ✅ | ✅ | ✅                                                                           | ✅ | ✅ |
-| AVI | ✅ | ✅ | ❌                                                                           | ❌ | ❌ |
-| MKV | ❌ | ✅ | ❌                                                                           | ✅ | ❌ |
-| MOV | ✅ | ✅ | ✅                                                                           | ❌ | ✅ |
-| FLV | ❌ | ✅ | ❌                                                                           | ❌ | ❌ |
-| WEBM | ❌ | ✅ | ❌                                                                           | ✅ | ✅ |
-| WMV | ✅ | ✅ | ❌                                                                           | ❌ | ❌ |
-| 3GP | ✅ | ✅ | ✅                                                                           | ✅ | ❌ |
+| Format | Windows                                                                                                           | Linux  | macOS & iOS                                                       | Android | WasmJS |
+|--------|-------------------------------------------------------------------------------------------------------------------|-------------------|-----------------------------------------------------------------------------|-----------------|-------------------|
+| **Player** | [MediaFoundation](https://learn.microsoft.com/en-us/windows/win32/medfound/microsoft-media-foundation-sdk) | [GStreamer](https://gstreamer.freedesktop.org/) | [AVPlayer](https://developer.apple.com/documentation/avfoundation/avplayer) | [Media 3](https://developer.android.com/media/media3) | [HTML5 Video](https://www.w3schools.com/html/html5_video.asp) |
+| MP4 (H.264) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ✅ |
+| AVI | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
+| MKV | ❌                                                                                                                 | ✅ | ❌                                                                           | ✅ | ❌ |
+| MOV | ✅                                                                                                                 | ✅ | ✅                                                                           | ❌ | ✅ |
+| FLV | ❌                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
+| WEBM | ❌                                                                                                                 | ✅ | ❌                                                                           | ✅ | ✅ |
+| WMV | ✅                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
+| 3GP | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ❌ |
 
 
 ## 🔧 Installation
@@ -185,8 +185,6 @@ if (playerState.isLoading) {
     CircularProgressIndicator()
 }
 ````
-> [!IMPORTANT]
-> This feature is actually on Beta, so it may not work as expected. It's not actually work on Windows and MacOS.
 
 ### Using Subtitles
 
@@ -279,7 +277,6 @@ Compose Media Player is licensed under the MIT License. See [LICENSE](LICENSE) f
 
 ## 📊 Roadmap
 
-- **Buffering Detection**: Implement functionality to detect and handle buffering events during playback via an `isLoading` state.
 - **Audio Player**: Introduce a standalone audio player for handling audio-only content.
 - **Player with Separate Audio and Video Streams**: Add functionality to support different audio and video streams for advanced playback scenarios.
 - **Metadata Support**: Add support for extracting the following metadata:
