@@ -14,7 +14,7 @@ import com.sun.jna.win32.StdCallLibrary
 internal interface MediaFoundationLib : StdCallLibrary {
     companion object {
         val INSTANCE: MediaFoundationLib by lazy {
-            Native.load("OffscreenPlayer", MediaFoundationLib::class.java)
+            Native.load("NativeVideoPlayer", MediaFoundationLib::class.java)
         }
     }
 
