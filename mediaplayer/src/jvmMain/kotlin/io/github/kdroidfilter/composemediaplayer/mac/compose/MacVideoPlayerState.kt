@@ -298,15 +298,41 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         val ptr = mainMutex.withLock { playerPtr } ?: return false
 
         return try {
+            // Open video asynchronously
             SharedVideoPlayer.INSTANCE.openUri(ptr, uri)
-            // Wait a short time for initialization
-            delay(100)
+
+            // Instead of directly calling `updateMetadata()`,
+            // we poll until valid dimensions are available
+            pollDimensionsUntilReady(ptr)
+
+            // Once dimensions are retrieved, call updateMetadata()
+            updateMetadata()
+
             true
         } catch (e: Exception) {
-            if (e is CancellationException) throw e
             macLogger.e { "Failed to open URI: ${e.message}" }
             false
         }
+    }
+
+    /**
+     * Loops several times (every 250 ms) until width/height
+     * are no longer zero. If dimensions are still zero after
+     * a specified number of attempts, stop waiting.
+     */
+    private suspend fun pollDimensionsUntilReady(ptr: Pointer, maxAttempts: Int = 20) {
+        for (attempt in 1..maxAttempts) {
+            val width = SharedVideoPlayer.INSTANCE.getFrameWidth(ptr)
+            val height = SharedVideoPlayer.INSTANCE.getFrameHeight(ptr)
+
+            if (width > 0 && height > 0) {
+                macLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
+                return
+            }
+            macLogger.d { "Dimensions not ready yet (attempt $attempt/$maxAttempts), waiting..." }
+            delay(250)
+        }
+        macLogger.e { "Unable to retrieve valid dimensions after $maxAttempts attempts" }
     }
 
     /** Updates the metadata from the native player. */
@@ -321,8 +347,13 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             val frameRate = SharedVideoPlayer.INSTANCE.getVideoFrameRate(ptr)
 
             // Calculate aspect ratio
-            val newAspectRatio = if (width > 0 && height > 0) width.toFloat() / height.toFloat()
-            else 16f / 9f
+            val newAspectRatio = if (width > 0 && height > 0) {
+                width.toFloat() / height.toFloat()
+            } else {
+                // Au lieu de forcer 16f/9f, ne changez pas l’aspect si la vidéo n’est pas encore prête.
+                // Par exemple, on peut conserver l’ancien aspect ratio :
+                _aspectRatio.value
+            }
 
             withContext(Dispatchers.Main) {
                 // Update metadata
@@ -331,7 +362,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                 metadata.height = height
                 metadata.frameRate = frameRate
 
-                // Update aspect ratio
+                // Met à jour l’aspect ratio seulement si width/height valides
                 _aspectRatio.value = newAspectRatio
             }
 
