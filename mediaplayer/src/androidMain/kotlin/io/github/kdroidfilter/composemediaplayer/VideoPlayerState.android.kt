@@ -162,6 +162,10 @@ actual open class VideoPlayerState {
     actual val leftLevel: Float get() = _leftLevel
     actual val rightLevel: Float get() = _rightLevel
 
+    // Aspect ratio
+    private var _aspectRatio by mutableStateOf(16f / 9f)
+    val aspectRatio: Float get() = _aspectRatio
+
     // Time tracking
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
@@ -232,6 +236,16 @@ actual open class VideoPlayerState {
                 startPositionUpdates()
             } else {
                 stopPositionUpdates()
+            }
+        }
+
+        override fun onVideoSizeChanged(videoSize: VideoSize) {
+            // Update aspect ratio when video size changes
+            if (videoSize.width > 0 && videoSize.height > 0) {
+                _aspectRatio = videoSize.width.toFloat() / videoSize.height.toFloat()
+                // Update metadata
+                _metadata.width = videoSize.width
+                _metadata.height = videoSize.height
             }
         }
 
@@ -386,6 +400,7 @@ actual open class VideoPlayerState {
         _isPlaying = false
         _isLoading = false
         _error = null
+        _aspectRatio = 16f / 9f  // Reset aspect ratio to default
         if (!keepMedia) {
             _hasMedia = false
         }
