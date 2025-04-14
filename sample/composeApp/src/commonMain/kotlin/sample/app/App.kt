@@ -30,7 +30,7 @@ import io.github.vinceglb.filekit.name
 
 // Define screens for navigation
 enum class Screen {
-    SinglePlayer, MultiPlayer
+    SinglePlayer, MultiPlayer, VideoAttachmentPlayer
 }
 
 @Composable
@@ -54,6 +54,12 @@ fun App() {
                         selected = currentScreen == Screen.MultiPlayer,
                         onClick = { currentScreen = Screen.MultiPlayer }
                     )
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.Subtitles, contentDescription = "Video Attachment") },
+                        label = { Text("Video Attachment") },
+                        selected = currentScreen == Screen.VideoAttachmentPlayer,
+                        onClick = { currentScreen = Screen.VideoAttachmentPlayer }
+                    )
                 }
             }
         ) { paddingValues ->
@@ -66,6 +72,7 @@ fun App() {
                 when (currentScreen) {
                     Screen.SinglePlayer -> SinglePlayerScreen()
                     Screen.MultiPlayer -> MultiPlayerScreen()
+                    Screen.VideoAttachmentPlayer -> VideoAttachmentPlayerScreen()
                 }
             }
         }
