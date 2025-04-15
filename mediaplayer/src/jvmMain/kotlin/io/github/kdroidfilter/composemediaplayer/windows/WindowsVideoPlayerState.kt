@@ -383,8 +383,17 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
                 val sharedBuffer = sharedFrameBuffer!!
 
-                ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
-                    .get(sharedBuffer, 0, min(sizeRef.value, frameBufferSize))
+                try {
+                    val buffer = ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
+                    val copySize = min(sizeRef.value, frameBufferSize)
+                    if (buffer != null && copySize > 0) {
+                        buffer.get(sharedBuffer, 0, copySize)
+                    }
+                } catch (e: Exception) {
+                    setError("Error copying frame data: ${e.message}")
+                    delay(100)
+                    continue
+                }
 
                 player.UnlockVideoFrame(instance)
 
@@ -476,17 +485,39 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     override fun play() {
         if (!isInitialized || videoPlayerInstance == null) {
-            lastUri?.let { uri ->
-                openUri(uri)
+            // If not initialized or no instance, try to initialize with lastUri if available
+            if (lastUri != null && lastUri!!.isNotEmpty()) {
+                scope.launch {
+                    openUri(lastUri!!)
+                    // After opening, try to play again after a short delay
+                    delay(100)
+                    if (isInitialized && videoPlayerInstance != null) {
+                        executeMediaOperation(
+                            operation = "play after init",
+                            precondition = true
+                        ) {
+                            setPlaybackState(true, "Error while starting playback after initialization")
+                        }
+                    }
+                }
             }
             return
         }
+
         executeMediaOperation(
             operation = "play",
             precondition = true
         ) {
-            if (!_isPlaying) {
-                setPlaybackState(true, "Error while starting playback")
+            // Always try to set playback state to true, regardless of _isPlaying
+            // This ensures we attempt to start playback even if state is inconsistent
+            setPlaybackState(true, "Error while starting playback")
+
+            // If we have media but no video job running, restart it
+            if (_hasMedia && (videoJob == null || videoJob?.isActive == false)) {
+                videoJob = scope.launch {
+                    launch { produceFrames() }
+                    launch { consumeFrames() }
+                }
             }
         }
     }
@@ -599,13 +630,24 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private fun setPlaybackState(playing: Boolean, errorMessage: String): Boolean {
         val instance = videoPlayerInstance
         if (instance != null) {
-            val res = player.SetPlaybackState(instance, playing)
-            if (res < 0) {
-                setError("$errorMessage (hr=0x${res.toString(16)})")
-                return false
+            // Try up to 3 times without delay
+            for (attempt in 1..3) {
+                val res = player.SetPlaybackState(instance, playing)
+                if (res >= 0) {
+                    _isPlaying = playing
+                    // Clear any previous error if successful
+                    if (_error != null) {
+                        clearError()
+                    }
+                    return true
+                }
+
+                // Only set error on the last failed attempt
+                if (attempt == 3) {
+                    setError("$errorMessage (hr=0x${res.toString(16)}) after $attempt attempts")
+                }
             }
-            _isPlaying = playing
-            return true
+            return false
         }
         setError("$errorMessage: No player instance")
         return false
@@ -614,9 +656,27 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private suspend fun waitForPlaybackState() {
         if (!_isPlaying) {
             try {
-                snapshotFlow { _isPlaying }.filter { it }.first()
+                // Add a timeout of 5 seconds to prevent hanging indefinitely
+                withTimeoutOrNull(5000) {
+                    snapshotFlow { _isPlaying }.filter { it }.first()
+                } ?: run {
+                    // If timeout occurs, try to restart playback
+                    if (_hasMedia && videoPlayerInstance != null) {
+                        setPlaybackState(true, "Error while restarting playback after timeout")
+                        // Give a short time for playback to start
+                        delay(100)
+                        // If still not playing, yield to allow other coroutines to run
+                        if (!_isPlaying) {
+                            yield()
+                        }
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: Exception) {
+                // Log the error but continue execution
+                println("Error in waitForPlaybackState: ${e.message}")
+                yield()
             }
         }
     }
