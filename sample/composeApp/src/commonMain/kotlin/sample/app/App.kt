@@ -11,11 +11,12 @@ import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import io.github.kdroidfilter.platformtools.darkmodedetector.isSystemInDarkMode
 import sample.app.singleplayer.SinglePlayerScreen
 
 @Composable
 fun App() {
-    MaterialTheme {
+    MaterialTheme(colorScheme = if(isSystemInDarkMode()) darkColorScheme() else lightColorScheme()) {
         // Navigation state
         var currentScreen by remember { mutableStateOf(Screen.SinglePlayer) }
 
