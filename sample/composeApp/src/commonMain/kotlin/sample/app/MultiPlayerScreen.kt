@@ -35,6 +35,7 @@ fun MultiPlayerScreen() {
         val state = rememberVideoPlayerState()
         LaunchedEffect(url) {
             state.openUri(url)
+            state.loop = true
         }
         state
     }
@@ -168,7 +169,7 @@ fun MultiVideoItem(playerState: VideoPlayerState, videoUrl: String) {
                     }
                     Slider(
                         value = playerState.volume,
-                        onValueChange = { newVolume -> 
+                        onValueChange = { newVolume ->
                             playerState.volume = newVolume
                         },
                         valueRange = 0f..1f,
