@@ -158,8 +158,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         scope.launch {
             try {
                 // Media Foundation is already initialized in companion object
-
-                // Create a new VideoPlayerInstance using the helper method
                 val instance = MediaFoundationLib.createInstance()
                 if (instance == null) {
                     setError("Failed to create video player instance")
@@ -191,8 +189,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         videoPlayerInstance = null
                     }
                     releaseAllResources()
-                    // Don't shut down Media Foundation as other instances might be using it
-                    // player.ShutdownMediaFoundation()
                 }
             } catch (e: Exception) {
                 println("Error during dispose: ${e.message}")
@@ -232,7 +228,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 try {
                     isLoading = true
 
-                    // Stop playback and release existing resources
+                    // Arrêter la lecture et libérer les ressources existantes
                     val wasPlaying = _isPlaying
                     val instance = videoPlayerInstance
                     if (instance == null) {
@@ -255,54 +251,57 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _duration = 0.0
                     _hasMedia = false
 
+                    // Vérifier si le fichier ou l'URL est valide
                     if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
                         setError("File not found: $uri")
                         return@withLock
                     }
 
+                    // Ouvrir le média
                     val hrOpen = player.OpenMedia(instance, WString(uri))
                     if (hrOpen < 0) {
                         setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
-                        println("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                         return@withLock
                     }
 
-                    _hasMedia = true
-
-                    // Retrieve video dimensions
+                    // Récupérer les dimensions de la vidéo
                     val wRef = IntByReference()
                     val hRef = IntByReference()
                     player.GetVideoSize(instance, wRef, hRef)
-                    if (wRef.value > 0 && hRef.value > 0) {
-                        videoWidth = wRef.value
-                        videoHeight = hRef.value
-                    } else {
-                        videoWidth = 1280
-                        videoHeight = 720
+                    if (wRef.value <= 0 || hRef.value <= 0) {
+                        setError("Failed to retrieve video size")
+                        player.CloseMedia(instance)
+                        return@withLock
                     }
+                    videoWidth = wRef.value
+                    videoHeight = hRef.value
 
-                    // Calculate the buffer size for frames
+                    // Calculer la taille du buffer pour les frames
                     frameBufferSize = videoWidth * videoHeight * 4
 
-                    // Allocate shared buffer
+                    // Allouer le buffer partagé
                     sharedFrameBuffer = ByteArray(frameBufferSize)
 
-                    // Retrieve media duration
+                    // Récupérer la durée du média
                     val durationRef = LongByReference()
                     val hrDuration = player.GetMediaDuration(instance, durationRef)
                     if (hrDuration < 0) {
                         setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
+                        player.CloseMedia(instance)
                         return@withLock
                     }
                     _duration = durationRef.value / 10000000.0
 
-                    // Start video processing
+                    // Définir _hasMedia à true uniquement si tout a réussi
+                    _hasMedia = true
+
+                    // Lancer le traitement vidéo
                     videoJob = scope.launch {
                         launch { produceFrames() }
                         launch { consumeFrames() }
                     }
 
-                    // Launch a job to periodically update audio levels
+                    // Lancer une tâche pour mettre à jour les niveaux audio
                     audioLevelsJob = scope.launch {
                         while (isActive && _hasMedia) {
                             updateAudioLevels()
@@ -485,11 +484,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     override fun play() {
         if (!isInitialized || videoPlayerInstance == null) {
-            // If not initialized or no instance, try to initialize with lastUri if available
             if (lastUri != null && lastUri!!.isNotEmpty()) {
                 scope.launch {
                     openUri(lastUri!!)
-                    // After opening, try to play again after a short delay
                     delay(100)
                     if (isInitialized && videoPlayerInstance != null) {
                         executeMediaOperation(
@@ -508,11 +505,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             operation = "play",
             precondition = true
         ) {
-            // Always try to set playback state to true, regardless of _isPlaying
-            // This ensures we attempt to start playback even if state is inconsistent
             setPlaybackState(true, "Error while starting playback")
-
-            // If we have media but no video job running, restart it
             if (_hasMedia && (videoJob == null || videoJob?.isActive == false)) {
                 videoJob = scope.launch {
                     launch { produceFrames() }
@@ -562,7 +555,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             if (instance != null) {
                 try {
                     isLoading = true
-
                     videoJob?.cancelAndJoin()
                     clearFrameChannel()
                     sharedFrameBuffer = ByteArray(frameBufferSize)
@@ -630,19 +622,15 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private fun setPlaybackState(playing: Boolean, errorMessage: String): Boolean {
         val instance = videoPlayerInstance
         if (instance != null) {
-            // Try up to 3 times without delay
             for (attempt in 1..3) {
                 val res = player.SetPlaybackState(instance, playing)
                 if (res >= 0) {
                     _isPlaying = playing
-                    // Clear any previous error if successful
                     if (_error != null) {
                         clearError()
                     }
                     return true
                 }
-
-                // Only set error on the last failed attempt
                 if (attempt == 3) {
                     setError("$errorMessage (hr=0x${res.toString(16)}) after $attempt attempts")
                 }
@@ -656,16 +644,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private suspend fun waitForPlaybackState() {
         if (!_isPlaying) {
             try {
-                // Add a timeout of 5 seconds to prevent hanging indefinitely
                 withTimeoutOrNull(5000) {
                     snapshotFlow { _isPlaying }.filter { it }.first()
                 } ?: run {
-                    // If timeout occurs, try to restart playback
                     if (_hasMedia && videoPlayerInstance != null) {
                         setPlaybackState(true, "Error while restarting playback after timeout")
-                        // Give a short time for playback to start
                         delay(100)
-                        // If still not playing, yield to allow other coroutines to run
                         if (!_isPlaying) {
                             yield()
                         }
@@ -674,7 +658,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // Log the error but continue execution
                 println("Error in waitForPlaybackState: ${e.message}")
                 yield()
             }
