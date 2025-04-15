@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 import org.jetbrains.skia.*
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
 import kotlin.math.min
@@ -29,25 +30,25 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         private var instanceCount = 0
         private var isMediaFoundationInitialized = false
         // Add a mutex for synchronizing CloseMedia calls
-        private val closeMediaMutex = java.util.concurrent.locks.ReentrantLock()
+        private val closeMediaMutex = ReentrantLock()
         // Add a mutex for synchronizing UnlockVideoFrame calls
-        private val unlockFrameMutex = java.util.concurrent.locks.ReentrantLock()
+        private val unlockFrameMutex = ReentrantLock()
         // Add a mutex for synchronizing ReadVideoFrame calls
-        private val readFrameMutex = java.util.concurrent.locks.ReentrantLock()
+        private val readFrameMutex = ReentrantLock()
         // Add a mutex for synchronizing GetMediaPosition calls
-        private val getPositionMutex = java.util.concurrent.locks.ReentrantLock()
+        private val getPositionMutex = ReentrantLock()
         // Add a mutex for synchronizing SeekMedia calls
-        private val seekMediaMutex = java.util.concurrent.locks.ReentrantLock()
+        private val seekMediaMutex = ReentrantLock()
         // Add a mutex for synchronizing IsEOF calls
-        private val isEofMutex = java.util.concurrent.locks.ReentrantLock()
+        private val isEofMutex = ReentrantLock()
         // Add a mutex for synchronizing GetAudioLevels calls
-        private val audioLevelsMutex = java.util.concurrent.locks.ReentrantLock()
+        private val audioLevelsMutex = ReentrantLock()
         // Add a mutex for synchronizing GetMediaDuration calls
-        private val durationMutex = java.util.concurrent.locks.ReentrantLock()
+        private val durationMutex = ReentrantLock()
         // Add a mutex for synchronizing GetVideoSize calls
-        private val videoSizeMutex = java.util.concurrent.locks.ReentrantLock()
+        private val videoSizeMutex = ReentrantLock()
         // Add a mutex for synchronizing OpenMedia calls
-        private val openMediaMutex = java.util.concurrent.locks.ReentrantLock()
+        private val openMediaMutex = ReentrantLock()
 
         @Synchronized
         private fun initializeMediaFoundation(): Boolean {
@@ -189,8 +190,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             } catch (e: Exception) {
                 println("Error during safeGetVideoSize: ${e.message}")
                 // Set default values if getting video size fails
-                wRef.setValue(1280)
-                hRef.setValue(720)
+                wRef.value = 1280
+                hRef.value = 720
             } finally {
                 videoSizeMutex.unlock()
             }
