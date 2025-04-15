@@ -28,6 +28,26 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     companion object {
         private var instanceCount = 0
         private var isMediaFoundationInitialized = false
+        // Add a mutex for synchronizing CloseMedia calls
+        private val closeMediaMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing UnlockVideoFrame calls
+        private val unlockFrameMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing ReadVideoFrame calls
+        private val readFrameMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing GetMediaPosition calls
+        private val getPositionMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing SeekMedia calls
+        private val seekMediaMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing IsEOF calls
+        private val isEofMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing GetAudioLevels calls
+        private val audioLevelsMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing GetMediaDuration calls
+        private val durationMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing GetVideoSize calls
+        private val videoSizeMutex = java.util.concurrent.locks.ReentrantLock()
+        // Add a mutex for synchronizing OpenMedia calls
+        private val openMediaMutex = java.util.concurrent.locks.ReentrantLock()
 
         @Synchronized
         private fun initializeMediaFoundation(): Boolean {
@@ -46,6 +66,147 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             if (isMediaFoundationInitialized && instanceCount == 0) {
                 MediaFoundationLib.INSTANCE.ShutdownMediaFoundation()
                 isMediaFoundationInitialized = false
+            }
+        }
+
+        // Add a synchronized method to safely close media
+        @Synchronized
+        internal fun safeCloseMedia(player: MediaFoundationLib) {
+            try {
+                closeMediaMutex.lock()
+                player.CloseMedia()
+            } catch (e: Exception) {
+                println("Error during safeCloseMedia: ${e.message}")
+            } finally {
+                closeMediaMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely unlock video frame
+        @Synchronized
+        internal fun safeUnlockVideoFrame(player: MediaFoundationLib) {
+            try {
+                unlockFrameMutex.lock()
+                player.UnlockVideoFrame()
+            } catch (e: Exception) {
+                println("Error during safeUnlockVideoFrame: ${e.message}")
+                // Continue even if unlocking fails
+            } finally {
+                unlockFrameMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely read video frame
+        @Synchronized
+        internal fun safeReadVideoFrame(player: MediaFoundationLib, ptrRef: PointerByReference, sizeRef: IntByReference): Int {
+            try {
+                readFrameMutex.lock()
+                return player.ReadVideoFrame(ptrRef, sizeRef)
+            } catch (e: Exception) {
+                println("Error during safeReadVideoFrame: ${e.message}")
+                return -1 // Return error code if reading fails
+            } finally {
+                readFrameMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely get media position
+        @Synchronized
+        internal fun safeGetMediaPosition(player: MediaFoundationLib, posRef: LongByReference): Int {
+            try {
+                getPositionMutex.lock()
+                return player.GetMediaPosition(posRef)
+            } catch (e: Exception) {
+                println("Error during safeGetMediaPosition: ${e.message}")
+                return -1 // Return error code if getting position fails
+            } finally {
+                getPositionMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely seek media
+        @Synchronized
+        internal fun safeSeekMedia(player: MediaFoundationLib, position: Long): Int {
+            try {
+                seekMediaMutex.lock()
+                return player.SeekMedia(position)
+            } catch (e: Exception) {
+                println("Error during safeSeekMedia: ${e.message}")
+                return -1 // Return error code if seeking fails
+            } finally {
+                seekMediaMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely check if end of file is reached
+        @Synchronized
+        internal fun safeIsEOF(player: MediaFoundationLib): Boolean {
+            try {
+                isEofMutex.lock()
+                return player.IsEOF()
+            } catch (e: Exception) {
+                println("Error during safeIsEOF: ${e.message}")
+                return false // Return false if checking EOF fails
+            } finally {
+                isEofMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely get audio levels
+        @Synchronized
+        internal fun safeGetAudioLevels(player: MediaFoundationLib, leftRef: FloatByReference, rightRef: FloatByReference): Int {
+            try {
+                audioLevelsMutex.lock()
+                return player.GetAudioLevels(leftRef, rightRef)
+            } catch (e: Exception) {
+                println("Error during safeGetAudioLevels: ${e.message}")
+                return -1 // Return error code if getting audio levels fails
+            } finally {
+                audioLevelsMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely get media duration
+        @Synchronized
+        internal fun safeGetMediaDuration(player: MediaFoundationLib, durationRef: LongByReference): Int {
+            try {
+                durationMutex.lock()
+                return player.GetMediaDuration(durationRef)
+            } catch (e: Exception) {
+                println("Error during safeGetMediaDuration: ${e.message}")
+                return -1 // Return error code if getting duration fails
+            } finally {
+                durationMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely get video size
+        @Synchronized
+        internal fun safeGetVideoSize(player: MediaFoundationLib, wRef: IntByReference, hRef: IntByReference) {
+            try {
+                videoSizeMutex.lock()
+                player.GetVideoSize(wRef, hRef)
+            } catch (e: Exception) {
+                println("Error during safeGetVideoSize: ${e.message}")
+                // Set default values if getting video size fails
+                wRef.setValue(1280)
+                hRef.setValue(720)
+            } finally {
+                videoSizeMutex.unlock()
+            }
+        }
+
+        // Add a synchronized method to safely open media
+        @Synchronized
+        internal fun safeOpenMedia(player: MediaFoundationLib, uri: WString): Int {
+            try {
+                openMediaMutex.lock()
+                return player.OpenMedia(uri)
+            } catch (e: Exception) {
+                println("Error during safeOpenMedia: ${e.message}")
+                return -1 // Return error code if opening media fails
+            } finally {
+                openMediaMutex.unlock()
             }
         }
     }
@@ -178,7 +339,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     videoJob?.cancelAndJoin()
                     audioLevelsJob?.cancel() // Cancel the audio update job
                     try {
-                        player.CloseMedia()
+                        safeCloseMedia(player)
                     } catch (e: Exception) {
                         println("Error during CloseMedia in dispose: ${e.message}")
                         // Continue with disposal even if closing fails
@@ -240,7 +401,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     videoJob?.cancelAndJoin()
                     releaseAllResources()
                     try {
-                        player.CloseMedia()
+                        safeCloseMedia(player)
                     } catch (e: Exception) {
                         println("Error during CloseMedia: ${e.message}")
                         // Continue with opening new media even if closing fails
@@ -256,7 +417,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         return@withLock
                     }
 
-                    val hrOpen = player.OpenMedia(WString(uri))
+                    val hrOpen = safeOpenMedia(player, WString(uri))
                     if (hrOpen < 0) {
                         setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                         println("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
@@ -268,7 +429,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     // Retrieve video dimensions
                     val wRef = IntByReference()
                     val hRef = IntByReference()
-                    player.GetVideoSize(wRef, hRef)
+                    safeGetVideoSize(player, wRef, hRef)
                     if (wRef.value > 0 && hRef.value > 0) {
                         videoWidth = wRef.value
                         videoHeight = hRef.value
@@ -285,7 +446,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                     // Retrieve media duration
                     val durationRef = LongByReference()
-                    val hrDuration = player.GetMediaDuration(durationRef)
+                    val hrDuration = safeGetMediaDuration(player, durationRef)
                     if (hrDuration < 0) {
                         setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
                         return@withLock
@@ -333,7 +494,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     // Create references for the audio levels
                     val leftRef = FloatByReference()
                     val rightRef = FloatByReference()
-                    val hr = player.GetAudioLevels(leftRef, rightRef)
+                    val hr = safeGetAudioLevels(player, leftRef, rightRef)
 
                     // Only update if the call was successful
                     if (hr >= 0) {
@@ -357,10 +518,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     private suspend fun produceFrames() {
         while (scope.isActive && _hasMedia) {
-            if (player.IsEOF()) {
+            if (safeIsEOF(player)) {
                 if (loop) {
                     try {
-                        player.SeekMedia(0)
+                        safeSeekMedia(player, 0)
                         _currentTime = 0.0
                         _progress = 0f
                         play()
@@ -386,7 +547,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             try {
                 val ptrRef = PointerByReference()
                 val sizeRef = IntByReference()
-                val readResult = player.ReadVideoFrame(ptrRef, sizeRef)
+                val readResult = safeReadVideoFrame(player, ptrRef, sizeRef)
 
                 if (readResult < 0 || ptrRef.value == null || sizeRef.value <= 0) {
                     yield()
@@ -401,7 +562,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
                     .get(sharedBuffer, 0, min(sizeRef.value, frameBufferSize))
 
-                player.UnlockVideoFrame()
+                // Call safeUnlockVideoFrame before processing the frame data
+                safeUnlockVideoFrame(player)
 
                 var bitmap = frameBitmapRecycler
                 if (bitmap == null) {
@@ -419,7 +581,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     )
                     val frameBitmap = bitmap
                     val posRef = LongByReference()
-                    val frameTime = if (player.GetMediaPosition(posRef) >= 0) {
+                    val frameTime = if (safeGetMediaPosition(player, posRef) >= 0) {
                         posRef.value / 10000000.0
                     } else {
                         0.0
@@ -533,7 +695,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             errorMessage = null
             _error = null
             try {
-                player.CloseMedia()
+                safeCloseMedia(player)
             } catch (e: Exception) {
                 println("Error during CloseMedia in stop: ${e.message}")
                 // Continue with stop operation even if closing fails
@@ -560,10 +722,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
 
                 // Perform seek with a second attempt in case of failure
-                var hr = player.SeekMedia(targetPos)
+                var hr = safeSeekMedia(player, targetPos)
                 if (hr < 0) {
                     delay(50)
-                    hr = player.SeekMedia(targetPos)
+                    hr = safeSeekMedia(player, targetPos)
                     if (hr < 0) {
                         setError("Seek failed (hr=0x${hr.toString(16)})")
                         return@executeMediaOperation
@@ -572,7 +734,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                 // Update current position
                 val posRef = LongByReference()
-                if (player.GetMediaPosition(posRef) >= 0) {
+                if (safeGetMediaPosition(player, posRef) >= 0) {
                     _currentTime = posRef.value / 10000000.0
                     _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                 }
