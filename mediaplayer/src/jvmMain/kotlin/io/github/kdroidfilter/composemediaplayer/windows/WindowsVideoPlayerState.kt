@@ -25,6 +25,31 @@ import kotlin.concurrent.write
 import kotlin.math.min
 
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
+    companion object {
+        private var instanceCount = 0
+        private var isMediaFoundationInitialized = false
+
+        @Synchronized
+        private fun initializeMediaFoundation(): Boolean {
+            if (!isMediaFoundationInitialized) {
+                val hr = MediaFoundationLib.INSTANCE.InitMediaFoundation()
+                isMediaFoundationInitialized = hr >= 0
+                if (!isMediaFoundationInitialized) {
+                    println("Media Foundation initialization failed (hr=0x${hr.toString(16)})")
+                }
+            }
+            return isMediaFoundationInitialized
+        }
+
+        @Synchronized
+        private fun shutdownMediaFoundation() {
+            if (isMediaFoundationInitialized && instanceCount == 0) {
+                MediaFoundationLib.INSTANCE.ShutdownMediaFoundation()
+                isMediaFoundationInitialized = false
+            }
+        }
+    }
+
     // Instance of the native Media Foundation player
     private val player = MediaFoundationLib.INSTANCE
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -131,9 +156,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     init {
         try {
-            val hr = player.InitMediaFoundation()
-            isInitialized = hr >= 0
-            if (!isInitialized) setError("Media Foundation initialization failed (hr=0x${hr.toString(16)})")
+            synchronized(WindowsVideoPlayerState::class.java) {
+                instanceCount++
+            }
+            isInitialized = initializeMediaFoundation()
+            if (!isInitialized) setError("Media Foundation initialization failed")
         } catch (e: Exception) {
             setError("Exception during initialization: ${e.message}")
         }
@@ -150,9 +177,18 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     player.SetPlaybackState(false)
                     videoJob?.cancelAndJoin()
                     audioLevelsJob?.cancel() // Cancel the audio update job
-                    player.CloseMedia()
+                    try {
+                        player.CloseMedia()
+                    } catch (e: Exception) {
+                        println("Error during CloseMedia in dispose: ${e.message}")
+                        // Continue with disposal even if closing fails
+                    }
                     releaseAllResources()
-                    player.ShutdownMediaFoundation()
+
+                    synchronized(WindowsVideoPlayerState::class.java) {
+                        instanceCount--
+                        shutdownMediaFoundation()
+                    }
                 }
             } catch (e: Exception) {
                 println("Error during dispose: ${e.message}")
@@ -203,7 +239,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                     videoJob?.cancelAndJoin()
                     releaseAllResources()
-                    player.CloseMedia()
+                    try {
+                        player.CloseMedia()
+                    } catch (e: Exception) {
+                        println("Error during CloseMedia: ${e.message}")
+                        // Continue with opening new media even if closing fails
+                    }
 
                     _currentTime = 0.0
                     _progress = 0f
@@ -278,15 +319,38 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Updates audio levels safely, with error handling to prevent crashes.
+     * This method is called periodically by the audioLevelsJob.
+     */
     private suspend fun updateAudioLevels() {
-        mediaOperationMutex.withLock {
-            // Create references for the audio levels
-            val leftRef = FloatByReference()
-            val rightRef = FloatByReference()
-            val hr = player.GetAudioLevels(leftRef, rightRef)
-            if (hr >= 0) {
-                _leftLevel = leftRef.value
-                _rightLevel = rightRef.value
+        // Skip if no media is loaded
+        if (!_hasMedia) return
+
+        try {
+            mediaOperationMutex.withLock {
+                try {
+                    // Create references for the audio levels
+                    val leftRef = FloatByReference()
+                    val rightRef = FloatByReference()
+                    val hr = player.GetAudioLevels(leftRef, rightRef)
+
+                    // Only update if the call was successful
+                    if (hr >= 0) {
+                        _leftLevel = leftRef.value
+                        _rightLevel = rightRef.value
+                    }
+                } catch (e: Exception) {
+                    // Log the error but don't crash
+                    println("Error during GetAudioLevels: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            // Handle any other exceptions that might occur
+            println("Unexpected error in updateAudioLevels: ${e.message}")
+            // Cancel the audio levels job to prevent further errors
+            scope.launch {
+                audioLevelsJob?.cancel()
             }
         }
     }
@@ -468,7 +532,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             isLoading = false
             errorMessage = null
             _error = null
-            player.CloseMedia()
+            try {
+                player.CloseMedia()
+            } catch (e: Exception) {
+                println("Error during CloseMedia in stop: ${e.message}")
+                // Continue with stop operation even if closing fails
+            }
         }
     }
 
