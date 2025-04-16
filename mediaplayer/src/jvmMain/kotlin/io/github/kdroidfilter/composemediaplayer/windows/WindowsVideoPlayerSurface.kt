@@ -10,9 +10,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 
+
 /**
- * Surface de rendu pour afficher la frame vidéo.
- * Utilise la même logique que MacVideoPlayerSurface et LinuxPlayerSurface.
+ * A composable function that provides a surface for rendering video frames
+ * within the Windows video player. It adjusts to size changes and ensures the video
+ * is displayed properly with respect to its aspect ratio.
+ *
+ * @param playerState The state of the Windows video player, used to manage video playback and rendering.
+ * @param modifier The modifier to be used to adjust the layout or styling of the composable.
  */
 @Composable
 fun WindowsVideoPlayerSurface(

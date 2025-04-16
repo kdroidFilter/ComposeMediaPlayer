@@ -25,6 +25,7 @@ import org.jetbrains.skia.*
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
 import kotlin.math.min
@@ -124,7 +125,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     // Current frame management
     private var _currentFrame: Bitmap? by mutableStateOf(null)
-    private val bitmapLock = java.util.concurrent.locks.ReentrantReadWriteLock()
+    private val bitmapLock = ReentrantReadWriteLock()
     internal val currentFrameState: State<ImageBitmap?> = mutableStateOf(null)
 
     // Aspect ratio property
