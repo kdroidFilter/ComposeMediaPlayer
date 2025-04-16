@@ -21,19 +21,17 @@ fun WindowsVideoPlayerSurface(
 ) {
     Box(
         modifier = modifier.onSizeChanged {
-            // Notification de redimensionnement
             playerState.onResized()
         },
         contentAlignment = Alignment.Center
     ) {
         if (playerState.hasMedia) {
             val currentFrame by playerState.currentFrameState
-            val aspectRatio = playerState.aspectRatio
-
             currentFrame?.let { frame ->
                 // Draw the video frame to fill the entire canvas area
                 Canvas(
-                    modifier = Modifier.fillMaxHeight()
+                    modifier = Modifier
+                        .fillMaxHeight()
                         .aspectRatio(playerState.aspectRatio),
                 ) {
                     drawImage(
