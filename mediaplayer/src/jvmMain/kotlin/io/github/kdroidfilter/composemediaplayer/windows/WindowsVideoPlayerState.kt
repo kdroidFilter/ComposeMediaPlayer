@@ -23,6 +23,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.skia.*
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -35,6 +36,9 @@ internal val windowsLogger = Logger.withTag("WindowsVideoPlayerState")
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     companion object {
         private val mediaFoundationInitialized = AtomicBoolean(false)
+
+        // Map to store volume settings for each instance
+        private val instanceVolumes = ConcurrentHashMap<Pointer, Float>()
 
         // Initialize Media Foundation only once for all instances
         private fun initializeMediaFoundation() {
@@ -76,6 +80,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     mediaOperationMutex.withLock {
                         val instance = videoPlayerInstance
                         if (instance != null) {
+                            // Store the volume setting for this instance
+                            instanceVolumes[instance] = newVolume
+
+                            // Apply the volume setting to the native player
                             val hr = player.SetAudioVolume(instance, newVolume)
                             if (hr < 0) {
                                 setError("Error updating volume (hr=0x${hr.toString(16)})")
@@ -178,6 +186,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     return@launch
                 }
                 videoPlayerInstance = instance
+
+                // Set initial volume for this instance
+                instanceVolumes[instance] = _volume
+
                 isInitialized = true
             } catch (e: Exception) {
                 setError("Exception during initialization: ${e.message}")
@@ -208,6 +220,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                         // Close the media
                         player.CloseMedia(instance)
+
+                        // Remove volume setting for this instance
+                        instanceVolumes.remove(instance)
 
                         // Destroy the player instance
                         MediaFoundationLib.destroyInstance(instance)
@@ -347,6 +362,19 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         while (isActive && _hasMedia) {
                             updateAudioLevels()
                             delay(50)
+                        }
+                    }
+
+                    // Restore the volume setting for this instance
+                    val storedVolume = instanceVolumes[instance]
+                    if (storedVolume != null) {
+                        val volumeRef = FloatByReference()
+                        val hr = player.GetAudioVolume(instance, volumeRef)
+                        if (hr >= 0 && storedVolume != volumeRef.value) {
+                            val setHr = player.SetAudioVolume(instance, storedVolume)
+                            if (setHr < 0) {
+                                windowsLogger.e { "Error restoring volume (hr=0x${setHr.toString(16)})" }
+                            }
                         }
                     }
 
@@ -554,6 +582,22 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 videoJob = scope.launch {
                     launch { produceFrames() }
                     launch { consumeFrames() }
+                }
+            }
+
+            // Restore the volume setting for this instance
+            val instance = videoPlayerInstance
+            if (instance != null) {
+                val storedVolume = instanceVolumes[instance]
+                if (storedVolume != null) {
+                    val volumeRef = FloatByReference()
+                    val hr = player.GetAudioVolume(instance, volumeRef)
+                    if (hr >= 0 && storedVolume != volumeRef.value) {
+                        val setHr = player.SetAudioVolume(instance, storedVolume)
+                        if (setHr < 0) {
+                            windowsLogger.e { "Error restoring volume during play (hr=0x${setHr.toString(16)})" }
+                        }
+                    }
                 }
             }
         }
