@@ -6,7 +6,6 @@ gst1JavaCore = "1.4.0"
 kermit = "2.0.5"
 kotlin = "2.1.20"
 agp = "8.7.3"
-kotlinLogging = "7.0.6"
 kotlinx-coroutines = "1.10.2"
 kotlinxBrowserWasmJs = "0.3"
 kotlinxDatetime = "0.6.2"
@@ -27,7 +26,6 @@ filekit-core = { module = "io.github.vinceglb:filekit-core", version.ref = "file
 filekit-dialogs-compose = { module = "io.github.vinceglb:filekit-dialogs-compose", version.ref = "filekit" }
 gst1-java-core = { module = "org.freedesktop.gstreamer:gst1-java-core", version.ref = "gst1JavaCore" }
 kermit = { module = "co.touchlab:kermit", version.ref = "kermit" }
-kotlin-logging = { module = "io.github.oshai:kotlin-logging", version.ref = "kotlinLogging" }
 kotlinx-browser-wasm-js = { module = "org.jetbrains.kotlinx:kotlinx-browser-wasm-js", version.ref = "kotlinxBrowserWasmJs" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }

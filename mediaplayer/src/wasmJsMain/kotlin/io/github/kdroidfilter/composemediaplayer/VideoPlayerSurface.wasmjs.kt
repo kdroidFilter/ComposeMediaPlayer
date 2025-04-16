@@ -10,8 +10,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.htmlinterop.HtmlView
-import io.github.kdroidfilter.composemediaplayer.util.logger
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -21,6 +22,12 @@ import org.w3c.dom.HTMLTrackElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
 import kotlin.math.abs
+
+/**
+ * Logger for WebAssembly video player surface
+ */
+internal val wasmVideoLogger = Logger.withTag("WasmVideoPlayerSurface")
+    .apply { Logger.setMinSeverity(Severity.Warn) }
 
 
 @Composable
@@ -77,7 +84,7 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                         val height = video.videoHeight
                         if (height != 0) {
                             videoRatio = width.toFloat() / height.toFloat()
-                            logger.debug { "The video ratio is updated: $videoRatio" }
+                            wasmVideoLogger.d { "The video ratio is updated: $videoRatio" }
                         }
                     }
 
@@ -183,7 +190,7 @@ fun setupVideoElement(
     scope: CoroutineScope,
     enableAudioDetection: Boolean = true,
 ) {
-    logger.debug { "Setup video => enableAudioDetection = $enableAudioDetection" }
+    wasmVideoLogger.d { "Setup video => enableAudioDetection = $enableAudioDetection" }
 
     // Create analyzer only if enableAudioDetection is true
     val audioAnalyzer = if (enableAudioDetection) {
@@ -203,16 +210,16 @@ fun setupVideoElement(
 
     // loadedmetadata => attempt initialization
     video.addEventListener("loadedmetadata") {
-        logger.debug { "Video => loadedmetadata => init analyzer if enabled" }
+        wasmVideoLogger.d { "Video => loadedmetadata => init analyzer if enabled" }
         initAudioAnalyzer()
     }
 
     // play => re-init
     video.addEventListener("play") {
-        logger.debug { "Video => play => init analyzer if needed" }
+        wasmVideoLogger.d { "Video => play => init analyzer if needed" }
 
         if (!enableAudioDetection) {
-            logger.debug { "Audio detection disabled => no analyzer." }
+            wasmVideoLogger.d { "Audio detection disabled => no analyzer." }
         } else if (initializationJob?.isActive != true) {
             initAudioAnalyzer()
         }
@@ -220,7 +227,7 @@ fun setupVideoElement(
         // Loop => read levels only if analyzer is not null
         if (enableAudioDetection) {
             scope.launch {
-                logger.debug { "Starting audio level update loop" }
+                wasmVideoLogger.d { "Starting audio level update loop" }
                 while (true) {
                     val (left, right) = audioAnalyzer?.getAudioLevels() ?: (0f to 0f)
                     playerState.updateAudioLevels(left, right)
@@ -264,7 +271,8 @@ fun setupVideoElement(
     video.addEventListener("error") {
         scope.launch {
             playerState._isLoading = false
-            logger.error { "Video => error => possibly no audio analyzer if CORS issues." }
+            // Use Kermit logger for CORS errors
+            wasmVideoLogger.w { "Video error: possibly no audio analyzer due to missing CORS headers. Audio levels will be set to 0." }
         }
     }
 
@@ -276,7 +284,7 @@ fun setupVideoElement(
                 try {
                     video.play()
                 } catch (e: Exception) {
-                    logger.error(e) { "Error opening media: ${e.message}" }
+                    wasmVideoLogger.e { "Error opening media: ${e.message}" }
                 }
             }
         }
@@ -291,7 +299,7 @@ fun setupVideoElement(
         try {
             video.play()
         } catch (e: Exception) {
-            logger.error(e) { "Error opening media: ${e.message}" }
+            wasmVideoLogger.e { "Error opening media: ${e.message}" }
         }
     }
 }
@@ -303,4 +311,3 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
         onTimeUpdate(it.currentTime.toFloat(), it.duration.toFloat())
     }
 }
-

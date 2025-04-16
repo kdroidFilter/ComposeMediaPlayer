@@ -1,5 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.jsinterop.AnalyserNode
 import io.github.kdroidfilter.composemediaplayer.jsinterop.AudioContext
 import io.github.kdroidfilter.composemediaplayer.jsinterop.ChannelSplitterNode
@@ -7,6 +9,12 @@ import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaElementAudioSour
 import org.khronos.webgl.Uint8Array
 import org.khronos.webgl.get
 import org.w3c.dom.HTMLVideoElement
+
+/**
+ * Logger for WebAssembly audio level processor
+ */
+internal val wasmAudioLogger = Logger.withTag("WasmAudioProcessor")
+    .apply { Logger.setMinSeverity(Severity.Warn) }
 
 internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
 
@@ -23,6 +31,7 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
     /**
      * Initializes Web Audio (creates a source, a splitter, etc.)
      * In case of error (CORS), we simply return => the video remains managed by HTML
+     * and audio levels will be set to 0
      */
     fun initialize() {
         if (audioContext != null) return // already initialized?
@@ -33,7 +42,7 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
         val source = try {
             ctx.createMediaElementSource(video)
         } catch (e: Throwable) {
-            println("AudioAnalyzer => CORS/format error => fallback => ${e.message}")
+            wasmAudioLogger.w { "CORS/format error: Video doesn't have CORS headers. Audio levels will be set to 0. Error: ${e.message}" }
             return
         }
 
@@ -55,7 +64,7 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
         leftData = Uint8Array(size)
         rightData = Uint8Array(size)
 
-        println("AudioAnalyzer => OK => Web Audio capturing audio.")
+        wasmAudioLogger.d { "Web Audio successfully initialized and capturing audio." }
     }
 
     /**

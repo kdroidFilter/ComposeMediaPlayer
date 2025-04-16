@@ -14,13 +14,19 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
 import com.kdroid.androidcontextprovider.ContextProvider
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
-import io.github.kdroidfilter.composemediaplayer.util.logger
 import io.github.vinceglb.filekit.AndroidFile
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 
+/**
+ * Logger for WebAssembly video player surface
+ */
+internal val androidVideoLogger = Logger.withTag("WasmVideoPlayerSurface")
+    .apply { Logger.setMinSeverity(Severity.Warn) }
 
 @UnstableApi
 @Stable
@@ -172,8 +178,13 @@ actual open class VideoPlayerState {
     actual val positionText: String get() = formatTime(_currentTime)
     actual val durationText: String get() = formatTime(_duration)
 
-    actual fun hideMedia() { _hasMedia = false }
-    actual fun showMedia() { _hasMedia = true }
+    actual fun hideMedia() {
+        _hasMedia = false
+    }
+
+    actual fun showMedia() {
+        _hasMedia = true
+    }
 
     init {
         audioProcessor.setOnAudioLevelUpdateListener { left, right ->
@@ -211,6 +222,7 @@ actual open class VideoPlayerState {
                 Player.STATE_BUFFERING -> {
                     _isLoading = true
                 }
+
                 Player.STATE_READY -> {
                     _isLoading = false
                     exoPlayer?.let { player ->
@@ -219,11 +231,13 @@ actual open class VideoPlayerState {
                         if (player.isPlaying) startPositionUpdates()
                     }
                 }
+
                 Player.STATE_ENDED -> {
                     _isLoading = false
                     stopPositionUpdates()
                     _isPlaying = false
                 }
+
                 Player.STATE_IDLE -> {
                     _isLoading = false
                 }
@@ -253,12 +267,15 @@ actual open class VideoPlayerState {
             _error = when (error.errorCode) {
                 PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ->
                     VideoPlayerError.CodecError("Decoder initialization failed: ${error.message}")
+
                 PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
                 PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
                     VideoPlayerError.NetworkError("Network error: ${error.message}")
+
                 PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
                 PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ->
                     VideoPlayerError.SourceError("Invalid media source: ${error.message}")
+
                 else -> VideoPlayerError.UnknownError("Playback error: ${error.message}")
             }
             _isPlaying = false
@@ -348,7 +365,7 @@ actual open class VideoPlayerState {
                 player.play()
                 _hasMedia = true // Set to true when media is loaded
             } catch (e: Exception) {
-                logger.debug { "Error opening media: ${e.message}" }
+                androidVideoLogger.d { "Error opening media: ${e.message}" }
                 _isPlaying = false
                 _hasMedia = false // Set to false on error
                 _error = VideoPlayerError.SourceError("Failed to load media: ${e.message}")

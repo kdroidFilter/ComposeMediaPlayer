@@ -43,7 +43,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             api(libs.filekit.core)
             implementation(libs.kotlinx.datetime)
-            implementation(libs.kotlin.logging)
             implementation(libs.kermit)
         }
 
