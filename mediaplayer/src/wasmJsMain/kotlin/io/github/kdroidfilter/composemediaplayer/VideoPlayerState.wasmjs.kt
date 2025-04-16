@@ -220,11 +220,29 @@ actual open class VideoPlayerState {
     fun updatePosition(currentTime: Float, duration: Float) {
         val now = TimeSource.Monotonic.markNow()
         if (now - lastUpdateTime >= 1.seconds) {
-            _positionText = if (currentTime.isNaN()) "00:00" else formatTime(currentTime)
+            // Calculate a dynamic threshold based on video duration (10% of duration or at least 0.5 seconds)
+            val threshold = if (duration > 0f && !duration.isNaN()) {
+                maxOf(duration * 0.1f, 0.5f)
+            } else {
+                0.5f
+            }
+
+            // Check if we're very close to the end of the video
+            val isNearEnd = duration > 0f && !duration.isNaN() && !currentTime.isNaN() && 
+                            (duration - currentTime < threshold)
+
+            // If we're near the end, use the duration as the current time
+            val displayTime = if (isNearEnd) duration else currentTime
+
+            _positionText = if (displayTime.isNaN()) "00:00" else formatTime(displayTime)
             _durationText = if (duration.isNaN()) "00:00" else formatTime(duration)
 
             if (!userDragging && duration > 0f && !duration.isNaN()) {
-                sliderPos = (currentTime / duration) * PERCENTAGE_MULTIPLIER
+                sliderPos = if (isNearEnd) {
+                    PERCENTAGE_MULTIPLIER // Set to 100% if near end
+                } else {
+                    (currentTime / duration) * PERCENTAGE_MULTIPLIER
+                }
             }
             _currentDuration = duration
             lastUpdateTime = now
