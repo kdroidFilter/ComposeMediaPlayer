@@ -1,4 +1,4 @@
-name: "Déploiement automatique de la doc Dokka et de l'exemple Compose"
+name: "Automatic Deployment of Dokka Docs and Compose Example"
 
 on:
   push:
@@ -11,13 +11,13 @@ permissions:
   pages: write
   id-token: write
 
-# Empêche plusieurs déploiements simultanés
+# Prevents simultaneous deployments
 concurrency:
   group: "pages"
   cancel-in-progress: true
 
 jobs:
-  # 1) Construction de la doc Dokka et de l'exemple Compose
+  # 1) Build Dokka Docs and the Compose Example
   build:
     runs-on: ubuntu-latest
 
@@ -31,44 +31,44 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # Génération de la documentation Dokka
-      - name: Génération de la doc Dokka
+      # Generate Dokka Documentation
+      - name: Generate Dokka Docs
         run: |
           ./gradlew dokkaHtml
 
-      # Construction de l’exemple Kotlin/Compose
-      - name: Construction de l’exemple Kotlin/Compose
+      # Build the Kotlin/Compose Example
+      - name: Build Kotlin/Compose Example
         run: |
           ./gradlew :sample:composeApp:wasmJsBrowserDistribution
 
-      # Préparer une arborescence commune pour le déploiement
-      # On place la doc à la racine et l’exemple dans /sample
-      - name: Préparation des fichiers pour le déploiement
+      # Prepare a common structure for deployment
+      # Place the docs at the root and the example in /sample
+      - name: Prepare files for deployment
         run: |
           mkdir -p build/final
-          # On copie la doc dans build/final (racine du site)
+          # Copy the docs into build/final (root of the site)
           cp -r mediaplayer/build/dokka/html/* build/final
 
-          # On crée le dossier /sample dans build/final
+          # Create the /sample folder in build/final
           mkdir -p build/final/sample
           cp -r sample/composeApp/build/dist/wasmJs/productionExecutable/* build/final/sample
 
-      # Upload vers l’artefact "pages" pour qu’il soit disponible au job suivant
-      - name: Upload artifact pour GitHub Pages
+      # Upload to the "pages" artifact so it is available for the next job
+      - name: Upload artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: build/final
 
-  # 2) Déploiement GitHub Pages
+  # 2) GitHub Pages Deployment
   deploy:
     needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      # L’URL finale sera mise dans la sortie page_url
+      # The final URL will be provided in the page_url output
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Déploiement sur GitHub Pages
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
         with:

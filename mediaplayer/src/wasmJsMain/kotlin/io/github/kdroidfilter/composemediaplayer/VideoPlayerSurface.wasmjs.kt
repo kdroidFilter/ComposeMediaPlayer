@@ -458,6 +458,14 @@ fun setupVideoElement(
         }
     }
 
+    // ended => pause the video
+    video.addEventListener("ended") {
+        scope.launch {
+            wasmVideoLogger.d { "Video playback ended" }
+            playerState.pause()
+        }
+    }
+
     // volume, loop
     video.volume = playerState.volume.toDouble()
     video.loop = playerState.loop
