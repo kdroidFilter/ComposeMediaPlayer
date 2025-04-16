@@ -56,7 +56,4 @@ interface PlatformVideoPlayerState {
     fun seekTo(value: Float)
     fun dispose()
     fun clearError()
-    fun hideMedia()
-    fun showMedia()
-
 }

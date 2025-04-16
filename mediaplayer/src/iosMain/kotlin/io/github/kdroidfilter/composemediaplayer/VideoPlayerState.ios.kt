@@ -234,15 +234,6 @@ actual open class VideoPlayerState {
         }
     }
 
-    actual fun hideMedia() {
-        Logger.d { "hideMedia called" }
-        _hasMedia = false
-    }
-
-    actual fun showMedia() {
-        Logger.d { "showMedia called" }
-        _hasMedia = true
-    }
 
     actual fun clearError() {
         Logger.d { "clearError called" }

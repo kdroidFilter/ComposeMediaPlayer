@@ -178,13 +178,6 @@ actual open class VideoPlayerState {
     actual val positionText: String get() = formatTime(_currentTime)
     actual val durationText: String get() = formatTime(_duration)
 
-    actual fun hideMedia() {
-        _hasMedia = false
-    }
-
-    actual fun showMedia() {
-        _hasMedia = true
-    }
 
     init {
         audioProcessor.setOnAudioLevelUpdateListener { left, right ->
