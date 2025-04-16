@@ -24,6 +24,16 @@ fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
     modifier: Modifier = Modifier,
 ) {
+    // Keep track of when this instance is first composed with this player state
+    val isFirstComposition = remember(playerState) { true }
+
+    // Only trigger resizing on first composition with this player state
+    LaunchedEffect(playerState) {
+        if (isFirstComposition) {
+            playerState.onResized()
+        }
+    }
+
     Box(
         modifier = modifier.onSizeChanged {
             playerState.onResized()
@@ -31,9 +41,10 @@ fun WindowsVideoPlayerSurface(
         contentAlignment = Alignment.Center
     ) {
         if (playerState.hasMedia) {
-            val currentFrame by playerState.currentFrameState
+            // Force recomposition when currentFrameState changes
+            val currentFrame by remember(playerState) { playerState.currentFrameState }
+
             currentFrame?.let { frame ->
-                // Draw the video frame to fill the entire canvas area
                 Canvas(
                     modifier = Modifier
                         .fillMaxHeight()
