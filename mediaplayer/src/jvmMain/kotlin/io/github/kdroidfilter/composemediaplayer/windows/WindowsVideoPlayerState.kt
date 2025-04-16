@@ -298,31 +298,20 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         delay(50)
                     }
 
-                    // Ensure all resources are properly released
                     videoJob?.cancelAndJoin()
-                    clearFrameChannel() // Explicitly clear the frame channel
                     releaseAllResources()
                     player.CloseMedia(instance)
 
-                    // Reset all state variables
                     _currentTime = 0.0
                     _progress = 0f
                     _duration = 0.0
                     _hasMedia = false
-                    bitmapLock.write {
-                        _currentFrame = null
-                        (currentFrameState as MutableState).value = null
-                    }
 
                     // Vérifier si le fichier ou l'URL est valide
                     if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
                         setError("File not found: $uri")
                         return@withLock
                     }
-
-                    // For Windows, ensure we have a clean state before opening new media
-                    // This is especially important for reinitialization
-                    delay(50) // Short delay to ensure previous operations are complete
 
                     // Ouvrir le média
                     val hrOpen = player.OpenMedia(instance, WString(uri))
@@ -346,7 +335,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     // Calculer la taille du buffer pour les frames
                     frameBufferSize = videoWidth * videoHeight * 4
 
-                    // Allouer le buffer partagé - ensure it's properly sized
+                    // Allouer le buffer partagé
                     sharedFrameBuffer = ByteArray(frameBufferSize)
 
                     // Récupérer la durée du média
@@ -368,18 +357,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         windowsLogger.e { "Failed to seek to beginning (hr=0x${hrSeek.toString(16)})" }
                     }
 
-                    // Ensure frame bitmap recycler is null to force new bitmap creation
-                    frameBitmapRecycler = null
-
-                    // Lancer le traitement vidéo with fresh coroutines
-                    videoJob?.cancel() // Cancel any existing job first
+                    // Lancer le traitement vidéo
                     videoJob = scope.launch {
                         launch { produceFrames() }
                         launch { consumeFrames() }
                     }
 
                     // Lancer une tâche pour mettre à jour les niveaux audio
-                    audioLevelsJob?.cancel() // Cancel any existing job first
                     audioLevelsJob = scope.launch {
                         while (isActive && _hasMedia) {
                             updateAudioLevels()
@@ -400,18 +384,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         }
                     }
 
-                    // Ensure we have a clean state before starting playback
                     delay(100)
-
-                    // Start playback
-                    val playResult = setPlaybackState(true, "Error starting playback after opening media")
-                    if (playResult) {
-                        _isPlaying = true
-                    } else {
-                        // If setting playback state failed, try again after a delay
-                        delay(100)
-                        play()
-                    }
+                    play()
 
                 } catch (e: Exception) {
                     setError("Error while opening media: ${e.message}")
