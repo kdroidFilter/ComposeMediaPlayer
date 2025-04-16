@@ -30,11 +30,13 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
 
     /**
      * Initializes Web Audio (creates a source, a splitter, etc.)
-     * In case of error (CORS), we simply return => the video remains managed by HTML
+     * In case of error (CORS), we simply return false => the video remains managed by HTML
      * and audio levels will be set to 0
+     * 
+     * @return true if initialization was successful, false if there was a CORS error
      */
-    fun initialize() {
-        if (audioContext != null) return // already initialized?
+    fun initialize(): Boolean {
+        if (audioContext != null) return true // already initialized?
 
         val ctx = AudioContext()
         audioContext = ctx
@@ -43,7 +45,9 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
             ctx.createMediaElementSource(video)
         } catch (e: Throwable) {
             wasmAudioLogger.w { "CORS/format error: Video doesn't have CORS headers. Audio levels will be set to 0. Error: ${e.message}" }
-            return
+            // Clean up the audio context since we won't be using it
+            audioContext = null
+            return false
         }
 
         sourceNode = source
@@ -65,10 +69,18 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
         rightData = Uint8Array(size)
 
         wasmAudioLogger.d { "Web Audio successfully initialized and capturing audio." }
+        return true
     }
 
     /**
      * Returns (left%, right%) in range 0..100
+     * 
+     * Uses a logarithmic scale to match the Mac implementation:
+     * 1. Calculate average level from frequency data
+     * 2. Normalize to 0..1 range
+     * 3. Convert to decibels: 20 * log10(level)
+     * 4. Normalize: ((db + 60) / 60).coerceIn(0f, 1f)
+     * 5. Convert to percentage: normalized * 100f
      */
     fun getAudioLevels(): Pair<Float, Float> {
         val la = leftAnalyser ?: return 0f to 0f
@@ -91,8 +103,22 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
         val avgLeft = sumLeft.toFloat() / lb.length
         val avgRight = sumRight.toFloat() / rb.length
 
-        val leftPercent = ((avgLeft / 255f) * 100f).coerceAtMost(100f)
-        val rightPercent = ((avgRight / 255f) * 100f).coerceAtMost(100f)
+        // Normalize to 0..1 range
+        val normalizedLeft = avgLeft / 255f
+        val normalizedRight = avgRight / 255f
+
+        // Convert to logarithmic scale (same as Mac implementation)
+        fun convertToPercentage(level: Float): Float {
+            if (level <= 0f) return 0f
+            // Conversion to decibels: 20 * log10(level)
+            val db = 20 * kotlin.math.log10(level)
+            // Assume that -60 dB corresponds to silence and 0 dB to maximum level.
+            val normalized = ((db + 60) / 60).coerceIn(0f, 1f)
+            return normalized * 100f
+        }
+
+        val leftPercent = convertToPercentage(normalizedLeft)
+        val rightPercent = convertToPercentage(normalizedRight)
 
         return leftPercent to rightPercent
     }

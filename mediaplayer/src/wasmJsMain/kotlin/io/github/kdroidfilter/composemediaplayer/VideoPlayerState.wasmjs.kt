@@ -205,6 +205,15 @@ actual open class VideoPlayerState {
     }
 
     /**
+     * Sets the error state.
+     * 
+     * @param error The error to set
+     */
+    fun setError(error: VideoPlayerError) {
+        _error = error
+    }
+
+    /**
      * Updates the audio level indicators.
      * 
      * @param left The left channel audio level
