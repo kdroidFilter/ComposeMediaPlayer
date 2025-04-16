@@ -2,6 +2,7 @@ package sample.app
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
@@ -129,7 +130,7 @@ fun VideoAttachment(
 @Composable
 fun VideoAttachmentPlayerScreen() {
     val viewModel = remember { PostViewModel() }
-    var customUrl by remember { mutableStateOf("https://pixey.org/storage/m/_v2/515736985118386604/549719332-a3f277/PFmm1pLteJcX/ifPy1vg6Co8YS0Ah4IlQel5lOgvVv4wrnyCtE0Dx.mp4") }
+    var customUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
     var attachment by remember { 
         mutableStateOf(
             MediaAttachment(
@@ -143,65 +144,74 @@ fun VideoAttachmentPlayerScreen() {
         ) 
     }
     
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
         // Header
-        Text(
-            text = "Video Attachment Player",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-        
-        // Video player
-        VideoAttachment(
-            attachment = attachment,
-            viewModel = viewModel,
-            onReady = { /* Do something when video is ready */ }
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // URL input
-        OutlinedTextField(
-            value = customUrl,
-            onValueChange = { customUrl = it },
-            label = { Text("Enter video URL") },
-            modifier = Modifier.fillMaxWidth(),
-            trailingIcon = {
-                IconButton(onClick = {
-                    attachment = attachment.copy(url = customUrl)
-                }) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = "Load URL")
+        item {
+            Text(
+                text = "Video Attachment Player",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+        }
+        item {
+
+            // Video player
+            VideoAttachment(
+                attachment = attachment,
+                viewModel = viewModel,
+                onReady = { /* Do something when video is ready */ }
+            )
+        }
+        item {
+
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // URL input
+            OutlinedTextField(
+                value = customUrl,
+                onValueChange = { customUrl = it },
+                label = { Text("Enter video URL") },
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    IconButton(onClick = {
+                        attachment = attachment.copy(url = customUrl)
+                    }) {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = "Load URL")
+                    }
                 }
-            }
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Controls
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Autoplay switch
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Autoplay")
-                Switch(
-                    checked = viewModel.isAutoplayVideos,
-                    onCheckedChange = { viewModel.isAutoplayVideos = it }
-                )
-            }
-            
-            // Volume switch
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Volume")
-                Switch(
-                    checked = viewModel.volume,
-                    onCheckedChange = { viewModel.toggleVolume(it) }
-                )
+            )
+        }
+        item {
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Autoplay switch
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Autoplay")
+                    Switch(
+                        checked = viewModel.isAutoplayVideos,
+                        onCheckedChange = { viewModel.isAutoplayVideos = it }
+                    )
+                }
+
+                // Volume switch
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Volume")
+                    Switch(
+                        checked = viewModel.volume,
+                        onCheckedChange = { viewModel.toggleVolume(it) }
+                    )
+                }
             }
         }
     }

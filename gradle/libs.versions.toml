@@ -3,9 +3,8 @@
 androidcontextprovider = "1.0.1"
 filekit = "0.10.0-beta01"
 gst1JavaCore = "1.4.0"
-gst1JavaSwing = "0.9.0"
 kermit = "2.0.5"
-kotlin = "2.1.20"
+kotlin = "2.2.0-Beta1"
 agp = "8.7.3"
 kotlinLogging = "7.0.6"
 kotlinx-coroutines = "1.10.2"
@@ -27,7 +26,6 @@ androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "medi
 filekit-core = { module = "io.github.vinceglb:filekit-core", version.ref = "filekit" }
 filekit-dialogs-compose = { module = "io.github.vinceglb:filekit-dialogs-compose", version.ref = "filekit" }
 gst1-java-core = { module = "org.freedesktop.gstreamer:gst1-java-core", version.ref = "gst1JavaCore" }
-gst1-java-swing = { module = "org.freedesktop.gstreamer:gst1-java-swing", version.ref = "gst1JavaSwing" }
 kermit = { module = "co.touchlab:kermit", version.ref = "kermit" }
 kotlin-logging = { module = "io.github.oshai:kotlin-logging", version.ref = "kotlinLogging" }
 kotlinx-browser-wasm-js = { module = "org.jetbrains.kotlinx:kotlinx-browser-wasm-js", version.ref = "kotlinxBrowserWasmJs" }
@@ -49,6 +47,5 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 android-application = { id = "com.android.application", version.ref = "agp" }
-google-osdetector = { id = "com.google.osdetector", version = "1.7.3" }
 vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.31.0"}
 dokka = { id = "org.jetbrains.dokka" , version = "2.0.0"}

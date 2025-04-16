@@ -18,7 +18,7 @@ kotlin {
     androidTarget()
     jvm()
     wasmJs {
-        moduleName = "composeApp"
+        outputModuleName = "composeApp"
         browser {
             val rootDirPath = project.rootDir.path
             val projectDirPath = project.projectDir.path
@@ -54,6 +54,7 @@ kotlin {
             implementation(project(":mediaplayer"))
             implementation(compose.materialIconsExtended)
             implementation(libs.filekit.dialogs.compose)
+            implementation(libs.platformtools.darkmodedetector)
         }
 
         androidMain.dependencies {
@@ -90,6 +91,11 @@ compose.desktop {
             packageVersion = "1.0.0"
             linux {
                 modules("jdk.security.auth")
+            }
+            macOS {
+                jvmArgs(
+                    "-Dapple.awt.application.appearance=system"
+                )
             }
         }
     }
