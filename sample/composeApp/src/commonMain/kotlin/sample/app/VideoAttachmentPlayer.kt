@@ -130,7 +130,7 @@ fun VideoAttachment(
 @Composable
 fun VideoAttachmentPlayerScreen() {
     val viewModel = remember { PostViewModel() }
-    var customUrl by remember { mutableStateOf("https://pixey.org/storage/m/_v2/515736985118386604/549719332-a3f277/PFmm1pLteJcX/ifPy1vg6Co8YS0Ah4IlQel5lOgvVv4wrnyCtE0Dx.mp4") }
+    var customUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
     var attachment by remember { 
         mutableStateOf(
             MediaAttachment(

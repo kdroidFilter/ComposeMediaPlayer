@@ -419,9 +419,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             if (player.IsEOF(instance)) {
                 if (loop) {
                     try {
-                        player.SeekMedia(instance, 0)
-                        _currentTime = 0.0
-                        _progress = 0f
+                        seekTo(0f)
                         play()
                     } catch (e: Exception) {
                         setError("Error during SeekMedia for loop: ${e.message}")
