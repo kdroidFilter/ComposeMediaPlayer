@@ -30,18 +30,27 @@ import kotlin.concurrent.read
 import kotlin.concurrent.write
 import kotlin.math.min
 
-// Initialize logger using Kermit
+/**
+ * Logger for Windows video player implementation
+ */
 internal val windowsLogger = Logger.withTag("WindowsVideoPlayerState")
     .apply { setMinSeverity(Severity.Warn) }
 
+/**
+ * Windows implementation of the video player state.
+ * Handles media playback using Media Foundation on Windows platform.
+ */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     companion object {
         private val mediaFoundationInitialized = AtomicBoolean(false)
 
-        // Map to store volume settings for each instance
+        /** Map to store volume settings for each player instance */
         private val instanceVolumes = ConcurrentHashMap<Pointer, Float>()
 
-        // Initialize Media Foundation only once for all instances
+        /**
+         * Initialize Media Foundation only once for all instances.
+         * This is called automatically when the class is loaded.
+         */
         private fun initializeMediaFoundation() {
             if (!mediaFoundationInitialized.getAndSet(true)) {
                 val hr = MediaFoundationLib.INSTANCE.InitMediaFoundation()
@@ -57,20 +66,33 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    // Instance of the native Media Foundation player
+    /** Instance of the native Media Foundation player */
     private val player = MediaFoundationLib.INSTANCE
+
+    /** Coroutine scope for all async operations */
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    /** Whether the player has been initialized */
     private var isInitialized by mutableStateOf(false)
+
+    /** Whether media has been loaded */
     private var _hasMedia by mutableStateOf(false)
     override val hasMedia get() = _hasMedia
+
+    /** Whether media is currently playing */
     private var _isPlaying by mutableStateOf(false)
     override val isPlaying get() = _isPlaying
 
-    // Video player instance handle
+    /** Video player instance handle */
     private var videoPlayerInstance: Pointer? = null
 
-    // Volume management: any modification triggers the native call SetAudioVolume
+    /** Current volume level (0.0 to 1.0) */
     private var _volume by mutableStateOf(1f)
+
+    /**
+     * Volume control for the player (0.0 to 1.0)
+     * Any modification triggers the native call SetAudioVolume
+     */
     override var volume: Float
         get() = _volume
         set(value) {
@@ -79,8 +101,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 _volume = newVolume
                 scope.launch {
                     mediaOperationMutex.withLock {
-                        val instance = videoPlayerInstance
-                        if (instance != null) {
+                        videoPlayerInstance?.let { instance ->
                             // Store the volume setting for this instance
                             instanceVolumes[instance] = newVolume
 
@@ -126,7 +147,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     // Current frame management
     private var _currentFrame: Bitmap? by mutableStateOf(null)
     private val bitmapLock = ReentrantReadWriteLock()
-    internal val currentFrameState: State<ImageBitmap?> = mutableStateOf(null)
+    internal val currentFrameState = mutableStateOf<ImageBitmap?>(null)
 
     // Aspect ratio property
     internal val aspectRatio: Float
@@ -198,6 +219,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Gets the current frame as a Compose ImageBitmap with thread-safe access
+     * @return The current frame as an ImageBitmap, or null if no frame is available
+     */
     fun getLockedComposeImageBitmap(): ImageBitmap? =
         bitmapLock.read { _currentFrame?.asComposeImageBitmap() }
 
@@ -256,7 +281,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             _currentFrame?.close()  // Close the current frame bitmap if any
             _currentFrame = null
             // Reset the currentFrameState
-            (currentFrameState as MutableState).value = null
+            currentFrameState.value = null
             frameBitmapRecycler?.close()  // Recycle the bitmap if any
             frameBitmapRecycler = null
         }
@@ -272,6 +297,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
 
+    /**
+     * Opens a media file or URL for playback
+     *
+     * @param uri The path to the media file or URL to open
+     */
     override fun openUri(uri: String) {
         lastUri = uri
 
@@ -285,7 +315,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 try {
                     isLoading = true
 
-                    // Arrêter la lecture et libérer les ressources existantes
+                    // Stop playback and release existing resources
                     val wasPlaying = _isPlaying
                     val instance = videoPlayerInstance
                     if (instance == null) {
@@ -308,20 +338,20 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _duration = 0.0
                     _hasMedia = false
 
-                    // Vérifier si le fichier ou l'URL est valide
+                    // Check if the file or URL is valid
                     if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
                         setError("File not found: $uri")
                         return@withLock
                     }
 
-                    // Ouvrir le média
+                    // Open the media
                     val hrOpen = player.OpenMedia(instance, WString(uri))
                     if (hrOpen < 0) {
                         setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                         return@withLock
                     }
 
-                    // Récupérer les dimensions de la vidéo
+                    // Get the video dimensions
                     val wRef = IntByReference()
                     val hRef = IntByReference()
                     player.GetVideoSize(instance, wRef, hRef)
@@ -333,13 +363,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     videoWidth = wRef.value
                     videoHeight = hRef.value
 
-                    // Calculer la taille du buffer pour les frames
+                    // Calculate the buffer size for frames
                     frameBufferSize = videoWidth * videoHeight * 4
 
-                    // Allouer le buffer partagé
+                    // Allocate the shared buffer
                     sharedFrameBuffer = ByteArray(frameBufferSize)
 
-                    // Récupérer la durée du média
+                    // Get the media duration
                     val durationRef = LongByReference()
                     val hrDuration = player.GetMediaDuration(instance, durationRef)
                     if (hrDuration < 0) {
@@ -349,22 +379,22 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
                     _duration = durationRef.value / 10000000.0
 
-                    // Définir _hasMedia à true uniquement si tout a réussi
+                    // Set _hasMedia to true only if everything succeeded
                     _hasMedia = true
 
-                    // Explicitement chercher au début de la vidéo
+                    // Explicitly seek to the beginning of the video
                     val hrSeek = player.SeekMedia(instance, 0)
                     if (hrSeek < 0) {
                         windowsLogger.e { "Failed to seek to beginning (hr=0x${hrSeek.toString(16)})" }
                     }
 
-                    // Lancer le traitement vidéo
+                    // Start video processing
                     videoJob = scope.launch {
                         launch { produceFrames() }
                         launch { consumeFrames() }
                     }
 
-                    // Lancer une tâche pour mettre à jour les niveaux audio
+                    // Start a task to update audio levels
                     audioLevelsJob = scope.launch {
                         while (isActive && _hasMedia) {
                             updateAudioLevels()
@@ -398,10 +428,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Updates the audio level meters
+     */
     private suspend fun updateAudioLevels() {
         mediaOperationMutex.withLock {
-            val instance = videoPlayerInstance
-            if (instance != null) {
+            videoPlayerInstance?.let { instance ->
                 val leftRef = FloatByReference()
                 val rightRef = FloatByReference()
                 val hr = player.GetAudioLevels(instance, leftRef, rightRef)
@@ -557,12 +589,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
                     _currentFrame = frameData.bitmap
                     // Update the currentFrameState with the new frame
-                    (currentFrameState as MutableState).value = frameData.bitmap.asComposeImageBitmap()
+                    currentFrameState.value = frameData.bitmap.asComposeImageBitmap()
                 }
 
                 _currentTime = frameData.timestamp
                 _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
-                isLoading = false
+                isLoading = false  // Once frames start arriving, set isLoading to false
 
                 delay(1)
 
@@ -577,11 +609,15 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Starts or resumes playback
+     * If no media is loaded but a previous URI exists, it will try to open and play it
+     */
     override fun play() {
         if (!isInitialized || videoPlayerInstance == null || !_hasMedia) {
-            if (lastUri != null && lastUri!!.isNotEmpty()) {
+            lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
                 scope.launch {
-                    openUri(lastUri!!)
+                    openUri(uri)
                     delay(100)
                     if (isInitialized && videoPlayerInstance != null) {
                         executeMediaOperation(
@@ -626,6 +662,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Pauses playback if currently playing
+     */
     override fun pause() {
         executeMediaOperation(
             operation = "pause",
@@ -635,6 +674,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Stops playback and releases media resources
+     * This will close the media file but keep the player instance
+     */
     override fun stop() {
         executeMediaOperation(
             operation = "stop"
@@ -650,8 +693,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             isLoading = false
             errorMessage = null
             _error = null
-            val instance = videoPlayerInstance
-            if (instance != null) {
+            videoPlayerInstance?.let { instance ->
                 player.CloseMedia(instance)
             }
         }
@@ -702,6 +744,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Called when the player surface is resized
+     * Temporarily pauses frame processing to avoid artifacts during resize
+     */
     fun onResized() {
         isResizing.set(true)
         scope.launch {
@@ -717,6 +763,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Sets an error state with the given message
+     *
+     * @param msg The error message
+     */
     private fun setError(msg: String) {
         _error = VideoPlayerError.UnknownError(msg)
         errorMessage = msg
@@ -724,31 +775,46 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         windowsLogger.e { msg }
     }
 
+    /**
+     * Creates an ImageInfo object for the current video dimensions
+     * 
+     * @return ImageInfo configured for the current video frame
+     */
     private fun createVideoImageInfo() =
         ImageInfo(videoWidth, videoHeight, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
 
+    /**
+     * Sets the playback state (playing or paused)
+     * 
+     * @param playing True to start playback, false to pause
+     * @param errorMessage Error message to display if the operation fails
+     * @param bStop True to stop playback completely, false to pause
+     * @return True if the operation succeeded, false otherwise
+     */
     private fun setPlaybackState(playing: Boolean, errorMessage: String, bStop: Boolean = false): Boolean {
-        val instance = videoPlayerInstance
-        if (instance != null) {
+        return videoPlayerInstance?.let { instance ->
             for (attempt in 1..3) {
                 val res = player.SetPlaybackState(instance, playing, bStop)
                 if (res >= 0) {
                     _isPlaying = playing
-                    if (_error != null) {
-                        clearError()
-                    }
+                    _error?.let { clearError() }
                     return true
                 }
                 if (attempt == 3) {
                     setError("$errorMessage (hr=0x${res.toString(16)}) after $attempt attempts")
                 }
             }
-            return false
+            false
+        } ?: run {
+            setError("$errorMessage: No player instance")
+            false
         }
-        setError("$errorMessage: No player instance")
-        return false
     }
 
+    /**
+     * Waits for the playback state to become active
+     * If playback doesn't start within 5 seconds, attempts to restart it
+     */
     private suspend fun waitForPlaybackState() {
         if (!_isPlaying) {
             try {
@@ -772,6 +838,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Waits if the player is currently resizing
+     * 
+     * @return True if resizing is in progress and we waited, false otherwise
+     */
     private suspend fun waitIfResizing(): Boolean {
         if (isResizing.get()) {
             try {
@@ -784,6 +855,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         return false
     }
 
+    /**
+     * Executes a media operation with proper error handling and mutex locking
+     *
+     * @param operation Name of the operation for error reporting
+     * @param precondition Condition that must be true for the operation to execute
+     * @param block The operation to execute
+     */
     private fun executeMediaOperation(
         operation: String,
         precondition: Boolean = true,
