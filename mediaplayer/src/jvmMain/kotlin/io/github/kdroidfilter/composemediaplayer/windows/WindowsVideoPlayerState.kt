@@ -219,13 +219,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    /**
-     * Gets the current frame as a Compose ImageBitmap with thread-safe access
-     * @return The current frame as an ImageBitmap, or null if no frame is available
-     */
-    fun getLockedComposeImageBitmap(): ImageBitmap? =
-        bitmapLock.read { _currentFrame?.asComposeImageBitmap() }
-
     override fun dispose() {
         scope.launch {
             try {
@@ -293,7 +286,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     private fun clearFrameChannel() {
         // Drain the frame channel to ensure all items are removed
-        while (frameChannel.tryReceive().isSuccess) { }
+        while (frameChannel.tryReceive().isSuccess) {
+            // Intentionally empty - just draining the channel
+        }
     }
 
 
