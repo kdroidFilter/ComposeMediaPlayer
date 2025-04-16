@@ -875,8 +875,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    override fun hideMedia() {}
-    override fun showMedia() {}
     override fun selectSubtitleTrack(track: SubtitleTrack?) {}
     override fun disableSubtitles() {}
 }

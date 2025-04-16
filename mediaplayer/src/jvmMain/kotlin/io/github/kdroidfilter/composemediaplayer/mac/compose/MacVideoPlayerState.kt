@@ -884,27 +884,4 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             }
         }
     }
-
-    override fun hideMedia() {
-        macLogger.d { "hideMedia() - Hiding media" }
-        stopFrameUpdates()
-        stopBufferingCheck()
-        ioScope.launch {
-            _currentFrameState.value = null
-
-        }
-    }
-
-    override fun showMedia() {
-        macLogger.d { "showMedia() - Showing media" }
-        if (hasMedia) {
-            ioScope.launch {
-                updateFrameAsync()
-                if (isPlaying) {
-                    startFrameUpdates()
-                    startBufferingCheck()
-                }
-            }
-        }
-    }
 }

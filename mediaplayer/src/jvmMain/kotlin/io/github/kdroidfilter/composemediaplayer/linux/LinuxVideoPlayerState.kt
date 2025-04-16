@@ -121,13 +121,6 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     override val hasMedia: Boolean
         get() = _hasMedia
 
-    override fun showMedia() {
-        _hasMedia = true
-    }
-
-    override fun hideMedia() {
-        _hasMedia = false
-    }
 
     private var _isPlaying by mutableStateOf(false)
     override val isPlaying: Boolean

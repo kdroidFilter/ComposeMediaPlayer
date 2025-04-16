@@ -14,7 +14,7 @@ html, body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: #ffffff; /* Background color */
+    background: #ffffff; /* Light theme background color */
     display: flex;
     justify-content: center;
     align-items: center;
@@ -25,10 +25,22 @@ html, body {
 .spinner {
     width: 60px;
     height: 60px;
-    border: 8px solid #f3f3f3;        /* Gray ring */
-    border-top: 8px solid #3498db;    /* Colored ring */
+    border: 8px solid #f3f3f3;        /* Light theme gray ring */
+    border-top: 8px solid #3498db;    /* Light theme colored ring */
     border-radius: 50%;
     animation: spin 1s linear infinite;
+}
+
+/* Dark theme styles based on system preference */
+@media (prefers-color-scheme: dark) {
+    #loader {
+        background: #121212; /* Dark theme background color */
+    }
+
+    .spinner {
+        border: 8px solid #333333;        /* Dark theme gray ring */
+        border-top: 8px solid #64b5f6;    /* Dark theme colored ring */
+    }
 }
 
 /* Rotation animation */

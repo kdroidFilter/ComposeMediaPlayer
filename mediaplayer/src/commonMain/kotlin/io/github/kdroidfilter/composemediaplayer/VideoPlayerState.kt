@@ -38,8 +38,6 @@ expect open class VideoPlayerState() {
     fun pause()
     fun stop()
     fun seekTo(value: Float)
-    fun hideMedia()
-    fun showMedia()
 
     // Functions to manage media sources
     fun openUri(uri: String)

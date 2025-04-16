@@ -77,19 +77,6 @@ actual open class VideoPlayerState {
     // Job for handling seek operations
     internal var seekJob: Job? = null
 
-    /**
-     * Hides the media by setting hasMedia to false.
-     */
-    actual fun hideMedia() {
-        _hasMedia = false
-    }
-
-    /**
-     * Shows the media by setting hasMedia to true.
-     */
-    actual fun showMedia() {
-        _hasMedia = true
-    }
 
     /**
      * Selects a subtitle track and enables subtitles.
