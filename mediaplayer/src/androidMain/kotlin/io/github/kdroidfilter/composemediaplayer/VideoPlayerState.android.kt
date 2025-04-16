@@ -172,6 +172,14 @@ actual open class VideoPlayerState {
     private var _aspectRatio by mutableStateOf(16f / 9f)
     val aspectRatio: Float get() = _aspectRatio
 
+    // Fullscreen state
+    private var _isFullscreen by mutableStateOf(false)
+    actual var isFullscreen: Boolean
+        get() = _isFullscreen
+        set(value) {
+            _isFullscreen = value
+        }
+
     // Time tracking
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
@@ -399,6 +407,13 @@ actual open class VideoPlayerState {
 
     actual fun clearError() {
         _error = null
+    }
+
+    /**
+     * Toggles the fullscreen state of the video player
+     */
+    actual fun toggleFullscreen() {
+        _isFullscreen = !_isFullscreen
     }
 
     private fun resetStates(keepMedia: Boolean = false) {

@@ -166,6 +166,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override val durationText: String get() = formatTime(_duration)
     private var errorMessage: String? by mutableStateOf(null)
 
+    // Fullscreen state
+    override var isFullscreen by mutableStateOf(false)
+
     // Video properties
     var videoWidth by mutableStateOf(0)
     var videoHeight by mutableStateOf(0)
@@ -877,4 +880,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     override fun selectSubtitleTrack(track: SubtitleTrack?) {}
     override fun disableSubtitles() {}
+
+    /**
+     * Toggles the fullscreen state of the video player
+     */
+    override fun toggleFullscreen() {
+        isFullscreen = !isFullscreen
+    }
 }

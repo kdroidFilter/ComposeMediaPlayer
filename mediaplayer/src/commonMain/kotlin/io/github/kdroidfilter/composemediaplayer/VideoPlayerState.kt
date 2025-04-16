@@ -32,12 +32,14 @@ expect open class VideoPlayerState() {
     val rightLevel: Float
     val positionText: String
     val durationText: String
+    var isFullscreen: Boolean
 
     // Functions to control playback
     fun play()
     fun pause()
     fun stop()
     fun seekTo(value: Float)
+    fun toggleFullscreen()
 
     // Functions to manage media sources
     fun openUri(uri: String)

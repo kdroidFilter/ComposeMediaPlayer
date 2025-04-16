@@ -70,6 +70,12 @@ actual open class VideoPlayerState {
             delegate.loop = value
         }
 
+    actual open var isFullscreen: Boolean
+        get() = delegate.isFullscreen
+        set(value) {
+            delegate.isFullscreen = value
+        }
+
     actual open val metadata: VideoMetadata get() = delegate.metadata
 
     actual var subtitlesEnabled = delegate.subtitlesEnabled
@@ -89,6 +95,7 @@ actual open class VideoPlayerState {
     actual open fun pause() = delegate.pause()
     actual open fun stop() = delegate.stop()
     actual open fun seekTo(value: Float) = delegate.seekTo(value)
+    actual open fun toggleFullscreen() = delegate.toggleFullscreen()
     actual open fun dispose() = delegate.dispose()
     actual open fun clearError() = delegate.clearError()
 

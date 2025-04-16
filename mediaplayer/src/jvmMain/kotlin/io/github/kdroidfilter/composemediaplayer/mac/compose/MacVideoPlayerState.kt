@@ -75,6 +75,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
     override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableListOf()
     override val metadata: VideoMetadata = VideoMetadata()
+    override var isFullscreen: Boolean by mutableStateOf(false)
     private var lastUri: String? = null
 
     // Non-blocking text properties
@@ -881,6 +882,17 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         ioScope.launch {
             withContext(Dispatchers.Main) {
                 error = null
+            }
+        }
+    }
+
+    /**
+     * Toggles the fullscreen state of the video player
+     */
+    override fun toggleFullscreen() {
+        ioScope.launch {
+            withContext(Dispatchers.Main) {
+                isFullscreen = !isFullscreen
             }
         }
     }

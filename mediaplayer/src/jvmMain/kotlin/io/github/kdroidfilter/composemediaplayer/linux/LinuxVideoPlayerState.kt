@@ -130,6 +130,13 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     override val error: VideoPlayerError?
         get() = _error
 
+    private var _isFullscreen by mutableStateOf(false)
+    override var isFullscreen: Boolean
+        get() = _isFullscreen
+        set(value) {
+            _isFullscreen = value
+        }
+
     override val metadata: VideoMetadata = VideoMetadata()
 
     override var subtitlesEnabled: Boolean = false
@@ -533,6 +540,15 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
 
     override fun clearError() {
         _error = null
+    }
+
+    /**
+     * Toggles the fullscreen state of the video player
+     */
+    override fun toggleFullscreen() {
+        EventQueue.invokeLater {
+            _isFullscreen = !_isFullscreen
+        }
     }
 
     // ---- Processing of a video sample ----
