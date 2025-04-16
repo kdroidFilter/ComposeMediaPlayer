@@ -298,20 +298,31 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         delay(50)
                     }
 
+                    // Ensure all resources are properly released
                     videoJob?.cancelAndJoin()
+                    clearFrameChannel() // Explicitly clear the frame channel
                     releaseAllResources()
                     player.CloseMedia(instance)
 
+                    // Reset all state variables
                     _currentTime = 0.0
                     _progress = 0f
                     _duration = 0.0
                     _hasMedia = false
+                    bitmapLock.write {
+                        _currentFrame = null
+                        (currentFrameState as MutableState).value = null
+                    }
 
                     // Vérifier si le fichier ou l'URL est valide
                     if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
                         setError("File not found: $uri")
                         return@withLock
                     }
+
+                    // For Windows, ensure we have a clean state before opening new media
+                    // This is especially important for reinitialization
+                    delay(50) // Short delay to ensure previous operations are complete
 
                     // Ouvrir le média
                     val hrOpen = player.OpenMedia(instance, WString(uri))
@@ -335,7 +346,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     // Calculer la taille du buffer pour les frames
                     frameBufferSize = videoWidth * videoHeight * 4
 
-                    // Allouer le buffer partagé
+                    // Allouer le buffer partagé - ensure it's properly sized
                     sharedFrameBuffer = ByteArray(frameBufferSize)
 
                     // Récupérer la durée du média
@@ -357,13 +368,18 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         windowsLogger.e { "Failed to seek to beginning (hr=0x${hrSeek.toString(16)})" }
                     }
 
-                    // Lancer le traitement vidéo
+                    // Ensure frame bitmap recycler is null to force new bitmap creation
+                    frameBitmapRecycler = null
+
+                    // Lancer le traitement vidéo with fresh coroutines
+                    videoJob?.cancel() // Cancel any existing job first
                     videoJob = scope.launch {
                         launch { produceFrames() }
                         launch { consumeFrames() }
                     }
 
                     // Lancer une tâche pour mettre à jour les niveaux audio
+                    audioLevelsJob?.cancel() // Cancel any existing job first
                     audioLevelsJob = scope.launch {
                         while (isActive && _hasMedia) {
                             updateAudioLevels()
@@ -384,8 +400,18 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         }
                     }
 
+                    // Ensure we have a clean state before starting playback
                     delay(100)
-                    play()
+
+                    // Start playback
+                    val playResult = setPlaybackState(true, "Error starting playback after opening media")
+                    if (playResult) {
+                        _isPlaying = true
+                    } else {
+                        // If setting playback state failed, try again after a delay
+                        delay(100)
+                        play()
+                    }
 
                 } catch (e: Exception) {
                     setError("Error while opening media: ${e.message}")
@@ -513,6 +539,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     private suspend fun consumeFrames() {
+        // Timeout mechanism to prevent getting stuck in loading state
+        var frameReceived = false
+        var loadingTimeout = 0
+
         while (scope.isActive && _hasMedia) {
             try {
                 waitForPlaybackState()
@@ -526,9 +556,23 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
             try {
                 val frameData = frameChannel.tryReceive().getOrNull() ?: run {
+                    // If we're still loading and haven't received a frame yet, increment timeout counter
+                    if (isLoading && !frameReceived) {
+                        loadingTimeout++
+                        // After ~3 seconds (16ms * 200) of no frames while loading, force isLoading to false
+                        if (loadingTimeout > 200) {
+                            windowsLogger.w { "No frames received for 3 seconds, forcing isLoading to false" }
+                            isLoading = false
+                            loadingTimeout = 0
+                        }
+                    }
                     delay(16)
                     return@run null
                 } ?: continue
+
+                // Reset timeout counter and mark that we've received a frame
+                loadingTimeout = 0
+                frameReceived = true
 
                 bitmapLock.write {
                     _currentFrame?.let { oldBitmap ->
