@@ -47,7 +47,7 @@ internal interface MediaFoundationLib : StdCallLibrary {
     fun SeekMedia(pInstance: Pointer, lPosition: Long): Int
     fun GetMediaDuration(pInstance: Pointer, pDuration: LongByReference): Int
     fun GetMediaPosition(pInstance: Pointer, pPosition: LongByReference): Int
-    fun SetPlaybackState(pInstance: Pointer, isPlaying: Boolean): Int
+    fun SetPlaybackState(pInstance: Pointer, isPlaying: Boolean, bStop: Boolean = false): Int
     fun ShutdownMediaFoundation(): Int
     fun SetAudioVolume(pInstance: Pointer, volume: Float): Int
     fun GetAudioVolume(pInstance: Pointer, volume: FloatByReference): Int

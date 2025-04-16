@@ -209,7 +209,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     val instance = videoPlayerInstance
                     if (instance != null) {
                         // Stop playback before releasing resources
-                        val hr = player.SetPlaybackState(instance, false)
+                        val hr = player.SetPlaybackState(instance, false, true)
                         if (hr < 0) {
                             windowsLogger.e { "Error stopping playback (hr=0x${hr.toString(16)})" }
                         }
@@ -293,7 +293,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
 
                     if (wasPlaying) {
-                        player.SetPlaybackState(instance, false)
+                        player.SetPlaybackState(instance, false, false)
                         _isPlaying = false
                         delay(50)
                     }
@@ -350,6 +350,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                     // Définir _hasMedia à true uniquement si tout a réussi
                     _hasMedia = true
+
+                    // Explicitement chercher au début de la vidéo
+                    val hrSeek = player.SeekMedia(instance, 0)
+                    if (hrSeek < 0) {
+                        windowsLogger.e { "Failed to seek to beginning (hr=0x${hrSeek.toString(16)})" }
+                    }
 
                     // Lancer le traitement vidéo
                     videoJob = scope.launch {
@@ -555,7 +561,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     override fun play() {
-        if (!isInitialized || videoPlayerInstance == null) {
+        if (!isInitialized || videoPlayerInstance == null || !_hasMedia) {
             if (lastUri != null && lastUri!!.isNotEmpty()) {
                 scope.launch {
                     openUri(lastUri!!)
@@ -616,7 +622,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         executeMediaOperation(
             operation = "stop"
         ) {
-            setPlaybackState(false, "Error while stopping playback")
+            setPlaybackState(false, "Error while stopping playback", true)
             delay(50)
             videoJob?.cancelAndJoin()
             releaseAllResources()
@@ -704,11 +710,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private fun createVideoImageInfo() =
         ImageInfo(videoWidth, videoHeight, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
 
-    private fun setPlaybackState(playing: Boolean, errorMessage: String): Boolean {
+    private fun setPlaybackState(playing: Boolean, errorMessage: String, bStop: Boolean = false): Boolean {
         val instance = videoPlayerInstance
         if (instance != null) {
             for (attempt in 1..3) {
-                val res = player.SetPlaybackState(instance, playing)
+                val res = player.SetPlaybackState(instance, playing, bStop)
                 if (res >= 0) {
                     _isPlaying = playing
                     if (_error != null) {
