@@ -76,9 +76,15 @@ class AudioLevelProcessor : BaseAudioProcessor() {
 
     private fun convertToPercentage(rms: Double): Float {
         if (rms <= 0) return 0f
-        val db = 20 * log10(rms)
+        // Apply a scaling factor to make Android values more consistent with wasmjs
+        // wasmjs uses frequency domain data which typically results in lower values
+        val scaledRms = rms * 0.3 // Scale down the RMS value to be more in line with wasmjs
+        val db = 20 * log10(scaledRms)
         // Convert from -60dB..0dB to 0..100%
-        return ((db + 60) / 60 * 100).toFloat().coerceIn(0f, 100f)
+        // First normalize to 0..1 range
+        val normalized = ((db + 60) / 60).toFloat().coerceIn(0f, 1f)
+        // Then convert to percentage
+        return normalized * 100f
     }
 
     override fun onReset() {
