@@ -12,74 +12,113 @@ import org.w3c.dom.url.URL
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
+/**
+ * Implementation of VideoPlayerState for WebAssembly/JavaScript platform.
+ * Manages the state of a video player including playback controls, media information,
+ * and error handling.
+ */
 @Stable
 actual open class VideoPlayerState {
 
+    // Variable to store the last opened URI for potential replay
+    private var lastUri: String? = null
 
+    // Coroutine scope for managing async operations
     private val playerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var lastUpdateTime = TimeSource.Monotonic.markNow()
 
+    // Source URI of the current media
     private var _sourceUri by mutableStateOf<String?>(null)
     val sourceUri: String? get() = _sourceUri
 
+    // Playback state properties
     private var _isPlaying by mutableStateOf(false)
     actual val isPlaying: Boolean get() = _isPlaying
 
     private var _hasMedia by mutableStateOf(false)
     actual val hasMedia: Boolean get() = _hasMedia
 
-    actual fun hideMedia() {
-        _hasMedia = false
-    }
-
-    actual fun showMedia() {
-        _hasMedia = true
-    }
-
     internal var _isLoading by mutableStateOf(false)
     actual val isLoading: Boolean get() = _isLoading
 
+    // Error handling
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     actual val error: VideoPlayerError? get() = _error
 
+    // Media metadata
     actual val metadata = VideoMetadata()
 
-    actual var subtitlesEnabled = false
-    actual var currentSubtitleTrack: SubtitleTrack? = null
+    // Subtitle management
+    actual var subtitlesEnabled by mutableStateOf(false)
+    actual var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
     actual val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
 
-    actual fun selectSubtitleTrack(track: SubtitleTrack?) {
-        // Active les sous-titres et sélectionne la piste donnée
-        currentSubtitleTrack = track
-        subtitlesEnabled = (track != null)
-    }
-
-
-    actual fun disableSubtitles() {
-        // Désactive les sous-titres
-        currentSubtitleTrack = null
-        subtitlesEnabled = false
-    }
-
+    // Playback control properties
     actual var volume by mutableStateOf(1.0f)
     actual var sliderPos by mutableStateOf(0.0f)
     actual var userDragging by mutableStateOf(false)
     actual var loop by mutableStateOf(false)
 
+    // Audio level indicators
     private var _leftLevel by mutableStateOf(0f)
     private var _rightLevel by mutableStateOf(0f)
     actual val leftLevel: Float get() = _leftLevel
     actual val rightLevel: Float get() = _rightLevel
 
+    // Time display properties
     private var _positionText by mutableStateOf("00:00")
     private var _durationText by mutableStateOf("00:00")
-    actual  val positionText: String get() = _positionText
+    actual val positionText: String get() = _positionText
     actual val durationText: String get() = _durationText
 
+    // Current duration of the media
+    private var _currentDuration: Float = 0f
+
+    // Job for handling seek operations
     internal var seekJob: Job? = null
 
+    /**
+     * Hides the media by setting hasMedia to false.
+     */
+    actual fun hideMedia() {
+        _hasMedia = false
+    }
+
+    /**
+     * Shows the media by setting hasMedia to true.
+     */
+    actual fun showMedia() {
+        _hasMedia = true
+    }
+
+    /**
+     * Selects a subtitle track and enables subtitles.
+     * 
+     * @param track The subtitle track to select, or null to disable subtitles
+     */
+    actual fun selectSubtitleTrack(track: SubtitleTrack?) {
+        currentSubtitleTrack = track
+        subtitlesEnabled = (track != null)
+    }
+
+    /**
+     * Disables subtitles by clearing the current track and setting subtitlesEnabled to false.
+     */
+    actual fun disableSubtitles() {
+        currentSubtitleTrack = null
+        subtitlesEnabled = false
+    }
+
+    /**
+     * Opens a media source from the given URI.
+     * 
+     * @param uri The URI of the media to open
+     */
     actual fun openUri(uri: String) {
         playerScope.coroutineContext.cancelChildren()
+
+        // Store the URI for potential replay after stop
+        lastUri = uri
 
         _sourceUri = uri
         _hasMedia = true
@@ -101,23 +140,42 @@ actual open class VideoPlayerState {
         }
     }
 
+    /**
+     * Opens a media file.
+     * 
+     * @param file The file to open
+     */
     actual fun openFile(file: PlatformFile) {
         val fileUri = file.toUriString()
         openUri(fileUri)
     }
 
-    actual  fun play() {
+    /**
+     * Starts or resumes playback of the current media.
+     * If no media is loaded but a previous URI exists, reopens that media.
+     */
+    actual fun play() {
         if (_hasMedia && !_isPlaying) {
             _isPlaying = true
+        } else if (!_hasMedia && lastUri != null) {
+            // If we have a stored URI but no media, reopen the media
+            openUri(lastUri!!)
         }
     }
 
-    actual  fun pause() {
+    /**
+     * Pauses playback of the current media.
+     */
+    actual fun pause() {
         if (_isPlaying) {
             _isPlaying = false
         }
     }
 
+    /**
+     * Stops playback and resets the player state.
+     * Note: lastUri is preserved for potential replay.
+     */
     actual fun stop() {
         _isPlaying = false
         _sourceUri = null
@@ -126,24 +184,52 @@ actual open class VideoPlayerState {
         sliderPos = 0.0f
         _positionText = "00:00"
         _durationText = "00:00"
+        // Note: We don't clear lastUri, so it can be used to replay the video
     }
 
-    actual  fun seekTo(value: Float) {
+    /**
+     * Seeks to a specific position in the media.
+     * 
+     * @param value The position to seek to, as a percentage (0-1000)
+     */
+    actual fun seekTo(value: Float) {
         sliderPos = value
         seekJob?.cancel()
     }
 
+    /**
+     * Clears any error state.
+     */
     actual fun clearError() {
         _error = null
     }
 
+    /**
+     * Sets the error state.
+     * 
+     * @param error The error to set
+     */
+    fun setError(error: VideoPlayerError) {
+        _error = error
+    }
+
+    /**
+     * Updates the audio level indicators.
+     * 
+     * @param left The left channel audio level
+     * @param right The right channel audio level
+     */
     fun updateAudioLevels(left: Float, right: Float) {
         _leftLevel = left
         _rightLevel = right
     }
 
-    private var _currentDuration: Float = 0f
-
+    /**
+     * Updates the position and duration display.
+     * 
+     * @param currentTime The current playback position in seconds
+     * @param duration The total duration of the media in seconds
+     */
     fun updatePosition(currentTime: Float, duration: Float) {
         val now = TimeSource.Monotonic.markNow()
         if (now - lastUpdateTime >= 1.seconds) {
@@ -158,10 +244,19 @@ actual open class VideoPlayerState {
         }
     }
 
+    /**
+     * Callback for time update events from the media player.
+     * 
+     * @param currentTime The current playback position in seconds
+     * @param duration The total duration of the media in seconds
+     */
     fun onTimeUpdate(currentTime: Float, duration: Float) {
         updatePosition(currentTime, duration)
     }
 
+    /**
+     * Disposes of resources used by the player.
+     */
     actual fun dispose() {
         playerScope.cancel()
     }
@@ -171,6 +266,11 @@ actual open class VideoPlayerState {
     }
 }
 
+/**
+ * Converts a PlatformFile to a URI string that can be used by the media player.
+ * 
+ * @return A URI string representing the file
+ */
 fun PlatformFile.toUriString(): String {
     return URL.createObjectURL(this.file)
 }

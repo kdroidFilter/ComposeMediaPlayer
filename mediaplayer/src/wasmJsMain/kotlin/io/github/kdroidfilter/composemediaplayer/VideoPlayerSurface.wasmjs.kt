@@ -10,8 +10,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.htmlinterop.HtmlView
-import io.github.kdroidfilter.composemediaplayer.util.logger
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -20,7 +21,14 @@ import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLTrackElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
+import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import kotlin.math.abs
+
+/**
+ * Logger for WebAssembly video player surface
+ */
+internal val wasmVideoLogger = Logger.withTag("WasmVideoPlayerSurface")
+    .apply { Logger.setMinSeverity(Severity.Warn) }
 
 
 @Composable
@@ -29,6 +37,8 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
 
         var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
         var videoRatio by remember { mutableStateOf<Float?>(null) }
+        // Track if we're using CORS mode (initially true, will be set to false if CORS errors occur)
+        var useCors by remember { mutableStateOf(true) }
         val scope = rememberCoroutineScope()
 
         Box(
@@ -64,36 +74,69 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
         ) {
 
             // Create HTML video element
-            HtmlView(
-                factory = {
-                    createVideoElement()
-                },
-                modifier = modifier,
-                update = { video ->
-                    videoElement = video
+            // Use key to force recreation when CORS mode changes
+            key(useCors) {
+                HtmlView(
+                    factory = {
+                        createVideoElement(useCors)
+                    },
+                    modifier = modifier,
+                    update = { video ->
+                        videoElement = video
 
-                    video.addEventListener("loadedmetadata") {
-                        val width = video.videoWidth
-                        val height = video.videoHeight
-                        if (height != 0) {
-                            videoRatio = width.toFloat() / height.toFloat()
-                            logger.debug { "The video ratio is updated: $videoRatio" }
+                        video.addEventListener("loadedmetadata") {
+                            val width = video.videoWidth
+                            val height = video.videoHeight
+                            if (height != 0) {
+                                videoRatio = width.toFloat() / height.toFloat()
+                                wasmVideoLogger.d { "The video ratio is updated: $videoRatio" }
+                            }
                         }
-                    }
 
-                    setupVideoElement(video, playerState, scope)
-                }
-            )
+                        setupVideoElement(
+                            video, 
+                            playerState, 
+                            scope, 
+                            enableAudioDetection = true,
+                            useCors = useCors,
+                            onCorsError = { useCors = false }
+                        )
+                    }
+                )
+            }
         }
 
         // Handle source change effect
         LaunchedEffect(playerState.sourceUri) {
             videoElement?.let {
-                it.src = playerState.sourceUri ?: ""
-                if (playerState.isPlaying) {
-                    it.play()
-                } else {
-                    it.pause()
+                val sourceUri = playerState.sourceUri ?: ""
+                if (sourceUri.isNotEmpty()) {
+                    // Log the source URI for debugging
+                    wasmVideoLogger.d { "Setting video source to: $sourceUri with useCors=$useCors" }
+
+                    // Clear any previous error
+                    playerState.clearError()
+
+                    // Reset corsErrorDetected flag when loading a new source
+                    // This will be handled in setupVideoElement
+
+                    // Set the source
+                    it.src = sourceUri
+
+                    // Try to load the video
+                    wasmVideoLogger.d { "Calling load() on video element" }
+                    it.load()
+
+                    if (playerState.isPlaying) {
+                        try {
+                            wasmVideoLogger.d { "Attempting to play video" }
+                            it.play()
+                        } catch (e: Exception) {
+                            wasmVideoLogger.e { "Error playing video: ${e.message}" }
+                        }
+                    } else {
+                        it.pause()
+                    }
                 }
             }
         }
@@ -117,6 +160,39 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
         // Handle loop update
         LaunchedEffect(playerState.loop) {
             videoElement?.loop = playerState.loop
+        }
+
+        // When CORS mode changes, we log it and store the current position and playing state
+        var lastPosition by remember { mutableStateOf(0.0) }
+        var wasPlaying by remember { mutableStateOf(false) }
+
+        LaunchedEffect(useCors) {
+            wasmVideoLogger.d { "CORS mode changed to $useCors" }
+            // Store current position and playing state before the video element is recreated
+            videoElement?.let {
+                lastPosition = it.currentTime
+                wasPlaying = playerState.isPlaying
+            }
+        }
+
+        // After the video element is recreated, restore the position and playing state
+        LaunchedEffect(videoElement, useCors) {
+            videoElement?.let {
+                if (lastPosition > 0) {
+                    it.currentTime = lastPosition
+                    // Reset lastPosition to avoid applying it again
+                    lastPosition = 0.0
+                }
+                if (wasPlaying) {
+                    try {
+                        it.play()
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error playing media after CORS mode change: ${e.message}" }
+                    }
+                    // Reset wasPlaying to avoid playing again
+                    wasPlaying = false
+                }
+            }
         }
 
         // Handle seek via sliderPos (with debounce)
@@ -160,7 +236,9 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
     }
 }
 
-private fun createVideoElement(): HTMLVideoElement {
+private fun createVideoElement(useCors: Boolean = true): HTMLVideoElement {
+    wasmVideoLogger.d { "Creating video element with useCors=$useCors" }
+
     return (document.createElement("video") as HTMLVideoElement).apply {
         controls = false
         // Absolute position to fit the video in its container
@@ -171,7 +249,38 @@ private fun createVideoElement(): HTMLVideoElement {
 
         style.width = "100%"
         style.height = "100%"
-        crossOrigin = "anonymous"
+
+        // Handle CORS mode
+        if (useCors) {
+            // Set crossOrigin to anonymous to enable CORS requests
+            crossOrigin = "anonymous"
+            wasmVideoLogger.d { "CORS mode enabled: Set crossOrigin=anonymous" }
+        } else {
+            // Explicitly remove the crossOrigin attribute to disable CORS
+            // This is important as some browsers might keep the attribute if not explicitly removed
+            removeAttribute("crossorigin")
+            wasmVideoLogger.d { "CORS mode disabled: Removed crossOrigin attribute" }
+        }
+
+        // Add additional attributes to help with format detection
+        setAttribute("playsinline", "")
+        setAttribute("webkit-playsinline", "")
+        setAttribute("preload", "auto")
+
+        // Enable more formats
+        setAttribute("x-webkit-airplay", "allow")
+
+        // Log supported types for debugging
+        val supportedTypes = listOf(
+            "video/mp4", 
+            "video/webm", 
+            "video/ogg"
+        )
+
+        supportedTypes.forEach { type ->
+            val canPlay = canPlayType(type)
+            wasmVideoLogger.d { "Browser support for $type: $canPlay" }
+        }
     }
 }
 
@@ -182,8 +291,10 @@ fun setupVideoElement(
     playerState: VideoPlayerState,
     scope: CoroutineScope,
     enableAudioDetection: Boolean = true,
+    useCors: Boolean = true,
+    onCorsError: () -> Unit = {},
 ) {
-    logger.debug { "Setup video => enableAudioDetection = $enableAudioDetection" }
+    wasmVideoLogger.d { "Setup video => enableAudioDetection = $enableAudioDetection, useCors = $useCors" }
 
     // Create analyzer only if enableAudioDetection is true
     val audioAnalyzer = if (enableAudioDetection) {
@@ -191,38 +302,54 @@ fun setupVideoElement(
     } else null
 
     var initializationJob: Job? = null
+    // Track if we've detected CORS errors - start with false for each new setup
+    var corsErrorDetected = false
+
+    // Reset error state when setting up a new video element
+    playerState.clearError()
 
     // Helper => initialize analysis if enableAudioDetection
     fun initAudioAnalyzer() {
-        if (!enableAudioDetection) return
+        if (!enableAudioDetection || corsErrorDetected) return
         initializationJob?.cancel()
         initializationJob = scope.launch {
-            audioAnalyzer?.initialize()
+            val success = audioAnalyzer?.initialize() ?: false
+            if (!success) {
+                // CORS error detected, disable audio analysis for this video
+                corsErrorDetected = true
+                wasmVideoLogger.w { "CORS error detected during audio analyzer initialization. Audio level processing disabled for this video." }
+            }
         }
     }
 
     // loadedmetadata => attempt initialization
     video.addEventListener("loadedmetadata") {
-        logger.debug { "Video => loadedmetadata => init analyzer if enabled" }
+        wasmVideoLogger.d { "Video => loadedmetadata => init analyzer if enabled" }
         initAudioAnalyzer()
     }
 
     // play => re-init
     video.addEventListener("play") {
-        logger.debug { "Video => play => init analyzer if needed" }
+        wasmVideoLogger.d { "Video => play => init analyzer if needed" }
 
         if (!enableAudioDetection) {
-            logger.debug { "Audio detection disabled => no analyzer." }
-        } else if (initializationJob?.isActive != true) {
+            wasmVideoLogger.d { "Audio detection disabled => no analyzer." }
+        } else if (!corsErrorDetected && initializationJob?.isActive != true) {
             initAudioAnalyzer()
         }
 
-        // Loop => read levels only if analyzer is not null
+        // Loop => read levels only if analyzer is not null and no CORS errors
         if (enableAudioDetection) {
             scope.launch {
-                logger.debug { "Starting audio level update loop" }
+                wasmVideoLogger.d { "Starting audio level update loop" }
                 while (true) {
-                    val (left, right) = audioAnalyzer?.getAudioLevels() ?: (0f to 0f)
+                    // Only try to get audio levels if no CORS errors were detected
+                    val (left, right) = if (!corsErrorDetected) {
+                        audioAnalyzer?.getAudioLevels() ?: (0f to 0f)
+                    } else {
+                        // If CORS errors were detected, just return zeros
+                        0f to 0f
+                    }
                     playerState.updateAudioLevels(left, right)
                     delay(100)
                 }
@@ -264,7 +391,56 @@ fun setupVideoElement(
     video.addEventListener("error") {
         scope.launch {
             playerState._isLoading = false
-            logger.error { "Video => error => possibly no audio analyzer if CORS issues." }
+            // Mark as CORS error to prevent further audio analyzer attempts
+            corsErrorDetected = true
+
+            // Log detailed error information
+            val error = video.error
+            if (error != null) {
+                val errorMessage = when (error.code) {
+                    MediaError.MEDIA_ERR_ABORTED -> "MEDIA_ERR_ABORTED: The fetching process was aborted by the user"
+                    MediaError.MEDIA_ERR_NETWORK -> "MEDIA_ERR_NETWORK: A network error occurred while fetching the media"
+                    MediaError.MEDIA_ERR_DECODE -> "MEDIA_ERR_DECODE: An error occurred while decoding the media"
+                    MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED -> "MEDIA_ERR_SRC_NOT_SUPPORTED: The media format is not supported"
+                    else -> "Unknown error code: ${error.code}"
+                }
+                wasmVideoLogger.e { "Video error details: $errorMessage" }
+
+                // Check if this is likely a CORS error (network errors are often CORS-related)
+                val isCorsRelatedError = error.code == MediaError.MEDIA_ERR_NETWORK || 
+                                        (error.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && useCors)
+
+                // Check for CORS-specific error in the console (this won't be captured directly, but helps with debugging)
+                wasmVideoLogger.d { "Is this likely a CORS-related error? $isCorsRelatedError (current useCors=$useCors)" }
+                wasmVideoLogger.d { "If you see 'Access to video has been blocked by CORS policy' in the browser console, this is definitely a CORS error" }
+            }
+
+            if (useCors) {
+                // If we're using CORS and got an error, try without CORS
+                wasmVideoLogger.w { "Video error with CORS enabled. Attempting to reload without CORS restrictions." }
+                // Clear the error since we're going to try again
+                playerState.clearError()
+                // Call the callback to update useCors in the composable
+                onCorsError()
+
+                // Force a reload by clearing and resetting the source
+                val currentSrc = video.src
+                if (currentSrc.isNotEmpty()) {
+                    wasmVideoLogger.d { "Forcing reload of video source: $currentSrc" }
+                    // We don't actually change the source here because the video element will be recreated
+                    // when useCors changes due to the key(useCors) in the composable
+                }
+            } else {
+                // If we already tried without CORS and still got an error, set the error state
+                val errorMsg = if (error?.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+                    "Failed to load because the video format is not supported"
+                } else {
+                    "Failed to load because no supported source was found"
+                }
+                playerState.setError(VideoPlayerError.SourceError(errorMsg))
+                wasmVideoLogger.e { "Video error: $errorMsg" }
+                wasmVideoLogger.w { "Audio levels will be set to 0 due to video error." }
+            }
         }
     }
 
@@ -276,7 +452,7 @@ fun setupVideoElement(
                 try {
                     video.play()
                 } catch (e: Exception) {
-                    logger.error(e) { "Error opening media: ${e.message}" }
+                    wasmVideoLogger.e { "Error opening media: ${e.message}" }
                 }
             }
         }
@@ -291,7 +467,7 @@ fun setupVideoElement(
         try {
             video.play()
         } catch (e: Exception) {
-            logger.error(e) { "Error opening media: ${e.message}" }
+            wasmVideoLogger.e { "Error opening media: ${e.message}" }
         }
     }
 }
@@ -303,4 +479,3 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
         onTimeUpdate(it.currentTime.toFloat(), it.duration.toFloat())
     }
 }
-
