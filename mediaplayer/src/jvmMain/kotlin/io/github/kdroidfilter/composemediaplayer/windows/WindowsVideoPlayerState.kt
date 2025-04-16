@@ -178,42 +178,67 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         scope.launch {
             try {
                 mediaOperationMutex.withLock {
+                    // Stop playing if active
                     _isPlaying = false
                     val instance = videoPlayerInstance
                     if (instance != null) {
-                        player.SetPlaybackState(instance, false)
+                        // Stop playback before releasing resources
+                        val hr = player.SetPlaybackState(instance, false)
+                        if (hr < 0) {
+                            println("Error stopping playback (hr=0x${hr.toString(16)})")
+                        }
+
+                        // Cancel all media jobs
                         videoJob?.cancelAndJoin()
                         audioLevelsJob?.cancel()
+
+                        // Close the media
                         player.CloseMedia(instance)
+
+                        // Destroy the player instance
                         MediaFoundationLib.destroyInstance(instance)
                         videoPlayerInstance = null
                     }
-                    releaseAllResources()
+                    releaseAllResources()  // Ensure all other resources are cleared
                 }
             } catch (e: Exception) {
                 println("Error during dispose: ${e.message}")
             } finally {
+                // Mark player as uninitialized
                 isInitialized = false
                 _hasMedia = false
-                scope.cancel()
+                scope.cancel()  // Cancel the scope to clean up any remaining jobs
             }
         }
     }
 
     private fun releaseAllResources() {
+        // Cancel any remaining jobs related to video processing
         videoJob?.cancel()
-        resizeJob?.cancel()
         audioLevelsJob?.cancel()
+        resizeJob?.cancel()
+
+        // Ensure the frame channel is emptied
         runBlocking { clearFrameChannel() }
+
+        // Free bitmaps and frame buffers
         bitmapLock.write {
-            _currentFrame?.close()
+            _currentFrame?.close()  // Close the current frame bitmap if any
             _currentFrame = null
-            frameBitmapRecycler?.close()
+            frameBitmapRecycler?.close()  // Recycle the bitmap if any
             frameBitmapRecycler = null
         }
+
+        // Clear any shared buffer allocated for frames
         sharedFrameBuffer = null
-        frameBufferSize = 0
+        frameBufferSize = 0  // Reset frame buffer size
     }
+
+    private fun clearFrameChannel() {
+        // Drain the frame channel to ensure all items are removed
+        while (frameChannel.tryReceive().isSuccess) { }
+    }
+
 
     override fun openUri(uri: String) {
         lastUri = uri
@@ -610,10 +635,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         _error = VideoPlayerError.UnknownError(msg)
         errorMessage = msg
         isLoading = false
-    }
-
-    private fun clearFrameChannel() {
-        while (frameChannel.tryReceive().isSuccess) { }
     }
 
     private fun createVideoImageInfo() =
