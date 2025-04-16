@@ -3,6 +3,9 @@ package io.github.kdroidfilter.composemediaplayer.windows
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Logger.Companion.setMinSeverity
+import co.touchlab.kermit.Severity
 import com.sun.jna.Pointer
 import com.sun.jna.WString
 import com.sun.jna.ptr.FloatByReference
@@ -25,6 +28,10 @@ import kotlin.concurrent.read
 import kotlin.concurrent.write
 import kotlin.math.min
 
+// Initialize logger using Kermit
+internal val windowsLogger = Logger.withTag("WindowsVideoPlayerState")
+    .apply { setMinSeverity(Severity.Warn) }
+
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     companion object {
         private val mediaFoundationInitialized = AtomicBoolean(false)
@@ -34,7 +41,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             if (!mediaFoundationInitialized.getAndSet(true)) {
                 val hr = MediaFoundationLib.INSTANCE.InitMediaFoundation()
                 if (hr < 0) {
-                    println("Media Foundation initialization failed (hr=0x${hr.toString(16)})")
+                    windowsLogger.e { "Media Foundation initialization failed (hr=0x${hr.toString(16)})" }
                 }
             }
         }
@@ -192,7 +199,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         // Stop playback before releasing resources
                         val hr = player.SetPlaybackState(instance, false)
                         if (hr < 0) {
-                            println("Error stopping playback (hr=0x${hr.toString(16)})")
+                            windowsLogger.e { "Error stopping playback (hr=0x${hr.toString(16)})" }
                         }
 
                         // Cancel all media jobs
@@ -209,7 +216,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     releaseAllResources()  // Ensure all other resources are cleared
                 }
             } catch (e: Exception) {
-                println("Error during dispose: ${e.message}")
+                windowsLogger.e { "Error during dispose: ${e.message}" }
             } finally {
                 // Mark player as uninitialized
                 isInitialized = false
@@ -454,6 +461,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     frameChannel.trySend(FrameData(frameBitmap, frameTime))
                     frameBitmapRecycler = null
                 } catch (e: Exception) {
+                    windowsLogger.e { "Error processing frame bitmap: ${e.message}" }
                     frameBitmapRecycler = bitmap
                 }
 
@@ -646,6 +654,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         _error = VideoPlayerError.UnknownError(msg)
         errorMessage = msg
         isLoading = false
+        windowsLogger.e { msg }
     }
 
     private fun createVideoImageInfo() =
@@ -690,7 +699,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                println("Error in waitForPlaybackState: ${e.message}")
+                windowsLogger.e { "Error in waitForPlaybackState: ${e.message}" }
                 yield()
             }
         }
