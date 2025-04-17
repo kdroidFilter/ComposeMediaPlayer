@@ -10,16 +10,6 @@
     <div class="spinner"></div>
 </div>
 </body>
-<script>
-    // Function to hide the loader and show the app
-    function appLoaded() {
-        const loader = document.getElementById("loader");
-        const app = document.getElementById("app");
-        if (loader) loader.style.display = "none"; // Hide the loader
-        if (app) app.style.display = "block";     // Show the app
-        console.log("App is fully loaded!");
-    }
-</script>
 <footer>
     <!-- The composeApp.js script is placed in the footer to ensure the loader displays as quickly as possible. -->
     <script type="application/javascript" src="composeApp.js"></script>
