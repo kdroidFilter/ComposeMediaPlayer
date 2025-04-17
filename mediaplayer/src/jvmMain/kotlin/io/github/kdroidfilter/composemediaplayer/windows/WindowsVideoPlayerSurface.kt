@@ -97,7 +97,9 @@ fun WindowsVideoPlayerSurface(
                     durationMs = durationMs,
                     isPlaying = playerState.isPlaying,
                     subtitleTrack = playerState.currentSubtitleTrack,
-                    subtitlesEnabled = playerState.subtitlesEnabled
+                    subtitlesEnabled = playerState.subtitlesEnabled,
+                    textStyle = playerState.subtitleTextStyle,
+                    backgroundColor = playerState.subtitleBackgroundColor
                 )
             }
         }
