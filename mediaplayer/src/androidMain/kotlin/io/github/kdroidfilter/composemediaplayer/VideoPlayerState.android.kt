@@ -6,6 +6,11 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -57,6 +62,14 @@ actual open class VideoPlayerState {
     actual var subtitlesEnabled by mutableStateOf(false)
     actual var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
     actual val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    actual var subtitleTextStyle by mutableStateOf(
+        TextStyle(
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign = TextAlign.Center
+        )
+    )
 
     private var playerView: PlayerView? = null
 

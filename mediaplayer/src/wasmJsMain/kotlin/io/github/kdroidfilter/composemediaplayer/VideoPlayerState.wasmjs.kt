@@ -4,6 +4,11 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
@@ -52,6 +57,14 @@ actual open class VideoPlayerState {
     actual var subtitlesEnabled by mutableStateOf(false)
     actual var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
     actual val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    actual var subtitleTextStyle by mutableStateOf(
+        TextStyle(
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign = TextAlign.Center
+        )
+    )
 
     // Playback control properties
     private var _volume by mutableStateOf(1.0f)

@@ -1,8 +1,13 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Logger.Companion.setMinSeverity
 import co.touchlab.kermit.Severity
@@ -74,6 +79,14 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
     override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableListOf()
+    override var subtitleTextStyle: TextStyle by mutableStateOf(
+        TextStyle(
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign = TextAlign.Center
+        )
+    )
     override val metadata: VideoMetadata = VideoMetadata()
     override var isFullscreen: Boolean by mutableStateOf(false)
     private var lastUri: String? = null

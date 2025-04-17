@@ -1,6 +1,11 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Stable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import com.sun.jna.Platform
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
@@ -81,6 +86,11 @@ actual open class VideoPlayerState {
     actual var subtitlesEnabled = delegate.subtitlesEnabled
     actual var currentSubtitleTrack : SubtitleTrack? = delegate.currentSubtitleTrack
     actual val availableSubtitleTracks  = delegate.availableSubtitleTracks
+    actual var subtitleTextStyle: TextStyle
+        get() = delegate.subtitleTextStyle
+        set(value) {
+            delegate.subtitleTextStyle = value
+        }
     actual fun selectSubtitleTrack(track: SubtitleTrack?) = delegate.selectSubtitleTrack(track)
     actual fun disableSubtitles() = delegate.disableSubtitles()
 

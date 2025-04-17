@@ -1,8 +1,13 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Logger.Companion.setMinSeverity
 import co.touchlab.kermit.Severity
@@ -160,6 +165,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     override var subtitlesEnabled = false
     override var currentSubtitleTrack: SubtitleTrack? = null
     override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    override var subtitleTextStyle: TextStyle = TextStyle(
+        color = Color.White,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Normal,
+        textAlign = TextAlign.Center
+    )
     override var isLoading by mutableStateOf(false)
         private set
     override val positionText: String get() = formatTime(_currentTime)

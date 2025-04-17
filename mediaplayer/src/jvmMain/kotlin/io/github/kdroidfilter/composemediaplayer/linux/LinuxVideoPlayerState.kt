@@ -4,8 +4,13 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -142,6 +147,12 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     override var subtitlesEnabled: Boolean = false
     override var currentSubtitleTrack: SubtitleTrack? = null
     override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    override var subtitleTextStyle: TextStyle = TextStyle(
+        color = Color.White,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Normal,
+        textAlign = TextAlign.Center
+    )
 
     // ---- Aspect ratio management ----
     private var lastAspectRatioUpdateTime: Long = 0

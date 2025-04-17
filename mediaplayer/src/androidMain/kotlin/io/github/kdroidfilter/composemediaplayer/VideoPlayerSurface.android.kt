@@ -110,7 +110,8 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                     durationMs = durationMs,
                     isPlaying = playerState.isPlaying,
                     subtitleTrack = playerState.currentSubtitleTrack,
-                    subtitlesEnabled = playerState.subtitlesEnabled
+                    subtitlesEnabled = playerState.subtitlesEnabled,
+                    textStyle = playerState.subtitleTextStyle
                 )
             }
         }

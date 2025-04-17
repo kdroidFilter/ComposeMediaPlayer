@@ -5,6 +5,11 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
@@ -280,6 +285,13 @@ actual open class VideoPlayerState {
         set(_) {}
     actual val availableSubtitleTracks: MutableList<SubtitleTrack>
         get() = TODO("Not yet implemented")
+
+    actual var subtitleTextStyle: TextStyle = TextStyle(
+        color = Color.White,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Normal,
+        textAlign = TextAlign.Center
+    )
 
     actual fun selectSubtitleTrack(track: SubtitleTrack?) {
     }

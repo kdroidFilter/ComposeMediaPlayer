@@ -1,5 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import androidx.compose.ui.text.TextStyle
+
 /**
  * Defines a platform-specific video player state interface, providing the essential
  * properties and operations needed for video playback management.
@@ -47,6 +49,7 @@ interface PlatformVideoPlayerState {
     var subtitlesEnabled: Boolean
     var currentSubtitleTrack: SubtitleTrack?
     val availableSubtitleTracks: MutableList<SubtitleTrack>
+    var subtitleTextStyle: TextStyle
     fun selectSubtitleTrack(track: SubtitleTrack?)
     fun disableSubtitles()
 
