@@ -1,4 +1,4 @@
-package io.github.kdroidfilter.composemediaplayer.mac.compose
+package io.github.kdroidfilter.composemediaplayer.mac
 
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.ImageBitmap
@@ -11,7 +11,6 @@ import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
-import io.github.kdroidfilter.composemediaplayer.mac.SharedVideoPlayer
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferInt
 import kotlin.math.abs
+import kotlin.math.log10
 
 // Initialize logger using Kermit
 internal val macLogger = Logger.withTag("MacVideoPlayerState")
@@ -528,7 +528,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                 fun convertToPercentage(level: Float): Float {
                     if (level <= 0f) return 0f
                     // Conversion to decibels: 20 * log10(level)
-                    val db = 20 * kotlin.math.log10(level)
+                    val db = 20 * log10(level)
                     // Assume that -60 dB corresponds to silence and 0 dB to maximum level.
                     val normalized = ((db + 60) / 60).coerceIn(0f, 1f)
                     return normalized * 100f

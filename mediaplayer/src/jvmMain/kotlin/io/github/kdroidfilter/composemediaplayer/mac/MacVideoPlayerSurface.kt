@@ -1,4 +1,4 @@
-package io.github.kdroidfilter.composemediaplayer.mac.compose
+package io.github.kdroidfilter.composemediaplayer.mac
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -6,7 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
 
 /**

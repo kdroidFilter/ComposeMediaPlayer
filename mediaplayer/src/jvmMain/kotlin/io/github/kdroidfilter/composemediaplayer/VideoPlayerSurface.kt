@@ -4,8 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerSurface
-import io.github.kdroidfilter.composemediaplayer.mac.compose.MacVideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.mac.compose.MacVideoPlayerSurface
+import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerSurface
 
