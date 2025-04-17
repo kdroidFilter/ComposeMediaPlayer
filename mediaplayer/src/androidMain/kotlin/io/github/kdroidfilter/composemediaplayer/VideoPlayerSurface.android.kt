@@ -17,6 +17,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 
 @UnstableApi
 @Composable
@@ -82,11 +83,8 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                             AspectRatioFrameLayout.RESIZE_MODE_FIT
                         }
 
-                        // Configure subtitle view
-                        subtitleView?.apply {
-                            setStyle(CaptionStyleCompat.DEFAULT)
-                            setFixedTextSize(TypedValue.COMPLEX_UNIT_SP, 18f) //todo let user change subtitle size
-                        }
+                        // Disable native subtitle view since we're using Compose-based subtitles
+                        subtitleView?.visibility = android.view.View.GONE
 
                         // Attach this view to the player state
                         playerState.attachPlayerView(this)
@@ -97,6 +95,47 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                     // the video player when not in fullscreen mode
                 }
             )
+
+            // Add Compose-based subtitle layer
+            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+                // Calculate current time in milliseconds
+                val currentTimeMs = (playerState.sliderPos / 1000f * 
+                    playerState.durationText.toTimeMs()).toLong()
+
+                // Calculate duration in milliseconds
+                val durationMs = playerState.durationText.toTimeMs()
+
+                ComposeSubtitleLayer(
+                    currentTimeMs = currentTimeMs,
+                    durationMs = durationMs,
+                    isPlaying = playerState.isPlaying,
+                    subtitleTrack = playerState.currentSubtitleTrack,
+                    subtitlesEnabled = playerState.subtitlesEnabled
+                )
+            }
         }
+    }
+}
+
+/**
+ * Converts a time string in the format "mm:ss" or "hh:mm:ss" to milliseconds.
+ */
+private fun String.toTimeMs(): Long {
+    val parts = this.split(":")
+    return when (parts.size) {
+        2 -> {
+            // Format: "mm:ss"
+            val minutes = parts[0].toLongOrNull() ?: 0
+            val seconds = parts[1].toLongOrNull() ?: 0
+            (minutes * 60 + seconds) * 1000
+        }
+        3 -> {
+            // Format: "hh:mm:ss"
+            val hours = parts[0].toLongOrNull() ?: 0
+            val minutes = parts[1].toLongOrNull() ?: 0
+            val seconds = parts[2].toLongOrNull() ?: 0
+            (hours * 3600 + minutes * 60 + seconds) * 1000
+        }
+        else -> 0
     }
 }

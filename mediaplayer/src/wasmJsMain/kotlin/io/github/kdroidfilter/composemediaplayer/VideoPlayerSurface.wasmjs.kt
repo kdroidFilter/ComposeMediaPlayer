@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.htmlinterop.HtmlView
+import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -89,6 +90,23 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                     }
                 }
         ) {
+            // Add Compose-based subtitle layer
+            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+                // Calculate current time in milliseconds
+                val currentTimeMs = (playerState.sliderPos / 1000f * 
+                    playerState.durationText.toTimeMs()).toLong()
+
+                // Calculate duration in milliseconds
+                val durationMs = playerState.durationText.toTimeMs()
+
+                ComposeSubtitleLayer(
+                    currentTimeMs = currentTimeMs,
+                    durationMs = durationMs,
+                    isPlaying = playerState.isPlaying,
+                    subtitleTrack = playerState.currentSubtitleTrack,
+                    subtitlesEnabled = playerState.subtitlesEnabled
+                )
+            }
 
             // Create HTML video element
             // Use key to force recreation when CORS mode changes
@@ -318,23 +336,18 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
             }
         }
 
+        // We're now using Compose-based subtitles instead of HTML track elements
+        // This effect is kept for backward compatibility but doesn't add track elements anymore
         LaunchedEffect(playerState.currentSubtitleTrack) {
             videoElement?.let { video ->
+                // Remove any existing track elements
                 val trackElements = video.querySelectorAll("track")
                 for (i in 0 until trackElements.length) {
                     val track = trackElements.item(i)
                     track?.let { video.removeChild(it) }
                 }
 
-                playerState.currentSubtitleTrack?.let { track ->
-                    val trackElement = document.createElement("track") as HTMLTrackElement
-                    trackElement.kind = "subtitles"
-                    trackElement.label = track.label
-                    trackElement.srclang = track.language
-                    trackElement.src = track.src
-                    trackElement.default = true
-                    video.appendChild(trackElement)
-                }
+                // We don't add new track elements since we're using Compose-based subtitles
             }
         }
     }
@@ -589,5 +602,28 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
     val video = event.target as? HTMLVideoElement
     video?.let {
         onTimeUpdate(it.currentTime.toFloat(), it.duration.toFloat())
+    }
+}
+
+/**
+ * Converts a time string in the format "mm:ss" or "hh:mm:ss" to milliseconds.
+ */
+private fun String.toTimeMs(): Long {
+    val parts = this.split(":")
+    return when (parts.size) {
+        2 -> {
+            // Format: "mm:ss"
+            val minutes = parts[0].toLongOrNull() ?: 0
+            val seconds = parts[1].toLongOrNull() ?: 0
+            (minutes * 60 + seconds) * 1000
+        }
+        3 -> {
+            // Format: "hh:mm:ss"
+            val hours = parts[0].toLongOrNull() ?: 0
+            val minutes = parts[1].toLongOrNull() ?: 0
+            val seconds = parts[2].toLongOrNull() ?: 0
+            (hours * 3600 + minutes * 60 + seconds) * 1000
+        }
+        else -> 0
     }
 }

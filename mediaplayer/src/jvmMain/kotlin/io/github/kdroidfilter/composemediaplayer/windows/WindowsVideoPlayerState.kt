@@ -878,8 +878,23 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {}
-    override fun disableSubtitles() {}
+    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+        scope.launch {
+            withContext(Dispatchers.Main) {
+                currentSubtitleTrack = track
+                subtitlesEnabled = track != null
+            }
+        }
+    }
+
+    override fun disableSubtitles() {
+        scope.launch {
+            withContext(Dispatchers.Main) {
+                subtitlesEnabled = false
+                currentSubtitleTrack = null
+            }
+        }
+    }
 
     /**
      * Toggles the fullscreen state of the video player

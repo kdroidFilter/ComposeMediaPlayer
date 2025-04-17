@@ -340,76 +340,39 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     // ---- Subtitle management ----
     override fun selectSubtitleTrack(track: SubtitleTrack?) {
         currentSubtitleTrack = track
+        subtitlesEnabled = track != null
+
+        // We're not using GStreamer's native subtitle rendering anymore
+        // Instead, we're using Compose-based subtitles
+        // So we don't need to set the suburi or enable the GST_PLAY_FLAG_TEXT flag
+
+        // Just for backward compatibility, we'll disable any existing subtitles in GStreamer
         try {
-            if (track != null) {
-                val subUri = if (
-                    track.src.toString().startsWith("http://") ||
-                    track.src.toString().startsWith("https://")
-                ) {
-                    track.src.toString()
-                } else {
-                    File(track.src.toString()).toURI().toString()
-                }
-                if (isPlaying) {
-                    val pos = playbin.queryPosition(Format.TIME)
-                    playbin.state = State.READY
-                    playbin.set("suburi", subUri)
-                    val currentFlags = playbin.get("flags") as Int
-                    playbin.set("flags", currentFlags or GST_PLAY_FLAG_TEXT)
-                    playbin.state = State.PLAYING
-                    // Timer to perform a seek to the correct position
-                    Timer(100) { _ ->
-                        playbin.seekSimple(
-                            Format.TIME,
-                            EnumSet.of(SeekFlags.FLUSH, SeekFlags.ACCURATE),
-                            pos
-                        )
-                    }.apply {
-                        isRepeats = false
-                        start()
-                    }
-                } else {
-                    playbin.set("suburi", subUri)
-                    val currentFlags = playbin.get("flags") as Int
-                    playbin.set("flags", currentFlags or GST_PLAY_FLAG_TEXT)
-                }
-                subtitlesEnabled = true
-            } else {
-                disableSubtitles()
-            }
+            // Disable native subtitles in GStreamer
+            playbin.set("suburi", "")
+            val currentFlags = playbin.get("flags") as Int
+            playbin.set("flags", currentFlags and GST_PLAY_FLAG_TEXT.inv())
         } catch (e: Exception) {
-            _error = VideoPlayerError.UnknownError("Error while selecting subtitles: ${e.message}")
+            // Ignore errors, as we're not using GStreamer's subtitle rendering anyway
         }
     }
 
     override fun disableSubtitles() {
         currentSubtitleTrack = null
+        subtitlesEnabled = false
+
+        // We're not using GStreamer's native subtitle rendering anymore
+        // Instead, we're using Compose-based subtitles
+        // So we don't need to disable the GST_PLAY_FLAG_TEXT flag
+
+        // Just for backward compatibility, we'll disable any existing subtitles in GStreamer
         try {
-            if (isPlaying) {
-                val pos = playbin.queryPosition(Format.TIME)
-                playbin.state = State.READY
-                playbin.set("suburi", "")
-                val currentFlags = playbin.get("flags") as Int
-                playbin.set("flags", currentFlags and GST_PLAY_FLAG_TEXT.inv())
-                playbin.state = State.PLAYING
-                Timer(100) { _ ->
-                    playbin.seekSimple(
-                        Format.TIME,
-                        EnumSet.of(SeekFlags.FLUSH, SeekFlags.ACCURATE),
-                        pos
-                    )
-                }.apply {
-                    isRepeats = false
-                    start()
-                }
-            } else {
-                playbin.set("suburi", "")
-                val currentFlags = playbin.get("flags") as Int
-                playbin.set("flags", currentFlags and GST_PLAY_FLAG_TEXT.inv())
-            }
-            subtitlesEnabled = false
+            // Disable native subtitles in GStreamer
+            playbin.set("suburi", "")
+            val currentFlags = playbin.get("flags") as Int
+            playbin.set("flags", currentFlags and GST_PLAY_FLAG_TEXT.inv())
         } catch (e: Exception) {
-            _error = VideoPlayerError.UnknownError("Error disabling subtitles: ${e.message}")
+            // Ignore errors, as we're not using GStreamer's subtitle rendering anyway
         }
     }
 

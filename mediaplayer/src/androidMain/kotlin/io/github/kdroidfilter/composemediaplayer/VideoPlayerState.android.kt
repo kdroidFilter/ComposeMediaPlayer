@@ -60,65 +60,51 @@ actual open class VideoPlayerState {
 
     private var playerView: PlayerView? = null
 
-    // Select an external subtitle track before media preparation
+    // Select an external subtitle track
     actual fun selectSubtitleTrack(track: SubtitleTrack?) {
         if (track == null) {
             disableSubtitles()
             return
         }
+
         // Update current track and enable flag.
         currentSubtitleTrack = track
         subtitlesEnabled = true
 
+        // We're not using ExoPlayer's native subtitle rendering anymore
+        // Instead, we're using Compose-based subtitles
+
         exoPlayer?.let { player ->
-            // Get current playback position and playing state
-            val currentPos = player.currentPosition
-            val wasPlaying = player.isPlaying
-
-            // If media is already loaded, we need to reload it with the new subtitle configuration
-            if (player.currentMediaItem != null) {
-                val currentUri = player.currentMediaItem?.localConfiguration?.uri?.toString()
-                if (currentUri != null) {
-                    // Create new MediaItem with subtitle configuration
-                    val mediaItemBuilder = MediaItem.Builder().setUri(currentUri)
-                    val subtitleUri = Uri.parse(track.src)
-                    val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
-                        .setMimeType(MimeTypes.TEXT_VTT)
-                        .setLanguage(track.language)
-                        .setLabel(track.label)
-                        .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                        .build()
-                    mediaItemBuilder.setSubtitleConfigurations(listOf(subtitleConfig))
-
-                    // Replace current media item
-                    player.setMediaItem(mediaItemBuilder.build())
-                    player.prepare()
-
-                    // Restore playback state
-                    player.seekTo(currentPos)
-                    if (wasPlaying) player.play()
-                }
-            }
-
-            // Update track selection parameters
+            // Disable native subtitles in ExoPlayer
             val trackParameters = player.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                .setPreferredTextLanguage(track.language)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()
             player.trackSelectionParameters = trackParameters
+
+            // Hide the subtitle view
+            playerView?.subtitleView?.visibility = android.view.View.GONE
         }
     }
 
     actual fun disableSubtitles() {
+        // Update state
+        currentSubtitleTrack = null
+        subtitlesEnabled = false
+
+        // We're not using ExoPlayer's native subtitle rendering anymore
+        // Instead, we're using Compose-based subtitles
+
         exoPlayer?.let { player ->
+            // Disable native subtitles in ExoPlayer
             val parameters = player.trackSelectionParameters.buildUpon()
                 .setPreferredTextLanguage(null)
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()
             player.trackSelectionParameters = parameters
+
+            // Hide the subtitle view
+            playerView?.subtitleView?.visibility = android.view.View.GONE
         }
-        currentSubtitleTrack = null
-        subtitlesEnabled = false
     }
 
     internal fun attachPlayerView(view: PlayerView) {
@@ -308,28 +294,22 @@ actual open class VideoPlayerState {
 
     /**
      * Open a video URI.
-     * If a subtitle track is selected, add it as an external subtitle source.
+     * We're not using ExoPlayer's native subtitle rendering anymore,
+     * so we don't need to add subtitle configurations to the MediaItem.
      */
     actual fun openUri(uri: String) {
         val mediaItemBuilder = MediaItem.Builder().setUri(uri)
-        currentSubtitleTrack?.let { subtitle ->
-            // Build subtitle configuration for external subtitle
-            val subtitleUri = Uri.parse(subtitle.src)
-            val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
-                .setMimeType(MimeTypes.TEXT_VTT) // Adjust MIME type as needed
-                .setLanguage(subtitle.language)
-                .setLabel(subtitle.label)
-                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                .build()
-            mediaItemBuilder.setSubtitleConfigurations(listOf(subtitleConfig))
-        }
+        // We're not using ExoPlayer's native subtitle rendering anymore
+        // Instead, we're using Compose-based subtitles
         val mediaItem = mediaItemBuilder.build()
         openFromMediaItem(mediaItem)
     }
 
     /**
      * Open a video file.
-     * Converts the file into a URI and adds external subtitle configuration if selected.
+     * Converts the file into a URI.
+     * We're not using ExoPlayer's native subtitle rendering anymore,
+     * so we don't need to add subtitle configurations to the MediaItem.
      */
     actual fun openFile(file: PlatformFile) {
         val mediaItemBuilder = MediaItem.Builder()
@@ -339,16 +319,8 @@ actual open class VideoPlayerState {
             is AndroidFile.FileWrapper -> Uri.fromFile(androidFile.file)
         }
         mediaItemBuilder.setUri(videoUri)
-        currentSubtitleTrack?.let { subtitle ->
-            val subtitleUri = Uri.parse(subtitle.src)
-            val subtitleConfig = MediaItem.SubtitleConfiguration.Builder(subtitleUri)
-                .setMimeType(MimeTypes.TEXT_VTT)
-                .setLanguage(subtitle.language)
-                .setLabel(subtitle.label)
-                .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-                .build()
-            mediaItemBuilder.setSubtitleConfigurations(listOf(subtitleConfig))
-        }
+        // We're not using ExoPlayer's native subtitle rendering anymore
+        // Instead, we're using Compose-based subtitles
         val mediaItem = mediaItemBuilder.build()
         openFromMediaItem(mediaItem)
     }
