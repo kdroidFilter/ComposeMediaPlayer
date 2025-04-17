@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowInsetsController
 import android.view.WindowInsets
@@ -13,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.core.app.ActivityOptionsCompat
 import androidx.core.view.WindowCompat
 import androidx.media3.common.util.UnstableApi
 
@@ -34,9 +36,14 @@ class FullscreenPlayerActivity : ComponentActivity() {
             // Register the player state to be accessible from the fullscreen activity
             VideoPlayerStateRegistry.registerState(playerState)
 
-            // Launch the fullscreen activity
+            // Launch the fullscreen activity without animations
             val intent = Intent(context, FullscreenPlayerActivity::class.java)
-            context.startActivity(intent)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+            // Use ActivityOptionsCompat to ensure animations are disabled (modern approach)
+            val options = ActivityOptionsCompat.makeCustomAnimation(context, 0, 0)
+            context.startActivity(intent, options.toBundle())
         }
     }
 
@@ -56,7 +63,9 @@ class FullscreenPlayerActivity : ComponentActivity() {
             override fun handleOnBackPressed() {
                 // Exit fullscreen mode when back button is pressed
                 VideoPlayerStateRegistry.getRegisteredState()?.isFullscreen = false
+
                 finish()
+                // Note: Exit animation is disabled in the overridden finish() method
             }
         })
 
@@ -93,7 +102,7 @@ class FullscreenPlayerActivity : ComponentActivity() {
      * Sets up fullscreen mode based on the Android version
      */
     private fun setupFullscreenMode() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // For Android 11+ (API 30+)
             try {
                 val controller = window.insetsController
@@ -131,4 +140,33 @@ class FullscreenPlayerActivity : ComponentActivity() {
         // Clear the registered state when the activity is destroyed
         VideoPlayerStateRegistry.clearRegisteredState()
     }
+
+
+    @Suppress("DEPRECATION")
+    override fun finish() {
+        super.finish()
+        window.exitTransition = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        } else {
+            overridePendingTransition(0, 0)
+        }
+
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onResume() {
+        super.onResume()
+        // Disable re-entry animation
+        window.exitTransition = null
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        } else {
+            overridePendingTransition(0, 0)
+        }
+
+    }
+
+
 }
