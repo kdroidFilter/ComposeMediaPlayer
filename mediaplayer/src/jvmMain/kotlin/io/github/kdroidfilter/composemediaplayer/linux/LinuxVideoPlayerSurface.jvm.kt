@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 
 /**
@@ -20,15 +21,19 @@ import androidx.compose.ui.unit.IntSize
  *                    including playback control, timeline management, and video frames.
  * @param modifier An optional `Modifier` for customizing the layout and appearance of the
  *                 composable container. Defaults to an empty `Modifier`.
+ * @param isInFullscreenWindow Whether this surface is already being displayed in a fullscreen window.
  */
 
 @Composable
 fun LinuxVideoPlayerSurface(
     playerState: LinuxVideoPlayerState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isInFullscreenWindow: Boolean = false
 ) {
     Box(
-        modifier = modifier,
+        modifier = modifier.onSizeChanged {
+            // If needed, add resize handling here
+        },
         contentAlignment = Alignment.Center
     ) {
         if (playerState.hasMedia) {
@@ -46,5 +51,9 @@ fun LinuxVideoPlayerSurface(
                 }
             }
         }
+    }
+
+    if (playerState.isFullscreen && !isInFullscreenWindow) {
+        openFullscreenWindow(playerState)
     }
 }

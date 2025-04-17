@@ -1,4 +1,4 @@
-package io.github.kdroidfilter.composemediaplayer.windows
+package io.github.kdroidfilter.composemediaplayer.mac
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -11,12 +11,12 @@ import io.github.kdroidfilter.composemediaplayer.common.openFullscreenWindow
  * @param playerState The player state to use in the fullscreen window
  */
 @Composable
-fun openFullscreenWindow(playerState: WindowsVideoPlayerState) {
+fun openFullscreenWindow(playerState: MacVideoPlayerState) {
     openFullscreenWindow(
         playerState = playerState,
         renderSurface = { state, modifier, isInFullscreenWindow ->
-            WindowsVideoPlayerSurface(
-                playerState = state as WindowsVideoPlayerState,
+            MacVideoPlayerSurface(
+                playerState = state as MacVideoPlayerState,
                 modifier = modifier,
                 isInFullscreenWindow = isInFullscreenWindow
             )
