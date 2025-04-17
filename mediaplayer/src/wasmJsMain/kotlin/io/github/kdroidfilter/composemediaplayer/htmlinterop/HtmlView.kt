@@ -16,6 +16,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateObserver
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.*
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -28,6 +29,9 @@ import kotlinx.dom.createElement
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 
+val LocalLayerContainer = staticCompositionLocalOf<Element> {
+    document.body ?: error("Document body is not available")
+}
 val NoOpUpdate: Element.() -> Unit = {}
 
 private class ComponentInfo<T : Element> {
