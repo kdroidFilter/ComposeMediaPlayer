@@ -324,10 +324,40 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         lastUri = uri
 
         if (!isInitialized || videoPlayerInstance == null) {
-            setError("Player is not initialized.")
+            // Instead of immediately returning an error, wait for initialization to complete
+            scope.launch {
+                try {
+                    // Wait for initialization to complete with a timeout
+                    var timeoutCounter = 0
+                    while ((!isInitialized || videoPlayerInstance == null) && timeoutCounter < 10) {
+                        delay(100)
+                        timeoutCounter++
+                    }
+
+                    // Check if initialization completed successfully
+                    if (!isInitialized || videoPlayerInstance == null) {
+                        setError("Player initialization timed out.")
+                        return@launch
+                    }
+
+                    // Now that the player is initialized, open the URI
+                    openUriInternal(uri)
+                } catch (e: Exception) {
+                    setError("Error waiting for player initialization: ${e.message}")
+                }
+            }
             return
         }
 
+        openUriInternal(uri)
+    }
+
+    /**
+     * Internal implementation of openUri that assumes the player is initialized
+     *
+     * @param uri The path to the media file or URL to open
+     */
+    private fun openUriInternal(uri: String) {
         scope.launch {
             mediaOperationMutex.withLock {
                 try {
