@@ -1,12 +1,14 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Stable
+import androidx.media3.common.util.UnstableApi
 import java.lang.ref.WeakReference
 
 /**
  * Registry for sharing VideoPlayerState instances between activities.
  * This is used to pass the player state to the fullscreen activity.
  */
+@UnstableApi
 @Stable
 object VideoPlayerStateRegistry {
     private var registeredState: WeakReference<VideoPlayerState>? = null
