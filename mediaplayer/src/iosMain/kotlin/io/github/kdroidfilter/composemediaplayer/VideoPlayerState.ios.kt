@@ -293,6 +293,8 @@ actual open class VideoPlayerState {
         textAlign = TextAlign.Center
     )
 
+    actual var subtitleBackgroundColor: Color = Color.Black.copy(alpha = 0.5f)
+
     actual fun selectSubtitleTrack(track: SubtitleTrack?) {
     }
 

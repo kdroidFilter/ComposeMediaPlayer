@@ -1,10 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer
 
-import android.util.TypedValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -15,7 +13,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 
@@ -111,7 +108,8 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                     isPlaying = playerState.isPlaying,
                     subtitleTrack = playerState.currentSubtitleTrack,
                     subtitlesEnabled = playerState.subtitlesEnabled,
-                    textStyle = playerState.subtitleTextStyle
+                    textStyle = playerState.subtitleTextStyle,
+                    backgroundColor = playerState.subtitleBackgroundColor
                 )
             }
         }

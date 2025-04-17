@@ -65,6 +65,7 @@ actual open class VideoPlayerState {
             textAlign = TextAlign.Center
         )
     )
+    actual var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
 
     // Playback control properties
     private var _volume by mutableStateOf(1.0f)

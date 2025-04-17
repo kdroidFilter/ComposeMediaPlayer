@@ -31,6 +31,8 @@ fun SinglePlayerScreen() {
         // Default video URL
         var videoUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
         val playerState = rememberVideoPlayerState()
+        playerState.subtitleTextStyle = TextStyle(color = Color.Red, fontWeight = FontWeight.Bold)
+        playerState.subtitleBackgroundColor = Color.Blue
 
         // List of subtitle tracks and the currently selected track
         val subtitleTracks = remember { mutableStateListOf<SubtitleTrack>() }

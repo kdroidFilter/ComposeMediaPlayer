@@ -1,5 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 
 /**
@@ -50,6 +51,7 @@ interface PlatformVideoPlayerState {
     var currentSubtitleTrack: SubtitleTrack?
     val availableSubtitleTracks: MutableList<SubtitleTrack>
     var subtitleTextStyle: TextStyle
+    var subtitleBackgroundColor: Color
     fun selectSubtitleTrack(track: SubtitleTrack?)
     fun disableSubtitles()
 

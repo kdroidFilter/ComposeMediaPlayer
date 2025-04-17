@@ -87,6 +87,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             textAlign = TextAlign.Center
         )
     )
+    override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
     override val metadata: VideoMetadata = VideoMetadata()
     override var isFullscreen: Boolean by mutableStateOf(false)
     private var lastUri: String? = null

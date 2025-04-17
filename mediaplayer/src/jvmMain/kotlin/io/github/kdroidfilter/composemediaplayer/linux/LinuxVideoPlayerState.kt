@@ -153,6 +153,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         fontWeight = FontWeight.Normal,
         textAlign = TextAlign.Center
     )
+    override var subtitleBackgroundColor: Color = Color.Black.copy(alpha = 0.5f)
 
     // ---- Aspect ratio management ----
     private var lastAspectRatioUpdateTime: Long = 0

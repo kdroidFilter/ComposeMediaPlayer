@@ -71,6 +71,8 @@ actual open class VideoPlayerState {
         )
     )
 
+    actual var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+
     private var playerView: PlayerView? = null
 
     // Select an external subtitle track
