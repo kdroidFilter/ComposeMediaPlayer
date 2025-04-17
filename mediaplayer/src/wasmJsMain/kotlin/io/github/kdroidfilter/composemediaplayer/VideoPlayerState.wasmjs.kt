@@ -54,7 +54,12 @@ actual open class VideoPlayerState {
     actual val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
 
     // Playback control properties
-    actual var volume by mutableStateOf(1.0f)
+    private var _volume by mutableStateOf(1.0f)
+    actual var volume: Float
+        get() = _volume
+        set(value) {
+            _volume = value.coerceIn(0f, 1f)
+        }
     actual var sliderPos by mutableStateOf(0.0f)
     actual var userDragging by mutableStateOf(false)
     actual var loop by mutableStateOf(false)
@@ -224,10 +229,11 @@ actual open class VideoPlayerState {
      * 
      * @param currentTime The current playback position in seconds
      * @param duration The total duration of the media in seconds
+     * @param forceUpdate If true, bypasses the rate limiting check (useful for tests)
      */
-    fun updatePosition(currentTime: Float, duration: Float) {
+    fun updatePosition(currentTime: Float, duration: Float, forceUpdate: Boolean = false) {
         val now = TimeSource.Monotonic.markNow()
-        if (now - lastUpdateTime >= 1.seconds) {
+        if (forceUpdate || now - lastUpdateTime >= 1.seconds) {
             // Calculate a dynamic threshold based on video duration (10% of duration or at least 0.5 seconds)
             val threshold = if (duration > 0f && !duration.isNaN()) {
                 maxOf(duration * 0.1f, 0.5f)
@@ -262,9 +268,10 @@ actual open class VideoPlayerState {
      * 
      * @param currentTime The current playback position in seconds
      * @param duration The total duration of the media in seconds
+     * @param forceUpdate If true, bypasses the rate limiting check (useful for tests)
      */
-    fun onTimeUpdate(currentTime: Float, duration: Float) {
-        updatePosition(currentTime, duration)
+    fun onTimeUpdate(currentTime: Float, duration: Float, forceUpdate: Boolean = false) {
+        updatePosition(currentTime, duration, forceUpdate)
     }
 
     /**

@@ -58,6 +58,12 @@ kotlin {
             implementation(libs.androidx.activityCompose)
         }
 
+        androidUnitTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(kotlin("test-junit"))
+            implementation(libs.kotlinx.coroutines.test)
+        }
+
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.gst1.java.core)
@@ -75,8 +81,18 @@ kotlin {
         iosMain.dependencies {
         }
 
+        iosTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
+        }
+
         wasmJsMain.dependencies {
             implementation(libs.kotlinx.browser.wasm.js)
+        }
+
+        wasmJsTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
         }
 
     }
