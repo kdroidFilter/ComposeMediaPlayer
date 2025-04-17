@@ -58,6 +58,7 @@ actual open class VideoPlayerState {
     actual var sliderPos by mutableStateOf(0.0f)
     actual var userDragging by mutableStateOf(false)
     actual var loop by mutableStateOf(false)
+    actual var isFullscreen by mutableStateOf(false)
 
     // Audio level indicators
     private var _leftLevel by mutableStateOf(0f)
@@ -189,6 +190,13 @@ actual open class VideoPlayerState {
      */
     actual fun clearError() {
         _error = null
+    }
+
+    /**
+     * Toggles the fullscreen state of the video player
+     */
+    actual fun toggleFullscreen() {
+        isFullscreen = !isFullscreen
     }
 
     /**

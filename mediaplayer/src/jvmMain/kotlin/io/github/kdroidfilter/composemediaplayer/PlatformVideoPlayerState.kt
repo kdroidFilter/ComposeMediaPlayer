@@ -39,6 +39,7 @@ interface PlatformVideoPlayerState {
     val durationText: String
     val isLoading: Boolean
     val error: VideoPlayerError?
+    var isFullscreen: Boolean
 
     val metadata: VideoMetadata
 
@@ -54,6 +55,7 @@ interface PlatformVideoPlayerState {
     fun pause()
     fun stop()
     fun seekTo(value: Float)
+    fun toggleFullscreen()
     fun dispose()
     fun clearError()
 }

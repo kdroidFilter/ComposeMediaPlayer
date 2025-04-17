@@ -17,12 +17,29 @@ import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLTrackElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
+import kotlin.js.js
 import kotlin.math.abs
+
+/**
+ * Request fullscreen for a video element
+ */
+private fun requestFullscreen(video: HTMLVideoElement) {
+    js("video.requestFullscreen()")
+}
+
+/**
+ * Exit fullscreen if document is in fullscreen mode
+ */
+private fun exitFullscreen() {
+    js("if (document.fullscreenElement) document.exitFullscreen()")
+}
+
 
 /**
  * Logger for WebAssembly video player surface
@@ -160,6 +177,93 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
         // Handle loop update
         LaunchedEffect(playerState.loop) {
             videoElement?.loop = playerState.loop
+        }
+
+        // Handle fullscreen update
+        LaunchedEffect(playerState.isFullscreen) {
+            videoElement?.let { video ->
+                if (playerState.isFullscreen) {
+                    try {
+                        // Request fullscreen on the video element using helper function
+                        wasmVideoLogger.d { "Requesting fullscreen" }
+                        requestFullscreen(video)
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error requesting fullscreen: ${e.message}" }
+                    }
+                } else {
+                    try {
+                        // Exit fullscreen if we're in fullscreen mode using helper function
+                        wasmVideoLogger.d { "Exiting fullscreen" }
+                        exitFullscreen()
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error exiting fullscreen: ${e.message}" }
+                    }
+                }
+            }
+        }
+
+        // Listen for fullscreen change events on the document
+        DisposableEffect(Unit) {
+            // Create a fullscreen change listener function
+            val fullscreenChangeListener: (Event) -> Unit = {
+                // Check if we're no longer in fullscreen mode but our state says we are
+                videoElement?.let { video ->
+                    val isDocumentFullscreen = video.ownerDocument?.fullscreenElement != null
+                    if (!isDocumentFullscreen && playerState.isFullscreen) {
+                        wasmVideoLogger.d { "Fullscreen exited externally (e.g., via Escape key)" }
+                        playerState.isFullscreen = false
+                    }
+                }
+            }
+
+            // Add event listeners for fullscreen change events
+            document.addEventListener("fullscreenchange", fullscreenChangeListener)
+            document.addEventListener("webkitfullscreenchange", fullscreenChangeListener)
+            document.addEventListener("mozfullscreenchange", fullscreenChangeListener)
+            document.addEventListener("MSFullscreenChange", fullscreenChangeListener)
+
+            // Remove the event listeners when the composable is disposed
+            onDispose {
+                document.removeEventListener("fullscreenchange", fullscreenChangeListener)
+                document.removeEventListener("webkitfullscreenchange", fullscreenChangeListener)
+                document.removeEventListener("mozfullscreenchange", fullscreenChangeListener)
+                document.removeEventListener("MSFullscreenChange", fullscreenChangeListener)
+            }
+        }
+
+        // Listen for play/pause events on the video element
+        DisposableEffect(videoElement) {
+            val video = videoElement ?: return@DisposableEffect onDispose {}
+
+            // Create play event listener
+            val playListener: (Event) -> Unit = {
+                wasmVideoLogger.d { "Video played externally" }
+                if (!playerState.isPlaying) {
+                    scope.launch {
+                        playerState.play()
+                    }
+                }
+            }
+
+            // Create pause event listener
+            val pauseListener: (Event) -> Unit = {
+                wasmVideoLogger.d { "Video paused externally" }
+                if (playerState.isPlaying) {
+                    scope.launch {
+                        playerState.pause()
+                    }
+                }
+            }
+
+            // Add event listeners for play/pause events
+            video.addEventListener("play", playListener)
+            video.addEventListener("pause", pauseListener)
+
+            // Remove the event listeners when the composable is disposed
+            onDispose {
+                video.removeEventListener("play", playListener)
+                video.removeEventListener("pause", pauseListener)
+            }
         }
 
         // When CORS mode changes, we log it and store the current position and playing state

@@ -56,6 +56,14 @@ actual open class VideoPlayerState {
     actual val isLoading: Boolean
         get() = _isLoading
 
+    // Fullscreen state
+    private var _isFullscreen by mutableStateOf(false)
+    actual var isFullscreen: Boolean
+        get() = _isFullscreen
+        set(value) {
+            _isFullscreen = value
+        }
+
     actual val error: VideoPlayerError? = null
 
     // Observable instance of AVPlayer
@@ -237,6 +245,14 @@ actual open class VideoPlayerState {
 
     actual fun clearError() {
         Logger.d { "clearError called" }
+    }
+
+    /**
+     * Toggles the fullscreen state of the video player
+     */
+    actual fun toggleFullscreen() {
+        Logger.d { "toggleFullscreen called" }
+        _isFullscreen = !_isFullscreen
     }
 
     actual fun dispose() {

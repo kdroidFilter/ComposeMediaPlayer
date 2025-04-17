@@ -207,6 +207,15 @@ fun SinglePlayerScreen() {
                         Icon(Icons.Default.Subtitles, contentDescription = "Subtitles")
                     }
 
+                    FilledIconButton(
+                        onClick = { playerState.toggleFullscreen() },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    ) {
+                        Icon(Icons.Default.Fullscreen, contentDescription = "Subtitles")
+                    }
+
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
