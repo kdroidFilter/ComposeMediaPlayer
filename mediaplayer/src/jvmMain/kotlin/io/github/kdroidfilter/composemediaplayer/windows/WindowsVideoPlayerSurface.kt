@@ -18,11 +18,13 @@ import androidx.compose.ui.unit.IntSize
  *
  * @param playerState The state of the Windows video player, used to manage video playback and rendering.
  * @param modifier The modifier to be used to adjust the layout or styling of the composable.
+ * @param isInFullscreenWindow Whether this surface is already being displayed in a fullscreen window.
  */
 @Composable
 fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
     modifier: Modifier = Modifier,
+    isInFullscreenWindow: Boolean = false,
 ) {
     // Keep track of when this instance is first composed with this player state
     val isFirstComposition = remember(playerState) { true }
@@ -57,5 +59,9 @@ fun WindowsVideoPlayerSurface(
                 }
             }
         }
+    }
+
+    if (playerState.isFullscreen && !isInFullscreenWindow) {
+        openFullscreenWindow(playerState)
     }
 }
