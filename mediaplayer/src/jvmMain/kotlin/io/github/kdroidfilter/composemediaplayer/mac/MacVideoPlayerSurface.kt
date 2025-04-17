@@ -1,9 +1,10 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -11,29 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 
-/**
- * Converts a time string in the format "mm:ss" or "hh:mm:ss" to milliseconds.
- */
-private fun String.toTimeMs(): Long {
-    val parts = this.split(":")
-    return when (parts.size) {
-        2 -> {
-            // Format: "mm:ss"
-            val minutes = parts[0].toLongOrNull() ?: 0
-            val seconds = parts[1].toLongOrNull() ?: 0
-            (minutes * 60 + seconds) * 1000
-        }
-        3 -> {
-            // Format: "hh:mm:ss"
-            val hours = parts[0].toLongOrNull() ?: 0
-            val minutes = parts[1].toLongOrNull() ?: 0
-            val seconds = parts[2].toLongOrNull() ?: 0
-            (hours * 3600 + minutes * 60 + seconds) * 1000
-        }
-        else -> 0
-    }
-}
 
 /**
  * A Composable function that renders a video player surface for MacOS.

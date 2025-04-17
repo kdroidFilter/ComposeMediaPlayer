@@ -13,33 +13,18 @@ import androidx.compose.ui.graphics.Color
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.htmlinterop.HtmlView
+import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.w3c.dom.HTMLTrackElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
-import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
-import kotlin.js.js
 import kotlin.math.abs
 
-/**
- * Request fullscreen for a video element
- */
-private fun requestFullscreen(video: HTMLVideoElement) {
-    js("video.requestFullscreen()")
-}
-
-/**
- * Exit fullscreen if document is in fullscreen mode
- */
-private fun exitFullscreen() {
-    js("if (document.fullscreenElement) document.exitFullscreen()")
-}
 
 
 /**
@@ -608,24 +593,15 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
 }
 
 /**
- * Converts a time string in the format "mm:ss" or "hh:mm:ss" to milliseconds.
+ * Request fullscreen for a video element
  */
-private fun String.toTimeMs(): Long {
-    val parts = this.split(":")
-    return when (parts.size) {
-        2 -> {
-            // Format: "mm:ss"
-            val minutes = parts[0].toLongOrNull() ?: 0
-            val seconds = parts[1].toLongOrNull() ?: 0
-            (minutes * 60 + seconds) * 1000
-        }
-        3 -> {
-            // Format: "hh:mm:ss"
-            val hours = parts[0].toLongOrNull() ?: 0
-            val minutes = parts[1].toLongOrNull() ?: 0
-            val seconds = parts[2].toLongOrNull() ?: 0
-            (hours * 3600 + minutes * 60 + seconds) * 1000
-        }
-        else -> 0
-    }
+private fun requestFullscreen(video: HTMLVideoElement) {
+    js("video.requestFullscreen()")
+}
+
+/**
+ * Exit fullscreen if document is in fullscreen mode
+ */
+private fun exitFullscreen() {
+    js("if (document.fullscreenElement) document.exitFullscreen()")
 }

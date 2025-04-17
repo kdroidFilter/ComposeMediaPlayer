@@ -92,28 +92,6 @@ fun ComposeSubtitleLayer(
     }
 }
 
-/**
- * Converts a time string in the format "mm:ss" or "hh:mm:ss" to milliseconds.
- */
-private fun String.toTimeMs(): Long {
-    val parts = this.split(":")
-    return when (parts.size) {
-        2 -> {
-            // Format: "mm:ss"
-            val minutes = parts[0].toLongOrNull() ?: 0
-            val seconds = parts[1].toLongOrNull() ?: 0
-            (minutes * 60 + seconds) * 1000
-        }
-        3 -> {
-            // Format: "hh:mm:ss"
-            val hours = parts[0].toLongOrNull() ?: 0
-            val minutes = parts[1].toLongOrNull() ?: 0
-            val seconds = parts[2].toLongOrNull() ?: 0
-            (hours * 3600 + minutes * 60 + seconds) * 1000
-        }
-        else -> 0
-    }
-}
 
 /**
  * Loads the content of a subtitle file from the given source.
