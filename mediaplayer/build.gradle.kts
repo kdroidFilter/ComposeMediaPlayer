@@ -66,6 +66,12 @@ kotlin {
             implementation(libs.slf4j.simple)
         }
 
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+            implementation(kotlin("test-junit"))
+            implementation(libs.kotlinx.coroutines.test)
+        }
+
         iosMain.dependencies {
         }
 
