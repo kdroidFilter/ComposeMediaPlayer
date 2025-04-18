@@ -1,17 +1,12 @@
-/*
- * This file includes code based on or inspired by the project available at:
- * https://github.com/Hamamas/Kotlin-Wasm-Html-Interop/blob/master/composeApp/src/wasmJsMain/kotlin/com/hamama/kwhi/HtmlView.kt
- *
- * License: Apache 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
- *
- * Modifications made by kdroidFilter.
- */
-
 package io.github.kdroidfilter.composemediaplayer.htmlinterop
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateObserver
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.*
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -23,35 +18,19 @@ import kotlinx.browser.document
 import kotlinx.dom.createElement
 import org.w3c.dom.Document
 import org.w3c.dom.Element
-import kotlin.properties.Delegates
 
-/**
- * Local composition to provide the container for HTML layers
- */
 val LocalLayerContainer = staticCompositionLocalOf<Element> {
     document.body ?: error("Document body is not available")
 }
-
-/**
- * No-op update function for elements that don't need updates
- */
 val NoOpUpdate: Element.() -> Unit = {}
 
-/**
- * Holds information about a component and its container
- */
 private class ComponentInfo<T : Element> {
     lateinit var container: Element
     lateinit var component: T
     lateinit var updater: Updater<T>
-
-    // Track whether the component has been initialized
-    var isInitialized = false
 }
 
-/**
- * Manages focus traversal between Compose and HTML elements
- */
+
 private class FocusSwitcher<T : Element>(
     private val info: ComponentInfo<T>,
     private val focusManager: FocusManager
@@ -60,25 +39,18 @@ private class FocusSwitcher<T : Element>(
     private val forwardRequester = FocusRequester()
     private var isRequesting = false
 
-    fun moveBackward() {
+    private fun requestFocusAndMove(requester: FocusRequester, direction: FocusDirection) {
         try {
             isRequesting = true
-            backwardRequester.requestFocus()
+            requester.requestFocus()
         } finally {
             isRequesting = false
         }
-        focusManager.moveFocus(FocusDirection.Previous)
+        focusManager.moveFocus(direction)
     }
 
-    fun moveForward() {
-        try {
-            isRequesting = true
-            forwardRequester.requestFocus()
-        } finally {
-            isRequesting = false
-        }
-        focusManager.moveFocus(FocusDirection.Next)
-    }
+    fun moveBackward() = requestFocusAndMove(backwardRequester, FocusDirection.Previous)
+    fun moveForward() = requestFocusAndMove(forwardRequester, FocusDirection.Next)
 
     @Composable
     fun Content() {
@@ -88,12 +60,9 @@ private class FocusSwitcher<T : Element>(
                 .onFocusChanged {
                     if (it.isFocused && !isRequesting) {
                         focusManager.clearFocus(force = true)
-                        val component = info.container.firstElementChild
-                        if (component != null) {
+                        info.container.firstElementChild?.let { component ->
                             requestFocus(component)
-                        } else {
-                            moveForward()
-                        }
+                        } ?: moveForward()
                     }
                 }
                 .focusTarget()
@@ -104,13 +73,9 @@ private class FocusSwitcher<T : Element>(
                 .onFocusChanged {
                     if (it.isFocused && !isRequesting) {
                         focusManager.clearFocus(force = true)
-
-                        val component = info.container.lastElementChild
-                        if (component != null) {
+                        info.container.lastElementChild?.let { component ->
                             requestFocus(component)
-                        } else {
-                            moveBackward()
-                        }
+                        } ?: moveBackward()
                     }
                 }
                 .focusTarget()
@@ -118,181 +83,89 @@ private class FocusSwitcher<T : Element>(
     }
 }
 
-/**
- * Request focus for an HTML element
- */
-private fun requestFocus(element: Element): Unit = js("""
+private fun requestFocus(element: Element): Unit = js("element.focus()")
+
+private fun initializingElement(element: Element): Unit = js("""
     {
-        if (element && typeof element.focus === 'function') {
-            element.focus();
-        }
+        element.style.position = 'absolute';
+        element.style.margin = '0px';
     }
 """)
 
-/**
- * Initialize an HTML element with basic styling
- */
-private fun initializeElement(element: Element): Unit = js("""
+private fun changeCoordinates(
+    element: Element,
+    width: Float,
+    height: Float,
+    x: Float,
+    y: Float
+): Unit = js("""
     {
-        if (element && element.style) {
-            element.style.position = 'absolute';
-            element.style.margin = '0px';
-            element.style.padding = '0px';
-            element.style.boxSizing = 'border-box';
-        }
+        element.style.width = width + 'px';
+        element.style.height = height + 'px';
+        element.style.left = x + 'px';
+        element.style.top = y + 'px';
     }
 """)
 
-/**
- * Update the position and size of an HTML element
- */
-private fun updateElementGeometry(element: Element, width: Float, height: Float, x: Float, y: Float): Unit = js("""
-    {
-        if (element && element.style) {
-            element.style.width = width + 'px';
-            element.style.height = height + 'px';
-            element.style.left = x + 'px';
-            element.style.top = y + 'px';
-        }
-    }
-""")
-
-/**
- * A composable that integrates HTML elements into a Compose UI
- *
- * @param factory A function that creates the HTML element
- * @param modifier Compose modifier for the container
- * @param update A function to update the HTML element when state changes
- * @param onPositionCallback A callback that receives a function to force position recalculation
- * @param T The type of HTML element to create
- */
 @Composable
-fun <T : Element> HtmlView(
+internal fun <T : Element> HtmlView(
     factory: Document.() -> T,
     modifier: Modifier = Modifier,
-    update: (T) -> Unit = NoOpUpdate,
-    onPositionCallback: ((forceRecalculate: () -> Unit) -> Unit)? = null
+    update: (T) -> Unit = NoOpUpdate
 ) {
     val componentInfo = remember { ComponentInfo<T>() }
+
     val root = LocalLayerContainer.current
     val density = LocalDensity.current.density
     val focusManager = LocalFocusManager.current
-
-    // Create a stable identity for the focus switcher
-    val focusSwitcher = remember(componentInfo, focusManager) {
-        FocusSwitcher(componentInfo, focusManager)
-    }
-
-    // This ensures we track whether we need to recreate our HTML element
-    var factoryKey by remember { mutableIntStateOf(0) }
-
-    // Create a key for the current factory to detect changes
-    val currentFactoryKey = remember(factory) { ++factoryKey }
-
-    // Store the last position calculation function
-    var updatePosition by remember { mutableStateOf<(() -> Unit)?>(null) }
-
-    // Provide the recalculation function through the callback if needed
-    LaunchedEffect(updatePosition) {
-        if (updatePosition != null && onPositionCallback != null) {
-            onPositionCallback(updatePosition!!)
-        }
-    }
+    val focusSwitcher = remember { FocusSwitcher(componentInfo, focusManager) }
 
     Box(
         modifier = modifier.onGloballyPositioned { coordinates ->
-            if (componentInfo.isInitialized) {
-                val location = coordinates.positionInWindow().round()
-                val size = coordinates.size
-
-                // Update the element geometry
-                updateElementGeometry(
-                    componentInfo.component,
-                    size.width / density,
-                    size.height / density,
-                    location.x / density,
-                    location.y / density
-                )
-
-                // Store the position calculation function for later use
-                updatePosition = {
-                    updateElementGeometry(
-                        componentInfo.component,
-                        size.width / density,
-                        size.height / density,
-                        location.x / density,
-                        location.y / density
-                    )
-                }
-            }
+            val location = coordinates.positionInWindow().round()
+            val size = coordinates.size
+            changeCoordinates(
+                componentInfo.component, 
+                size.width / density, 
+                size.height / density, 
+                location.x / density, 
+                location.y / density
+            )
         }
     ) {
         focusSwitcher.Content()
     }
 
-    // Effect to create and destroy the HTML element
-    DisposableEffect(currentFactoryKey) {
-        try {
-            // Create container if not already created
-            if (!componentInfo.isInitialized) {
-                componentInfo.container = document.createElement("div", NoOpUpdate)
-                root.insertBefore(componentInfo.container, root.firstChild)
-            } else {
-                // Clean up previous component
-                componentInfo.container.innerHTML = ""
-                componentInfo.updater.dispose()
-            }
+    DisposableEffect(factory) {
+        componentInfo.apply {
+            container = document.createElement("div", NoOpUpdate)
+            component = document.factory()
+            updater = Updater(component, update)
+        }
 
-            // Create the new component
-            componentInfo.component = document.factory()
-            componentInfo.container.append(componentInfo.component)
-            componentInfo.updater = Updater(componentInfo.component, update)
-            initializeElement(componentInfo.component)
-            componentInfo.isInitialized = true
-        } catch (e: Throwable) {
+        with(componentInfo) {
+            root.insertBefore(container, root.firstChild)
+            container.append(component)
+            initializingElement(component)
         }
 
         onDispose {
-            try {
-                // Don't remove the container on factory change, just on full disposal
-                if (currentFactoryKey != factoryKey) return@onDispose
-
-                if (componentInfo.isInitialized) {
-                    root.removeChild(componentInfo.container)
-                    componentInfo.updater.dispose()
-                    componentInfo.isInitialized = false
-                }
-            } catch (e: Throwable) {
-            }
+            root.removeChild(componentInfo.container)
+            componentInfo.updater.dispose()
         }
     }
 
-    // Update effect - when the update function changes
     SideEffect {
-        if (componentInfo.isInitialized) {
-            componentInfo.updater.update = update
-        }
+        componentInfo.updater.update = update
     }
 }
 
-/**
- * Manages state observation and updates for an HTML element
- */
 private class Updater<T : Element>(
     private val component: T,
     update: (T) -> Unit
 ) {
     private var isDisposed = false
-
-    private val snapshotObserver = SnapshotStateObserver { command ->
-        command()
-    }
-
-    private val scheduleUpdate = { _: T ->
-        if (!isDisposed) {
-            performUpdate()
-        }
-    }
+    private val snapshotObserver = SnapshotStateObserver { it() }
 
     var update: (T) -> Unit = update
         set(value) {
@@ -303,11 +176,8 @@ private class Updater<T : Element>(
         }
 
     private fun performUpdate() {
-        try {
-            snapshotObserver.observeReads(component, scheduleUpdate) {
-                update(component)
-            }
-        } catch (e: Throwable) {
+        snapshotObserver.observeReads(component, { if(!isDisposed) performUpdate() }) {
+            update(component)
         }
     }
 
@@ -317,11 +187,8 @@ private class Updater<T : Element>(
     }
 
     fun dispose() {
-        try {
-            snapshotObserver.stop()
-            snapshotObserver.clear()
-            isDisposed = true
-        } catch (e: Throwable) {
-        }
+        snapshotObserver.stop()
+        snapshotObserver.clear()
+        isDisposed = true
     }
 }
