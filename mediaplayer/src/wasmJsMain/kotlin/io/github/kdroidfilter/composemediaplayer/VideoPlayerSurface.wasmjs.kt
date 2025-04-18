@@ -13,26 +13,25 @@ import androidx.compose.ui.graphics.Color
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.htmlinterop.HtmlView
-import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
+import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
+import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.w3c.dom.HTMLTrackElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
-import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
-import kotlin.js.js
 import kotlin.math.abs
+
 
 
 /**
  * Logger for WebAssembly video player surface
  */
 internal val wasmVideoLogger = Logger.withTag("WasmVideoPlayerSurface")
-    .apply { Logger.setMinSeverity(Severity.Debug) }
+    .apply { Logger.setMinSeverity(Severity.Warn) }
 
 
 @Composable
@@ -76,6 +75,25 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                     }
                 }
         ) {
+            // Add Compose-based subtitle layer
+            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+                // Calculate current time in milliseconds
+                val currentTimeMs = (playerState.sliderPos / 1000f *
+                        playerState.durationText.toTimeMs()).toLong()
+
+                // Calculate duration in milliseconds
+                val durationMs = playerState.durationText.toTimeMs()
+
+                ComposeSubtitleLayer(
+                    currentTimeMs = currentTimeMs,
+                    durationMs = durationMs,
+                    isPlaying = playerState.isPlaying,
+                    subtitleTrack = playerState.currentSubtitleTrack,
+                    subtitlesEnabled = playerState.subtitlesEnabled,
+                    textStyle = playerState.subtitleTextStyle,
+                    backgroundColor = playerState.subtitleBackgroundColor
+                )
+            }
 
             // Create HTML video element
             // Use key to force recreation when CORS mode changes
@@ -105,11 +123,6 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                             useCors = useCors,
                             onCorsError = { useCors = false }
                         )
-                    },
-                    onPositionCallback = { recalculateFunc ->
-                        // Store the recalculation function in the player state
-                        playerState.positionRecalculationCallback = recalculateFunc
-                        wasmVideoLogger.d { "Position recalculation callback set" }
                     }
                 )
             }
@@ -171,109 +184,55 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
             videoElement?.loop = playerState.loop
         }
 
-        // Handle fullscreen using FullScreenLayout
-        if (playerState.isFullscreen) {
-            // Store current position and playing state before entering fullscreen
-            var currentPosition by remember(playerState.isFullscreen) { mutableStateOf(videoElement?.currentTime ?: 0.0) }
-            var isPlaying by remember(playerState.isFullscreen) { mutableStateOf(playerState.isPlaying) }
-
-            // Log fullscreen state change
-            LaunchedEffect(Unit) {
-                wasmVideoLogger.d { "Entering fullscreen mode using FullScreenLayout" }
-            }
-
-            FullScreenLayout(
-                modifier = Modifier.fillMaxSize(),
-                onDismissRequest = {
-                    wasmVideoLogger.d { "Exiting fullscreen mode" }
-                    playerState.isFullscreen = false
-                }
-            ) {
-                // Create a fullscreen video player surface
-                Box(
-                    modifier = Modifier.fillMaxSize()
-                        .background(Color.Black)
-                        .drawBehind {
-                            videoRatio?.let { ratio ->
-                                // We calculate a centered rectangle respecting the ratio of the video
-                                val containerWidth = size.width
-                                val containerHeight = size.height
-                                val rectWidth: Float
-                                val rectHeight: Float
-                                if (containerWidth / containerHeight > ratio) {
-                                    // The Box is too wide, we base ourselves on the height
-                                    rectHeight = containerHeight
-                                    rectWidth = rectHeight * ratio
-                                } else {
-                                    // The Box is too high, we base ourselves on the width
-                                    rectWidth = containerWidth
-                                    rectHeight = rectWidth / ratio
-                                }
-                                val offsetX = (containerWidth - rectWidth) / 2f
-                                val offsetY = (containerHeight - rectHeight) / 2f
-
-                                drawRect(
-                                    color = Color.Transparent,
-                                    blendMode = BlendMode.Clear,
-                                    topLeft = Offset(offsetX, offsetY),
-                                    size = Size(rectWidth, rectHeight)
-                                )
-                            }
-                        }
-                ) {
-                    // Create HTML video element in fullscreen mode
-                    key(useCors) {
-                        HtmlView(
-                            factory = {
-                                createVideoElement(useCors)
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                            update = { video ->
-                                // Set up the fullscreen video element
-                                videoElement = video
-
-                                video.addEventListener("loadedmetadata") {
-                                    val width = video.videoWidth
-                                    val height = video.videoHeight
-                                    if (height != 0) {
-                                        videoRatio = width.toFloat() / height.toFloat()
-                                        wasmVideoLogger.d { "The video ratio is updated: $videoRatio" }
-                                    }
-
-                                    // Restore position when metadata is loaded
-                                    if (currentPosition > 0) {
-                                        video.currentTime = currentPosition
-                                        wasmVideoLogger.d { "Restored position in fullscreen: $currentPosition" }
-                                    }
-
-                                    // Restore playing state
-                                    if (isPlaying) {
-                                        try {
-                                            video.play()
-                                            wasmVideoLogger.d { "Resumed playback in fullscreen" }
-                                        } catch (e: Exception) {
-                                            wasmVideoLogger.e { "Error resuming playback in fullscreen: ${e.message}" }
-                                        }
-                                    }
-                                }
-
-                                setupVideoElement(
-                                    video,
-                                    playerState,
-                                    scope,
-                                    enableAudioDetection = true,
-                                    useCors = useCors,
-                                    onCorsError = { useCors = false }
-                                )
-                            },
-                            onPositionCallback = { recalculateFunc ->
-                                // Store the recalculation function in the player state
-                                playerState.positionRecalculationCallback = recalculateFunc
-                                wasmVideoLogger.d { "Position recalculation callback set" }
-                            }
-                        )
+        // Handle fullscreen update
+        LaunchedEffect(playerState.isFullscreen) {
+            videoElement?.let { video ->
+                if (playerState.isFullscreen) {
+                    try {
+                        // Request fullscreen on the video element using helper function
+                        wasmVideoLogger.d { "Requesting fullscreen" }
+                        requestFullscreen(video)
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error requesting fullscreen: ${e.message}" }
+                    }
+                } else {
+                    try {
+                        // Exit fullscreen if we're in fullscreen mode using helper function
+                        wasmVideoLogger.d { "Exiting fullscreen" }
+                        exitFullscreen()
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error exiting fullscreen: ${e.message}" }
                     }
                 }
+            }
+        }
+
+        // Listen for fullscreen change events on the document
+        DisposableEffect(Unit) {
+            // Create a fullscreen change listener function
+            val fullscreenChangeListener: (Event) -> Unit = {
+                // Check if we're no longer in fullscreen mode but our state says we are
+                videoElement?.let { video ->
+                    val isDocumentFullscreen = video.ownerDocument?.fullscreenElement != null
+                    if (!isDocumentFullscreen && playerState.isFullscreen) {
+                        wasmVideoLogger.d { "Fullscreen exited externally (e.g., via Escape key)" }
+                        playerState.isFullscreen = false
+                    }
+                }
+            }
+
+            // Add event listeners for fullscreen change events
+            document.addEventListener("fullscreenchange", fullscreenChangeListener)
+            document.addEventListener("webkitfullscreenchange", fullscreenChangeListener)
+            document.addEventListener("mozfullscreenchange", fullscreenChangeListener)
+            document.addEventListener("MSFullscreenChange", fullscreenChangeListener)
+
+            // Remove the event listeners when the composable is disposed
+            onDispose {
+                document.removeEventListener("fullscreenchange", fullscreenChangeListener)
+                document.removeEventListener("webkitfullscreenchange", fullscreenChangeListener)
+                document.removeEventListener("mozfullscreenchange", fullscreenChangeListener)
+                document.removeEventListener("MSFullscreenChange", fullscreenChangeListener)
             }
         }
 
@@ -364,23 +323,18 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
             }
         }
 
+        // We're now using Compose-based subtitles instead of HTML track elements
+        // This effect is kept for backward compatibility but doesn't add track elements anymore
         LaunchedEffect(playerState.currentSubtitleTrack) {
             videoElement?.let { video ->
+                // Remove any existing track elements
                 val trackElements = video.querySelectorAll("track")
                 for (i in 0 until trackElements.length) {
                     val track = trackElements.item(i)
                     track?.let { video.removeChild(it) }
                 }
 
-                playerState.currentSubtitleTrack?.let { track ->
-                    val trackElement = document.createElement("track") as HTMLTrackElement
-                    trackElement.kind = "subtitles"
-                    trackElement.label = track.label
-                    trackElement.srclang = track.language
-                    trackElement.src = track.src
-                    trackElement.default = true
-                    video.appendChild(trackElement)
-                }
+                // We don't add new track elements since we're using Compose-based subtitles
             }
         }
     }
@@ -636,4 +590,18 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
     video?.let {
         onTimeUpdate(it.currentTime.toFloat(), it.duration.toFloat())
     }
+}
+
+/**
+ * Request fullscreen for a video element
+ */
+private fun requestFullscreen(video: HTMLVideoElement) {
+    js("video.requestFullscreen()")
+}
+
+/**
+ * Exit fullscreen if document is in fullscreen mode
+ */
+private fun exitFullscreen() {
+    js("if (document.fullscreenElement) document.exitFullscreen()")
 }

@@ -18,6 +18,7 @@ import kotlinx.browser.document
 import kotlinx.dom.createElement
 import org.w3c.dom.Document
 import org.w3c.dom.Element
+import org.w3c.dom.HTMLElement
 
 val LocalLayerContainer = staticCompositionLocalOf<Element> {
     document.body ?: error("Document body is not available")
@@ -83,14 +84,16 @@ private class FocusSwitcher<T : Element>(
     }
 }
 
-private fun requestFocus(element: Element): Unit = js("element.focus()")
+private fun requestFocus(element: Element) {
+    (element as HTMLElement).focus()
+}
 
-private fun initializingElement(element: Element): Unit = js("""
-    {
-        element.style.position = 'absolute';
-        element.style.margin = '0px';
+private fun initializingElement(element: Element) {
+    (element as HTMLElement).apply {
+        style.position = "absolute"
+        style.margin = "0px"
     }
-""")
+}
 
 private fun changeCoordinates(
     element: Element,
@@ -98,14 +101,14 @@ private fun changeCoordinates(
     height: Float,
     x: Float,
     y: Float
-): Unit = js("""
-    {
-        element.style.width = width + 'px';
-        element.style.height = height + 'px';
-        element.style.left = x + 'px';
-        element.style.top = y + 'px';
+) {
+    (element as HTMLElement).apply {
+        style.width = "${width}px"
+        style.height = "${height}px"
+        style.left = "${x}px"
+        style.top = "${y}px"
     }
-""")
+}
 
 @Composable
 internal fun <T : Element> HtmlView(
