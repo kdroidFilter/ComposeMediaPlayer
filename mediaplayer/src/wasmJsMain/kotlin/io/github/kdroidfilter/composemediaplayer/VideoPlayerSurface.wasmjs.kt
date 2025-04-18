@@ -26,7 +26,6 @@ import org.w3c.dom.events.Event
 import kotlin.math.abs
 
 
-
 /**
  * Logger for WebAssembly video player surface
  */
@@ -596,12 +595,14 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
  * Request fullscreen for a video element
  */
 private fun requestFullscreen(video: HTMLVideoElement) {
-    js("video.requestFullscreen()")
+   video.requestFullscreen()
 }
 
 /**
  * Exit fullscreen if document is in fullscreen mode
  */
 private fun exitFullscreen() {
-    js("if (document.fullscreenElement) document.exitFullscreen()")
+    if (document.fullscreenElement != null) {
+        document.exitFullscreen()
+    }
 }

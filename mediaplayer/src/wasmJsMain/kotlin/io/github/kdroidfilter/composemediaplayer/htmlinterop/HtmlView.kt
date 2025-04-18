@@ -1,12 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer.htmlinterop
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateObserver
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.*
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -15,14 +11,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.round
 import kotlinx.browser.document
-import kotlinx.dom.createElement
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import org.w3c.dom.HTMLElement
 
-val LocalLayerContainer = staticCompositionLocalOf<Element> {
-    document.body ?: error("Document body is not available")
-}
+val LocalLayerContainer = staticCompositionLocalOf<Element> { document.body ?: error("Document body unavailable") }
 val NoOpUpdate: Element.() -> Unit = {}
 
 private class ComponentInfo<T : Element> {
@@ -31,11 +24,7 @@ private class ComponentInfo<T : Element> {
     lateinit var updater: Updater<T>
 }
 
-
-private class FocusSwitcher<T : Element>(
-    private val info: ComponentInfo<T>,
-    private val focusManager: FocusManager
-) {
+private class FocusSwitcher<T : Element>(private val info: ComponentInfo<T>, private val focusManager: FocusManager) {
     private val backwardRequester = FocusRequester()
     private val forwardRequester = FocusRequester()
     private var isRequesting = false
@@ -55,58 +44,37 @@ private class FocusSwitcher<T : Element>(
 
     @Composable
     fun Content() {
-        Box(
-            Modifier
-                .focusRequester(backwardRequester)
-                .onFocusChanged {
-                    if (it.isFocused && !isRequesting) {
-                        focusManager.clearFocus(force = true)
-                        info.container.firstElementChild?.let { component ->
-                            requestFocus(component)
-                        } ?: moveForward()
-                    }
+        Box(Modifier
+            .focusRequester(backwardRequester)
+            .onFocusChanged {
+                if (it.isFocused && !isRequesting) {
+                    focusManager.clearFocus(force = true)
+                    info.container.firstElementChild?.let { (it as HTMLElement).focus() } ?: moveForward()
                 }
-                .focusTarget()
+            }
+            .focusTarget()
         )
-        Box(
-            Modifier
-                .focusRequester(forwardRequester)
-                .onFocusChanged {
-                    if (it.isFocused && !isRequesting) {
-                        focusManager.clearFocus(force = true)
-                        info.container.lastElementChild?.let { component ->
-                            requestFocus(component)
-                        } ?: moveBackward()
-                    }
+        Box(Modifier
+            .focusRequester(forwardRequester)
+            .onFocusChanged {
+                if (it.isFocused && !isRequesting) {
+                    focusManager.clearFocus(force = true)
+                    info.container.lastElementChild?.let { (it as HTMLElement).focus() } ?: moveBackward()
                 }
-                .focusTarget()
+            }
+            .focusTarget()
         )
     }
 }
 
-private fun requestFocus(element: Element) {
-    (element as HTMLElement).focus()
-}
-
-private fun initializingElement(element: Element) {
-    (element as HTMLElement).apply {
-        style.position = "absolute"
-        style.margin = "0px"
-    }
-}
-
-private fun changeCoordinates(
-    element: Element,
-    width: Float,
-    height: Float,
-    x: Float,
-    y: Float
-) {
-    (element as HTMLElement).apply {
-        style.width = "${width}px"
-        style.height = "${height}px"
-        style.left = "${x}px"
-        style.top = "${y}px"
+private fun setElementPosition(element: HTMLElement, width: Float, height: Float, x: Float, y: Float) {
+    element.style.apply {
+        position = "absolute"
+        margin = "0px"
+        this.width = "${width}px"
+        this.height = "${height}px"
+        left = "${x}px"
+        top = "${y}px"
     }
 }
 
@@ -116,50 +84,45 @@ internal fun <T : Element> HtmlView(
     modifier: Modifier = Modifier,
     update: (T) -> Unit = NoOpUpdate
 ) {
-    val componentInfo = remember { ComponentInfo<T>() }
-
+    val info = remember { ComponentInfo<T>() }
     val root = LocalLayerContainer.current
     val density = LocalDensity.current.density
     val focusManager = LocalFocusManager.current
-    val focusSwitcher = remember { FocusSwitcher(componentInfo, focusManager) }
+    val focusSwitcher = remember { FocusSwitcher(info, focusManager) }
 
-    Box(
-        modifier = modifier.onGloballyPositioned { coordinates ->
-            val location = coordinates.positionInWindow().round()
-            val size = coordinates.size
-            changeCoordinates(
-                componentInfo.component, 
-                size.width / density, 
-                size.height / density, 
-                location.x / density, 
-                location.y / density
-            )
-        }
-    ) {
+    Box(modifier.onGloballyPositioned { coords ->
+        val pos = coords.positionInWindow().round()
+        val size = coords.size
+        setElementPosition(
+            info.component as HTMLElement,
+            size.width / density,
+            size.height / density,
+            pos.x / density,
+            pos.y / density
+        )
+    }) {
         focusSwitcher.Content()
     }
 
     DisposableEffect(factory) {
-        componentInfo.apply {
-            container = document.createElement("div", NoOpUpdate)
+        info.apply {
+            container = document.createElement("div")
             component = document.factory()
             updater = Updater(component, update)
         }
 
-        with(componentInfo) {
-            root.insertBefore(container, root.firstChild)
-            container.append(component)
-            initializingElement(component)
-        }
+        root.insertBefore(info.container, root.firstChild)
+        info.container.append(info.component)
+        setElementPosition(info.component as HTMLElement, 0f, 0f, 0f, 0f)
 
         onDispose {
-            root.removeChild(componentInfo.container)
-            componentInfo.updater.dispose()
+            root.removeChild(info.container)
+            info.updater.dispose()
         }
     }
 
     SideEffect {
-        componentInfo.updater.update = update
+        info.updater.update = update
     }
 }
 
@@ -168,7 +131,7 @@ private class Updater<T : Element>(
     update: (T) -> Unit
 ) {
     private var isDisposed = false
-    private val snapshotObserver = SnapshotStateObserver { it() }
+    private val observer = SnapshotStateObserver { it() }
 
     var update: (T) -> Unit = update
         set(value) {
@@ -179,19 +142,19 @@ private class Updater<T : Element>(
         }
 
     private fun performUpdate() {
-        snapshotObserver.observeReads(component, { if(!isDisposed) performUpdate() }) {
+        observer.observeReads(component, { if(!isDisposed) performUpdate() }) {
             update(component)
         }
     }
 
     init {
-        snapshotObserver.start()
+        observer.start()
         performUpdate()
     }
 
     fun dispose() {
-        snapshotObserver.stop()
-        snapshotObserver.clear()
+        observer.stop()
+        observer.clear()
         isDisposed = true
     }
 }
