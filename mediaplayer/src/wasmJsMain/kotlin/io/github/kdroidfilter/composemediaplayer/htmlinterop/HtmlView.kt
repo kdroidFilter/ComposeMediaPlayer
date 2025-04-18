@@ -145,27 +145,16 @@ private fun initializeElement(element: Element): Unit = js("""
 
 /**
  * Update the position and size of an HTML element
- * 
- * @param isFullscreen If true, sets width and height to 100% and inset to 0
  */
-private fun updateElementGeometry(element: Element, width: Float, height: Float, x: Float, y: Float, isFullscreen: Boolean = false): Unit = js("""
-    function(element, width, height, x, y, isFullscreen) {
+private fun updateElementGeometry(element: Element, width: Float, height: Float, x: Float, y: Float): Unit = js("""
+    {
         if (element && element.style) {
-            if (isFullscreen) {
-                element.style.width = '100%';
-                element.style.height = '100%';
-                element.style.left = '0';
-                element.style.top = '0';
-                element.style.right = '0';
-                element.style.bottom = '0';
-            } else {
-                element.style.width = width + 'px';
-                element.style.height = height + 'px';
-                element.style.left = x + 'px';
-                element.style.top = y + 'px';
-            }
+            element.style.width = width + 'px';
+            element.style.height = height + 'px';
+            element.style.left = x + 'px';
+            element.style.top = y + 'px';
         }
-    }(element, width, height, x, y, isFullscreen)
+    }
 """)
 
 /**
@@ -174,7 +163,7 @@ private fun updateElementGeometry(element: Element, width: Float, height: Float,
  * @param factory A function that creates the HTML element
  * @param modifier Compose modifier for the container
  * @param update A function to update the HTML element when state changes
- * @param isFullscreen If true, sets width and height to 100% and inset to 0
+ * @param onPositionCallback A callback that receives a function to force position recalculation
  * @param T The type of HTML element to create
  */
 @Composable
@@ -182,7 +171,7 @@ fun <T : Element> HtmlView(
     factory: Document.() -> T,
     modifier: Modifier = Modifier,
     update: (T) -> Unit = NoOpUpdate,
-    isFullscreen: Boolean = false
+    onPositionCallback: ((forceRecalculate: () -> Unit) -> Unit)? = null
 ) {
     val componentInfo = remember { ComponentInfo<T>() }
     val root = LocalLayerContainer.current
@@ -198,25 +187,43 @@ fun <T : Element> HtmlView(
     var factoryKey by remember { mutableIntStateOf(0) }
 
     // Create a key for the current factory to detect changes
-    // We use a stable key that doesn't change when toggling fullscreen
     val currentFactoryKey = remember(factory) { ++factoryKey }
 
-    // Create a stable key for the HTML element that doesn't change when toggling fullscreen
-    val stableElementKey = remember { Any() }
+    // Store the last position calculation function
+    var updatePosition by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    // Provide the recalculation function through the callback if needed
+    LaunchedEffect(updatePosition) {
+        if (updatePosition != null && onPositionCallback != null) {
+            onPositionCallback(updatePosition!!)
+        }
+    }
 
     Box(
         modifier = modifier.onGloballyPositioned { coordinates ->
             if (componentInfo.isInitialized) {
                 val location = coordinates.positionInWindow().round()
                 val size = coordinates.size
+
+                // Update the element geometry
                 updateElementGeometry(
                     componentInfo.component,
                     size.width / density,
                     size.height / density,
                     location.x / density,
-                    location.y / density,
-                    isFullscreen
+                    location.y / density
                 )
+
+                // Store the position calculation function for later use
+                updatePosition = {
+                    updateElementGeometry(
+                        componentInfo.component,
+                        size.width / density,
+                        size.height / density,
+                        location.x / density,
+                        location.y / density
+                    )
+                }
             }
         }
     ) {
@@ -224,52 +231,37 @@ fun <T : Element> HtmlView(
     }
 
     // Effect to create and destroy the HTML element
-    // Use stableElementKey to ensure the element is not recreated when toggling fullscreen
-    DisposableEffect(stableElementKey) {
+    DisposableEffect(currentFactoryKey) {
         try {
             // Create container if not already created
             if (!componentInfo.isInitialized) {
                 componentInfo.container = document.createElement("div", NoOpUpdate)
                 root.insertBefore(componentInfo.container, root.firstChild)
-
-                // Create the new component
-                componentInfo.component = document.factory()
-                componentInfo.container.append(componentInfo.component)
-                componentInfo.updater = Updater(componentInfo.component, update)
-                initializeElement(componentInfo.component)
-                componentInfo.isInitialized = true
+            } else {
+                // Clean up previous component
+                componentInfo.container.innerHTML = ""
+                componentInfo.updater.dispose()
             }
+
+            // Create the new component
+            componentInfo.component = document.factory()
+            componentInfo.container.append(componentInfo.component)
+            componentInfo.updater = Updater(componentInfo.component, update)
+            initializeElement(componentInfo.component)
+            componentInfo.isInitialized = true
         } catch (e: Throwable) {
         }
 
         onDispose {
             try {
+                // Don't remove the container on factory change, just on full disposal
+                if (currentFactoryKey != factoryKey) return@onDispose
+
                 if (componentInfo.isInitialized) {
                     root.removeChild(componentInfo.container)
                     componentInfo.updater.dispose()
                     componentInfo.isInitialized = false
                 }
-            } catch (e: Throwable) {
-            }
-        }
-    }
-
-    // Effect to handle factory changes (e.g., when CORS mode changes)
-    LaunchedEffect(currentFactoryKey) {
-        if (componentInfo.isInitialized) {
-            try {
-                // Update the component with the new factory
-                val newComponent = document.factory()
-
-                // Replace the old component with the new one
-                componentInfo.container.innerHTML = ""
-                componentInfo.container.append(newComponent)
-
-                // Update the component info
-                componentInfo.component = newComponent
-                componentInfo.updater.dispose()
-                componentInfo.updater = Updater(newComponent, update)
-                initializeElement(newComponent)
             } catch (e: Throwable) {
             }
         }

@@ -97,6 +97,20 @@ actual open class VideoPlayerState {
     // Job for handling seek operations
     internal var seekJob: Job? = null
 
+    /**
+     * Callback function to force recalculation of the HTML view position.
+     * This is set by the VideoPlayerSurface when the HTML view is created.
+     */
+    var positionRecalculationCallback: (() -> Unit)? = null
+
+    /**
+     * Forces recalculation of the HTML view position.
+     * This is useful when the layout changes and the HTML view needs to be repositioned.
+     */
+    fun forcePositionRecalculation() {
+        positionRecalculationCallback?.invoke()
+    }
+
 
     /**
      * Selects a subtitle track and enables subtitles.
