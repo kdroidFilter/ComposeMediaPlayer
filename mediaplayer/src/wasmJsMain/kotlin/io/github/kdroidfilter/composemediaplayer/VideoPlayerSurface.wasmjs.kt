@@ -2,8 +2,11 @@ package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -15,6 +18,7 @@ import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.htmlinterop.HtmlView
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
@@ -29,8 +33,7 @@ import kotlin.math.abs
 /**
  * Logger for WebAssembly video player surface
  */
-internal val wasmVideoLogger = Logger.withTag("WasmVideoPlayerSurface")
-    .apply { Logger.setMinSeverity(Severity.Warn) }
+internal val wasmVideoLogger = Logger.withTag("WasmVideoPlayerSurface").apply { Logger.setMinSeverity(Severity.Warn) }
 
 
 @Composable
@@ -43,145 +46,19 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
         var useCors by remember { mutableStateOf(true) }
         val scope = rememberCoroutineScope()
 
-        Box(
-            modifier = Modifier.fillMaxSize()
-                .background(Color.Transparent)
-                .drawBehind {
-                    videoRatio?.let { ratio ->
-                        // We calculate a centered rectangle respecting the ratio of the video
-                        val containerWidth = size.width
-                        val containerHeight = size.height
-                        val rectWidth: Float
-                        val rectHeight: Float
-                        if (containerWidth / containerHeight > ratio) {
-                            // The Box is too wide, we base ourselves on the height
-                            rectHeight = containerHeight
-                            rectWidth = rectHeight * ratio
-                        } else {
-                            // The Box is too high, we base ourselves on the width
-                            rectWidth = containerWidth
-                            rectHeight = rectWidth / ratio
-                        }
-                        val offsetX = (containerWidth - rectWidth) / 2f
-                        val offsetY = (containerHeight - rectHeight) / 2f
 
-                        drawRect(
-                            color = Color.Transparent,
-                            blendMode = BlendMode.Clear,
-                            topLeft = Offset(offsetX, offsetY),
-                            size = Size(rectWidth, rectHeight)
-                        )
-                    }
-                }
-        ) {
-            // Add Compose-based subtitle layer
-            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
-                // Calculate current time in milliseconds
-                val currentTimeMs = (playerState.sliderPos / 1000f *
-                        playerState.durationText.toTimeMs()).toLong()
+        // Use VideoContent composable for video display logic
+        VideoContent(
+            playerState = playerState,
+            modifier = modifier,
+            videoRatio = videoRatio,
+            useCors = useCors,
+            onVideoElementChange = { videoElement = it },
+            onVideoRatioChange = { videoRatio = it },
+            onCorsChange = { useCors = it },
+            scope = scope
+        )
 
-                // Calculate duration in milliseconds
-                val durationMs = playerState.durationText.toTimeMs()
-
-                ComposeSubtitleLayer(
-                    currentTimeMs = currentTimeMs,
-                    durationMs = durationMs,
-                    isPlaying = playerState.isPlaying,
-                    subtitleTrack = playerState.currentSubtitleTrack,
-                    subtitlesEnabled = playerState.subtitlesEnabled,
-                    textStyle = playerState.subtitleTextStyle,
-                    backgroundColor = playerState.subtitleBackgroundColor
-                )
-            }
-
-            // Create HTML video element
-            // Use key to force recreation when CORS mode changes
-            key(useCors) {
-                HtmlView(
-                    factory = {
-                        createVideoElement(useCors)
-                    },
-                    modifier = modifier,
-                    update = { video ->
-                        videoElement = video
-
-                        video.addEventListener("loadedmetadata") {
-                            val width = video.videoWidth
-                            val height = video.videoHeight
-                            if (height != 0) {
-                                videoRatio = width.toFloat() / height.toFloat()
-                                wasmVideoLogger.d { "The video ratio is updated: $videoRatio" }
-                            }
-                        }
-
-                        setupVideoElement(
-                            video,
-                            playerState,
-                            scope,
-                            enableAudioDetection = true,
-                            useCors = useCors,
-                            onCorsError = { useCors = false }
-                        )
-                    }
-                )
-            }
-        }
-
-        // Handle source change effect
-        LaunchedEffect(playerState.sourceUri) {
-            videoElement?.let {
-                val sourceUri = playerState.sourceUri ?: ""
-                if (sourceUri.isNotEmpty()) {
-                    // Log the source URI for debugging
-                    wasmVideoLogger.d { "Setting video source to: $sourceUri with useCors=$useCors" }
-
-                    // Clear any previous error
-                    playerState.clearError()
-
-                    // Reset corsErrorDetected flag when loading a new source
-                    // This will be handled in setupVideoElement
-
-                    // Set the source
-                    it.src = sourceUri
-
-                    // Try to load the video
-                    wasmVideoLogger.d { "Calling load() on video element" }
-                    it.load()
-
-                    if (playerState.isPlaying) {
-                        try {
-                            wasmVideoLogger.d { "Attempting to play video" }
-                            it.play()
-                        } catch (e: Exception) {
-                            wasmVideoLogger.e { "Error playing video: ${e.message}" }
-                        }
-                    } else {
-                        it.pause()
-                    }
-                }
-            }
-        }
-
-        // Handle play/pause
-        LaunchedEffect(playerState.isPlaying) {
-            videoElement?.let {
-                if (playerState.isPlaying) {
-                    it.play()
-                } else {
-                    it.pause()
-                }
-            }
-        }
-
-        // Handle volume update
-        LaunchedEffect(playerState.volume) {
-            videoElement?.volume = playerState.volume.toDouble()
-        }
-
-        // Handle loop update
-        LaunchedEffect(playerState.loop) {
-            videoElement?.loop = playerState.loop
-        }
 
         // Handle fullscreen update
         LaunchedEffect(playerState.isFullscreen) {
@@ -190,7 +67,7 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                     try {
                         // Request fullscreen on the video element using helper function
                         wasmVideoLogger.d { "Requesting fullscreen" }
-                        requestFullscreen(video)
+//                        requestFullscreen(video)
                     } catch (e: Exception) {
                         wasmVideoLogger.e { "Error requesting fullscreen: ${e.message}" }
                     }
@@ -234,40 +111,57 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                 document.removeEventListener("MSFullscreenChange", fullscreenChangeListener)
             }
         }
+        // Handle source change effect
+        LaunchedEffect(playerState.sourceUri) {
+            videoElement?.let {
+                val sourceUri = playerState.sourceUri ?: ""
+                if (sourceUri.isNotEmpty()) {
+                    // Log the source URI for debugging
+                    wasmVideoLogger.d { "Setting video source to: $sourceUri with useCors=$useCors" }
 
-        // Listen for play/pause events on the video element
-        DisposableEffect(videoElement) {
-            val video = videoElement ?: return@DisposableEffect onDispose {}
+                    // Clear any previous error
+                    playerState.clearError()
 
-            // Create play event listener
-            val playListener: (Event) -> Unit = {
-                wasmVideoLogger.d { "Video played externally" }
-                if (!playerState.isPlaying) {
-                    scope.launch {
-                        playerState.play()
+                    // Set the source
+                    it.src = sourceUri
+
+                    // Try to load the video
+                    wasmVideoLogger.d { "Calling load() on video element" }
+                    it.load()
+
+                    if (playerState.isPlaying) {
+                        try {
+                            wasmVideoLogger.d { "Attempting to play video" }
+                            it.play()
+                        } catch (e: Exception) {
+                            wasmVideoLogger.e { "Error playing video: ${e.message}" }
+                        }
+                    } else {
+                        it.pause()
                     }
                 }
             }
+        }
 
-            // Create pause event listener
-            val pauseListener: (Event) -> Unit = {
-                wasmVideoLogger.d { "Video paused externally" }
+        // Handle play/pause
+        LaunchedEffect(playerState.isPlaying) {
+            videoElement?.let {
                 if (playerState.isPlaying) {
-                    scope.launch {
-                        playerState.pause()
-                    }
+                    it.play()
+                } else {
+                    it.pause()
                 }
             }
+        }
 
-            // Add event listeners for play/pause events
-            video.addEventListener("play", playListener)
-            video.addEventListener("pause", pauseListener)
+        // Handle volume update
+        LaunchedEffect(playerState.volume) {
+            videoElement?.volume = playerState.volume.toDouble()
+        }
 
-            // Remove the event listeners when the composable is disposed
-            onDispose {
-                video.removeEventListener("play", playListener)
-                video.removeEventListener("pause", pauseListener)
-            }
+        // Handle loop update
+        LaunchedEffect(playerState.loop) {
+            videoElement?.loop = playerState.loop
         }
 
         // When CORS mode changes, we log it and store the current position and playing state
@@ -322,19 +216,155 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
             }
         }
 
-        // We're now using Compose-based subtitles instead of HTML track elements
-        // This effect is kept for backward compatibility but doesn't add track elements anymore
-        LaunchedEffect(playerState.currentSubtitleTrack) {
-            videoElement?.let { video ->
-                // Remove any existing track elements
-                val trackElements = video.querySelectorAll("track")
-                for (i in 0 until trackElements.length) {
-                    val track = trackElements.item(i)
-                    track?.let { video.removeChild(it) }
+        // Listen for play/pause events on the video element
+        DisposableEffect(videoElement) {
+            val video = videoElement ?: return@DisposableEffect onDispose {}
+
+            // Create play event listener
+            val playListener: (Event) -> Unit = {
+                wasmVideoLogger.d { "Video played externally" }
+                if (!playerState.isPlaying) {
+                    scope.launch {
+                        playerState.play()
+                    }
+                }
+            }
+
+            // Create pause event listener
+            val pauseListener: (Event) -> Unit = {
+                wasmVideoLogger.d { "Video paused externally" }
+                if (playerState.isPlaying) {
+                    scope.launch {
+                        playerState.pause()
+                    }
+                }
+            }
+
+            // Add event listeners for play/pause events
+            video.addEventListener("play", playListener)
+            video.addEventListener("pause", pauseListener)
+
+            // Remove the event listeners when the composable is disposed
+            onDispose {
+                video.removeEventListener("play", playListener)
+                video.removeEventListener("pause", pauseListener)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoContent(
+    playerState: VideoPlayerState,
+    modifier: Modifier,
+    videoRatio: Float?,
+    useCors: Boolean,
+    onVideoElementChange: (HTMLVideoElement?) -> Unit,
+    onVideoRatioChange: (Float?) -> Unit,
+    onCorsChange: (Boolean) -> Unit,
+    scope: CoroutineScope
+) {
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Transparent).drawBehind {
+                videoRatio?.let { ratio ->
+                    // We calculate a centered rectangle respecting the ratio of the video
+                    val containerWidth = size.width
+                    val containerHeight = size.height
+                    val rectWidth: Float
+                    val rectHeight: Float
+                    if (containerWidth / containerHeight > ratio) {
+                        // The Box is too wide, we base ourselves on the height
+                        rectHeight = containerHeight
+                        rectWidth = rectHeight * ratio
+                    } else {
+                        // The Box is too high, we base ourselves on the width
+                        rectWidth = containerWidth
+                        rectHeight = rectWidth / ratio
+                    }
+                    val offsetX = (containerWidth - rectWidth) / 2f
+                    val offsetY = (containerHeight - rectHeight) / 2f
+
+                    drawRect(
+                        color = Color.Transparent,
+                        blendMode = BlendMode.Clear,
+                        topLeft = Offset(offsetX, offsetY),
+                        size = Size(rectWidth, rectHeight)
+                    )
+                }
+            }) {
+        // Add Compose-based subtitle layer
+        if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+            // Calculate current time in milliseconds
+            val currentTimeMs = (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
+
+            // Calculate duration in milliseconds
+            val durationMs = playerState.durationText.toTimeMs()
+
+            ComposeSubtitleLayer(
+                currentTimeMs = currentTimeMs,
+                durationMs = durationMs,
+                isPlaying = playerState.isPlaying,
+                subtitleTrack = playerState.currentSubtitleTrack,
+                subtitlesEnabled = playerState.subtitlesEnabled,
+                textStyle = playerState.subtitleTextStyle,
+                backgroundColor = playerState.subtitleBackgroundColor
+            )
+        }
+
+        if (playerState.isFullscreen) {
+            FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxHeight().background(Color.White).aspectRatio(videoRatio ?: (16f / 9f))) {
+
+                        if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+                            // Calculate current time in milliseconds
+                            val currentTimeMs = (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
+
+                            // Calculate duration in milliseconds
+                            val durationMs = playerState.durationText.toTimeMs()
+
+                            ComposeSubtitleLayer(
+                                currentTimeMs = currentTimeMs,
+                                durationMs = durationMs,
+                                isPlaying = playerState.isPlaying,
+                                subtitleTrack = playerState.currentSubtitleTrack,
+                                subtitlesEnabled = playerState.subtitlesEnabled,
+                                textStyle = playerState.subtitleTextStyle,
+                                backgroundColor = playerState.subtitleBackgroundColor
+                            )
+                        }
+                    }
                 }
 
-                // We don't add new track elements since we're using Compose-based subtitles
             }
+
+        }
+
+        // Create HTML video element
+        // Use key to force recreation when CORS mode changes
+        key(useCors) {
+            HtmlView(factory = {
+                createVideoElement(useCors)
+            }, modifier = modifier, update = { video ->
+                onVideoElementChange(video)
+
+                video.addEventListener("loadedmetadata") {
+                    val width = video.videoWidth
+                    val height = video.videoHeight
+                    if (height != 0) {
+                        onVideoRatioChange(width.toFloat() / height.toFloat())
+                        wasmVideoLogger.d { "The video ratio is updated: ${width.toFloat() / height.toFloat()}" }
+                    }
+                }
+
+                setupVideoElement(
+                    video,
+                    playerState,
+                    scope,
+                    enableAudioDetection = true,
+                    useCors = useCors,
+                    onCorsError = { onCorsChange(false) })
+            })
         }
     }
 }
@@ -375,9 +405,7 @@ private fun createVideoElement(useCors: Boolean = true): HTMLVideoElement {
 
         // Log supported types for debugging
         val supportedTypes = listOf(
-            "video/mp4",
-            "video/webm",
-            "video/ogg"
+            "video/mp4", "video/webm", "video/ogg"
         )
 
         supportedTypes.forEach { type ->
@@ -510,8 +538,8 @@ fun setupVideoElement(
                 wasmVideoLogger.e { "Video error details: $errorMessage" }
 
                 // Check if this is likely a CORS error (network errors are often CORS-related)
-                val isCorsRelatedError = error.code == MediaError.MEDIA_ERR_NETWORK ||
-                        (error.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && useCors)
+                val isCorsRelatedError =
+                    error.code == MediaError.MEDIA_ERR_NETWORK || (error.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && useCors)
 
                 // Check for CORS-specific error in the console (this won't be captured directly, but helps with debugging)
                 wasmVideoLogger.d { "Is this likely a CORS-related error? $isCorsRelatedError (current useCors=$useCors)" }
@@ -589,13 +617,6 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
     video?.let {
         onTimeUpdate(it.currentTime.toFloat(), it.duration.toFloat())
     }
-}
-
-/**
- * Request fullscreen for a video element
- */
-private fun requestFullscreen(video: HTMLVideoElement) {
-   video.requestFullscreen()
 }
 
 /**

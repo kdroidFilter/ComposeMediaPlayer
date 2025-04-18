@@ -9,7 +9,7 @@ import androidx.compose.ui.window.DialogProperties
 
 @Composable
 internal fun FullScreenLayout(
-    modifier: Modifier,
+    modifier: Modifier = Modifier,
     onDismissRequest: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
