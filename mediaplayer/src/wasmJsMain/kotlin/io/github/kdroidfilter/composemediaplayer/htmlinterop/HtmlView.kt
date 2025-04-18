@@ -185,7 +185,11 @@ fun <T : Element> HtmlView(
     var factoryKey by remember { mutableIntStateOf(0) }
 
     // Create a key for the current factory to detect changes
+    // We use a stable key that doesn't change when toggling fullscreen
     val currentFactoryKey = remember(factory) { ++factoryKey }
+
+    // Create a stable key for the HTML element that doesn't change when toggling fullscreen
+    val stableElementKey = remember { Any() }
 
     Box(
         modifier = modifier.onGloballyPositioned { coordinates ->
@@ -206,37 +210,52 @@ fun <T : Element> HtmlView(
     }
 
     // Effect to create and destroy the HTML element
-    DisposableEffect(currentFactoryKey) {
+    // Use stableElementKey to ensure the element is not recreated when toggling fullscreen
+    DisposableEffect(stableElementKey) {
         try {
             // Create container if not already created
             if (!componentInfo.isInitialized) {
                 componentInfo.container = document.createElement("div", NoOpUpdate)
                 root.insertBefore(componentInfo.container, root.firstChild)
-            } else {
-                // Clean up previous component
-                componentInfo.container.innerHTML = ""
-                componentInfo.updater.dispose()
-            }
 
-            // Create the new component
-            componentInfo.component = document.factory()
-            componentInfo.container.append(componentInfo.component)
-            componentInfo.updater = Updater(componentInfo.component, update)
-            initializeElement(componentInfo.component)
-            componentInfo.isInitialized = true
+                // Create the new component
+                componentInfo.component = document.factory()
+                componentInfo.container.append(componentInfo.component)
+                componentInfo.updater = Updater(componentInfo.component, update)
+                initializeElement(componentInfo.component)
+                componentInfo.isInitialized = true
+            }
         } catch (e: Throwable) {
         }
 
         onDispose {
             try {
-                // Don't remove the container on factory change, just on full disposal
-                if (currentFactoryKey != factoryKey) return@onDispose
-
                 if (componentInfo.isInitialized) {
                     root.removeChild(componentInfo.container)
                     componentInfo.updater.dispose()
                     componentInfo.isInitialized = false
                 }
+            } catch (e: Throwable) {
+            }
+        }
+    }
+
+    // Effect to handle factory changes (e.g., when CORS mode changes)
+    LaunchedEffect(currentFactoryKey) {
+        if (componentInfo.isInitialized) {
+            try {
+                // Update the component with the new factory
+                val newComponent = document.factory()
+
+                // Replace the old component with the new one
+                componentInfo.container.innerHTML = ""
+                componentInfo.container.append(newComponent)
+
+                // Update the component info
+                componentInfo.component = newComponent
+                componentInfo.updater.dispose()
+                componentInfo.updater = Updater(newComponent, update)
+                initializeElement(newComponent)
             } catch (e: Throwable) {
             }
         }

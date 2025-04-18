@@ -43,6 +43,49 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
         var useCors by remember { mutableStateOf(true) }
         val scope = rememberCoroutineScope()
 
+        // Create a stable key for the HTML element that doesn't change when toggling fullscreen
+        val stableHtmlKey = remember { Any() }
+
+        // Create a separate composable for the HTML video element
+        // This ensures it's not recreated when toggling fullscreen
+        @Composable
+        fun HtmlVideoElement() {
+            // Use key to force recreation only when CORS mode changes
+            key(useCors, stableHtmlKey) {
+                HtmlView(
+                    factory = {
+                        createVideoElement(useCors)
+                    },
+                    modifier = modifier,
+                    update = { video ->
+                        videoElement = video
+
+                        video.addEventListener("loadedmetadata") {
+                            val width = video.videoWidth
+                            val height = video.videoHeight
+                            if (height != 0) {
+                                videoRatio = width.toFloat() / height.toFloat()
+                                wasmVideoLogger.d { "The video ratio is updated: $videoRatio" }
+                            }
+                        }
+
+                        setupVideoElement(
+                            video,
+                            playerState,
+                            scope,
+                            enableAudioDetection = true,
+                            useCors = useCors,
+                            onCorsError = { useCors = false }
+                        )
+                    }
+                )
+            }
+        }
+
+        // Create the HTML video element outside the fullscreen condition
+        // This ensures it's not recreated when toggling fullscreen
+        HtmlVideoElement()
+
         // Define the content composable that hosts the video player and subtitles
         val playerContent: @Composable () -> Unit = {
             // This Box handles the video background
@@ -96,38 +139,6 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                         backgroundColor = playerState.subtitleBackgroundColor
                     )
                 }
-            }
-
-            // Create HTML video element - we move this outside the fullscreen condition
-            // Use key to force recreation only when CORS mode changes
-            key(useCors) {
-                HtmlView(
-                    factory = {
-                        createVideoElement(useCors)
-                    },
-                    modifier = modifier,
-                    update = { video ->
-                        videoElement = video
-
-                        video.addEventListener("loadedmetadata") {
-                            val width = video.videoWidth
-                            val height = video.videoHeight
-                            if (height != 0) {
-                                videoRatio = width.toFloat() / height.toFloat()
-                                wasmVideoLogger.d { "The video ratio is updated: $videoRatio" }
-                            }
-                        }
-
-                        setupVideoElement(
-                            video,
-                            playerState,
-                            scope,
-                            enableAudioDetection = true,
-                            useCors = useCors,
-                            onCorsError = { useCors = false }
-                        )
-                    }
-                )
             }
         }
 
