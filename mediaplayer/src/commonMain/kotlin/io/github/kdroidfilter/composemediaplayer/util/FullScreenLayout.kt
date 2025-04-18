@@ -8,9 +8,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 @Composable
-internal fun FullScreenLayout(modifier: Modifier, content: @Composable () -> Unit) {
+internal fun FullScreenLayout(
+    modifier: Modifier,
+    onDismissRequest: () -> Unit = {},
+    content: @Composable () -> Unit
+) {
     Dialog(
-        onDismissRequest = {},
+        onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Box(modifier = modifier.fillMaxSize()) {
