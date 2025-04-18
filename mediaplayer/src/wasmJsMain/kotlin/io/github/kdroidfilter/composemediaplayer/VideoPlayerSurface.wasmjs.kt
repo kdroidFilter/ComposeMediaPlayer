@@ -266,32 +266,32 @@ private fun VideoContent(
 ) {
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Transparent).drawBehind {
-                videoRatio?.let { ratio ->
-                    // We calculate a centered rectangle respecting the ratio of the video
-                    val containerWidth = size.width
-                    val containerHeight = size.height
-                    val rectWidth: Float
-                    val rectHeight: Float
-                    if (containerWidth / containerHeight > ratio) {
-                        // The Box is too wide, we base ourselves on the height
-                        rectHeight = containerHeight
-                        rectWidth = rectHeight * ratio
-                    } else {
-                        // The Box is too high, we base ourselves on the width
-                        rectWidth = containerWidth
-                        rectHeight = rectWidth / ratio
-                    }
-                    val offsetX = (containerWidth - rectWidth) / 2f
-                    val offsetY = (containerHeight - rectHeight) / 2f
-
-                    drawRect(
-                        color = Color.Transparent,
-                        blendMode = BlendMode.Clear,
-                        topLeft = Offset(offsetX, offsetY),
-                        size = Size(rectWidth, rectHeight)
-                    )
+            videoRatio?.let { ratio ->
+                // We calculate a centered rectangle respecting the ratio of the video
+                val containerWidth = size.width
+                val containerHeight = size.height
+                val rectWidth: Float
+                val rectHeight: Float
+                if (containerWidth / containerHeight > ratio) {
+                    // The Box is too wide, we base ourselves on the height
+                    rectHeight = containerHeight
+                    rectWidth = rectHeight * ratio
+                } else {
+                    // The Box is too high, we base ourselves on the width
+                    rectWidth = containerWidth
+                    rectHeight = rectWidth / ratio
                 }
-            }) {
+                val offsetX = (containerWidth - rectWidth) / 2f
+                val offsetY = (containerHeight - rectHeight) / 2f
+
+                drawRect(
+                    color = Color.Transparent,
+                    blendMode = BlendMode.Clear,
+                    topLeft = Offset(offsetX, offsetY),
+                    size = Size(rectWidth, rectHeight)
+                )
+            }
+        }) {
         // Add Compose-based subtitle layer
         if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
             // Calculate current time in milliseconds
@@ -314,11 +314,38 @@ private fun VideoContent(
         if (playerState.isFullscreen) {
             FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                    Box(Modifier.fillMaxHeight().background(Color.White).aspectRatio(videoRatio ?: (16f / 9f))) {
+                    Box(Modifier.fillMaxSize().background(Color.Transparent).drawBehind {
+                        videoRatio?.let { ratio ->
+                            // We calculate a centered rectangle respecting the ratio of the video
+                            val containerWidth = size.width
+                            val containerHeight = size.height
+                            val rectWidth: Float
+                            val rectHeight: Float
+                            if (containerWidth / containerHeight > ratio) {
+                                // The Box is too wide, we base ourselves on the height
+                                rectHeight = containerHeight
+                                rectWidth = rectHeight * ratio
+                            } else {
+                                // The Box is too high, we base ourselves on the width
+                                rectWidth = containerWidth
+                                rectHeight = rectWidth / ratio
+                            }
+                            val offsetX = (containerWidth - rectWidth) / 2f
+                            val offsetY = (containerHeight - rectHeight) / 2f
+
+                            drawRect(
+                                color = Color.Transparent,
+                                blendMode = BlendMode.Clear,
+                                topLeft = Offset(offsetX, offsetY),
+                                size = Size(rectWidth, rectHeight)
+                            )
+                        }
+                    }) {
 
                         if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
                             // Calculate current time in milliseconds
-                            val currentTimeMs = (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
+                            val currentTimeMs =
+                                (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
 
                             // Calculate duration in milliseconds
                             val durationMs = playerState.durationText.toTimeMs()
@@ -335,9 +362,7 @@ private fun VideoContent(
                         }
                     }
                 }
-
             }
-
         }
 
         // Create HTML video element
