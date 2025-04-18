@@ -77,7 +77,8 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                             useCors = useCors,
                             onCorsError = { useCors = false }
                         )
-                    }
+                    },
+                    isFullscreen = playerState.isFullscreen
                 )
             }
         }
@@ -211,11 +212,20 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
             videoElement?.loop = playerState.loop
         }
 
-        // Log fullscreen state changes
+        // Log fullscreen state changes and update HTML element geometry
         LaunchedEffect(playerState.isFullscreen) {
             wasmVideoLogger.d { "Fullscreen mode changed to: ${playerState.isFullscreen}" }
             // We don't need to recreate the video element or restore state here
             // The FullScreenLayout will just reposition the existing player content
+
+            // Force a recomposition to update the HTML element's geometry with the new fullscreen state
+            videoElement?.let { video ->
+                // This will trigger the onGloballyPositioned callback in HtmlView
+                // which will update the element's geometry with the isFullscreen parameter
+                video.style.width = if (video.style.width == "100%") "99.9%" else "100%"
+                delay(10)
+                video.style.width = "100%"
+            }
         }
 
         // Listen for play/pause events on the video element

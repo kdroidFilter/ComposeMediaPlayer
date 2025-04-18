@@ -145,16 +145,27 @@ private fun initializeElement(element: Element): Unit = js("""
 
 /**
  * Update the position and size of an HTML element
+ * 
+ * @param isFullscreen If true, sets width and height to 100% and inset to 0
  */
-private fun updateElementGeometry(element: Element, width: Float, height: Float, x: Float, y: Float): Unit = js("""
-    {
+private fun updateElementGeometry(element: Element, width: Float, height: Float, x: Float, y: Float, isFullscreen: Boolean = false): Unit = js("""
+    function(element, width, height, x, y, isFullscreen) {
         if (element && element.style) {
-            element.style.width = width + 'px';
-            element.style.height = height + 'px';
-            element.style.left = x + 'px';
-            element.style.top = y + 'px';
+            if (isFullscreen) {
+                element.style.width = '100%';
+                element.style.height = '100%';
+                element.style.left = '0';
+                element.style.top = '0';
+                element.style.right = '0';
+                element.style.bottom = '0';
+            } else {
+                element.style.width = width + 'px';
+                element.style.height = height + 'px';
+                element.style.left = x + 'px';
+                element.style.top = y + 'px';
+            }
         }
-    }
+    }(element, width, height, x, y, isFullscreen)
 """)
 
 /**
@@ -163,13 +174,15 @@ private fun updateElementGeometry(element: Element, width: Float, height: Float,
  * @param factory A function that creates the HTML element
  * @param modifier Compose modifier for the container
  * @param update A function to update the HTML element when state changes
+ * @param isFullscreen If true, sets width and height to 100% and inset to 0
  * @param T The type of HTML element to create
  */
 @Composable
 fun <T : Element> HtmlView(
     factory: Document.() -> T,
     modifier: Modifier = Modifier,
-    update: (T) -> Unit = NoOpUpdate
+    update: (T) -> Unit = NoOpUpdate,
+    isFullscreen: Boolean = false
 ) {
     val componentInfo = remember { ComponentInfo<T>() }
     val root = LocalLayerContainer.current
@@ -201,7 +214,8 @@ fun <T : Element> HtmlView(
                     size.width / density,
                     size.height / density,
                     location.x / density,
-                    location.y / density
+                    location.y / density,
+                    isFullscreen
                 )
             }
         }
