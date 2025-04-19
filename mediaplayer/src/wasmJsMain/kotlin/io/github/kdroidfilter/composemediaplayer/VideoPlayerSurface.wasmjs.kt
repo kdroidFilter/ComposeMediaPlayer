@@ -21,6 +21,7 @@ import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
+import kotlinx.browser.window
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -58,6 +59,7 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
             onCorsChange = { useCors = it },
             scope = scope
         )
+
 
 
         // Handle fullscreen update
@@ -341,7 +343,6 @@ private fun VideoContent(
                             )
                         }
                     }) {
-
                         if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
                             // Calculate current time in milliseconds
                             val currentTimeMs =
@@ -614,6 +615,16 @@ fun setupVideoElement(
         }
     }
 
+    window.addEventListener("resize", {
+        scope.launch {
+            if (playerState.isFullscreen) {
+                delay(500)
+                applyVideoStyles()
+            }
+        }
+    })
+
+
     // ended => pause the video
     video.addEventListener("ended") {
         scope.launch {
@@ -647,8 +658,25 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
 /**
  * Exit fullscreen if document is in fullscreen mode
  */
-private fun exitFullscreen() {
+ fun exitFullscreen() {
     if (document.fullscreenElement != null) {
         document.exitFullscreen()
     }
+}
+
+suspend fun applyVideoStyles() {
+    val video = document.querySelector("video") as? HTMLVideoElement
+    delay(500)
+    video?.let {
+        it.style.width = "100%"
+        it.style.height = "100%"
+        it.style.margin = "0px"
+        it.style.left = "0"
+        it.style.top = "0"
+    }
+}
+
+fun requestFullScreen() {
+    val document = document.documentElement
+    document?.requestFullscreen()
 }

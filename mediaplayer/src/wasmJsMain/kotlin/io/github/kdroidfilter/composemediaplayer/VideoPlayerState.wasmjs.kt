@@ -229,6 +229,13 @@ actual open class VideoPlayerState {
      * Toggles the fullscreen state of the video player
      */
     actual fun toggleFullscreen() {
+        if (!isFullscreen) {
+            requestFullScreen()
+           CoroutineScope(Dispatchers.Default).launch {
+               delay(500)
+               applyVideoStyles()
+           }
+        } else exitFullscreen()
         isFullscreen = !isFullscreen
     }
 
