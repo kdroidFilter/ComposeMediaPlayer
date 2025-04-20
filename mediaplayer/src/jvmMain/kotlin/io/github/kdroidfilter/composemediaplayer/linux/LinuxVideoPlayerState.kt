@@ -532,6 +532,8 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     /**
      * Directly reads in RGBA and copies to a Skia Bitmap in the RGBA_8888 format
      * (non-premultiplied). This avoids redundant conversions to maintain accurate colors and performance.
+     * 
+     * Optimized for better performance, especially in fullscreen mode.
      */
     private fun processSample(sample: Sample) {
         try {
@@ -562,21 +564,13 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             val bitmap = Bitmap()
             bitmap.allocPixels(imageInfo)
 
-            // Direct copy of RGBA data into a byte array
-            val totalPixels = width * height
-            val byteArray = ByteArray(totalPixels * 4)
-            var index = 0
-            repeat(totalPixels) {
-                // GStreamer provides RGBA in the order R, G, B, A
-                val r = byteBuffer.get().toInt() and 0xFF
-                val g = byteBuffer.get().toInt() and 0xFF
-                val b = byteBuffer.get().toInt() and 0xFF
-                val a = byteBuffer.get().toInt() and 0xFF
-                byteArray[index++] = r.toByte()
-                byteArray[index++] = g.toByte()
-                byteArray[index++] = b.toByte()
-                byteArray[index++] = a.toByte()
-            }
+            // Get the byte array from the buffer directly
+            val totalBytes = width * height * 4
+            val byteArray = ByteArray(totalBytes)
+
+            // Bulk copy the bytes from the buffer to the array
+            // This is much more efficient than copying pixel by pixel
+            byteBuffer.get(byteArray, 0, totalBytes)
 
             // Install these pixels into the Bitmap
             bitmap.installPixels(imageInfo, byteArray, width * 4)
