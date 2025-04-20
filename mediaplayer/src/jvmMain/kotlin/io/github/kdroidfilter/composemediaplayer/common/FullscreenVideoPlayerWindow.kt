@@ -6,10 +6,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.*
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.rememberWindowState
+import com.sun.jna.Platform
 import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.VideoPlayerStateRegistry
 
@@ -45,7 +49,9 @@ private fun FullscreenVideoPlayerWindow(
     }
 
     // Create a window state for fullscreen
-    val windowState = rememberWindowState(placement = WindowPlacement.Fullscreen)
+    val windowState = rememberWindowState(
+        placement = if (Platform.isLinux()) WindowPlacement.Maximized else WindowPlacement.Fullscreen,
+    )
 
     var isVisible by mutableStateOf(true)
 
@@ -70,13 +76,12 @@ private fun FullscreenVideoPlayerWindow(
         title = "Fullscreen Player",
         onKeyEvent = { keyEvent ->
             if (keyEvent.key == Key.Escape && keyEvent.type == KeyEventType.KeyDown) {
-               exitFullScreen()
+                exitFullScreen()
                 true
             } else {
                 false
             }
-        }
-    ) {
+        }) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             playerState?.let { state ->
                 renderSurface(state, Modifier.fillMaxSize(), true)
