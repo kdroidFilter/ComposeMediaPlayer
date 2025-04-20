@@ -55,24 +55,23 @@ fun LinuxVideoPlayerSurface(
             }
 
             // Add Compose-based subtitle layer
-            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
-                // Calculate current time in milliseconds
-                val currentTimeMs = (playerState.sliderPos / 1000f * 
-                    playerState.durationText.toTimeMs()).toLong()
+            // Always render the subtitle layer, but let it handle visibility internally
+            // This ensures it's properly recomposed when subtitles are enabled during playback
+            val currentTimeMs = (playerState.sliderPos / 1000f * 
+                playerState.durationText.toTimeMs()).toLong()
 
-                // Calculate duration in milliseconds
-                val durationMs = playerState.durationText.toTimeMs()
+            // Calculate duration in milliseconds
+            val durationMs = playerState.durationText.toTimeMs()
 
-                ComposeSubtitleLayer(
-                    currentTimeMs = currentTimeMs,
-                    durationMs = durationMs,
-                    isPlaying = playerState.isPlaying,
-                    subtitleTrack = playerState.currentSubtitleTrack,
-                    subtitlesEnabled = playerState.subtitlesEnabled,
-                    textStyle = playerState.subtitleTextStyle,
-                    backgroundColor = playerState.subtitleBackgroundColor
-                )
-            }
+            ComposeSubtitleLayer(
+                currentTimeMs = currentTimeMs,
+                durationMs = durationMs,
+                isPlaying = playerState.isPlaying,
+                subtitleTrack = playerState.currentSubtitleTrack,
+                subtitlesEnabled = playerState.subtitlesEnabled,
+                textStyle = playerState.subtitleTextStyle,
+                backgroundColor = playerState.subtitleBackgroundColor
+            )
         }
     }
 
