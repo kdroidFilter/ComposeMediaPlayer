@@ -54,8 +54,10 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         GStreamerInit.init()
     }
 
-    private val playbin = PlayBin("playbin")
-    private val videoSink = ElementFactory.make("appsink", "videosink") as AppSink
+    // Use instance-specific unique identifiers for GStreamer elements
+    private val instanceId = System.nanoTime().toString()
+    private val playbin = PlayBin("playbin-$instanceId")
+    private val videoSink = ElementFactory.make("appsink", "videosink-$instanceId") as AppSink
     private val sliderTimer = Timer(50, null)
 
     // ---- Internal states ----
@@ -164,7 +166,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
 
     init {
         // GStreamer configuration
-        val levelElement = ElementFactory.make("level", "level")
+        val levelElement = ElementFactory.make("level", "level-$instanceId")
         playbin.set("audio-filter", levelElement)
 
         // Configuration of the AppSink for video
@@ -600,6 +602,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         playbin.stop()
         playbin.dispose()
         videoSink.dispose()
-        Gst.deinit()
+        // Don't call Gst.deinit() here as it would affect all instances
+        // Each instance should only clean up its own resources
     }
 }
