@@ -19,6 +19,16 @@ import platform.UIKit.*
 @OptIn(ExperimentalForeignApi::class)
 @Composable
 actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier) {
+    VideoPlayerSurfaceImpl(playerState, modifier, isInFullscreenView = false)
+}
+
+@OptIn(ExperimentalForeignApi::class)
+@Composable
+fun VideoPlayerSurfaceImpl(
+    playerState: VideoPlayerState, 
+    modifier: Modifier,
+    isInFullscreenView: Boolean = false
+) {
     // Create and store the AVPlayerViewController
     val avPlayerViewController = remember {
         AVPlayerViewController().apply {
@@ -77,6 +87,13 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                     avPlayerViewController.view.setFrame(containerView.bounds)
                 }
             )
+        }
+    }
+
+    // Handle fullscreen mode
+    if (playerState.isFullscreen && !isInFullscreenView) {
+        openFullscreenView(playerState) { state, mod, inFullscreen ->
+            VideoPlayerSurfaceImpl(state, mod, inFullscreen)
         }
     }
 }
