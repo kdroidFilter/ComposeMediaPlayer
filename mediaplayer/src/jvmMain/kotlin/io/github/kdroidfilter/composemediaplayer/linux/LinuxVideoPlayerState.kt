@@ -278,10 +278,90 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             }
         })
 
-        // TAG (metadata, if needed)
+        // TAG (metadata)
         playbin.bus.connect(object : Bus.TAG {
             override fun tagsFound(source: GstObject?, tagList: TagList?) {
-                // Metadata implementation if necessary
+                if (tagList != null) {
+                    EventQueue.invokeLater {
+                        try {
+                            // Extract metadata from TagList
+                            try {
+                                // Try to extract title
+                                val title = tagList.getString("title", 0)
+                                if (title != null) {
+                                    metadata.title = title
+                                }
+                            } catch (e: Exception) {
+                                // Ignore errors when getting title
+                            }
+
+                            try {
+                                // Try to extract artist
+                                val artist = tagList.getString("artist", 0)
+                                if (artist != null) {
+                                    metadata.artist = artist
+                                }
+                            } catch (e: Exception) {
+                                // Ignore errors when getting artist
+                            }
+
+                            try {
+                                // Try to extract bitrate
+                                val bitrate = tagList.getString("bitrate", 0)
+                                if (bitrate != null) {
+                                    try {
+                                        metadata.bitrate = bitrate.toLong()
+                                    } catch (e: NumberFormatException) {
+                                        // Ignore if the string can't be converted to a long
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // Ignore errors when getting bitrate
+                            }
+
+                            try {
+                                // Try to extract MIME type from container format
+                                val containerFormat = tagList.getString("container-format", 0)
+                                if (containerFormat != null) {
+                                    metadata.mimeType = containerFormat
+                                } else {
+                                    // Try audio codec as fallback
+                                    val audioCodec = tagList.getString("audio-codec", 0)
+                                    if (audioCodec != null) {
+                                        metadata.mimeType = audioCodec
+                                    } else {
+                                        // Try video codec as fallback
+                                        val videoCodec = tagList.getString("video-codec", 0)
+                                        if (videoCodec != null) {
+                                            metadata.mimeType = videoCodec
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // Ignore errors when getting MIME type
+                            }
+
+                            try {
+                                // Try to extract audio channels
+                                val audioChannels = tagList.getString("audio-channels", 0)
+                                if (audioChannels != null) {
+                                    try {
+                                        metadata.audioChannels = audioChannels.toInt()
+                                    } catch (e: NumberFormatException) {
+                                        // Ignore if the string can't be converted to an integer
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // Ignore errors when getting audio channels
+                            }
+
+                            // We'll also update metadata from the pipeline
+                            updateVideoMetadata()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
             }
         })
 
@@ -317,6 +397,9 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                 EventQueue.invokeLater {
                     _isSeeking = false
                     updateLoadingState()
+
+                    // Update metadata after async operations (like seeking) complete
+                    updateVideoMetadata()
                 }
             }
         }
@@ -432,6 +515,72 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Updates the video metadata from the pipeline.
+     * This extracts information like width, height, duration, and frame rate.
+     */
+    private fun updateVideoMetadata() {
+        try {
+            // Get duration
+            val duration = playbin.queryDuration(Format.TIME)
+            if (duration > 0) {
+                metadata.duration = duration
+            }
+
+            // Get width and height from video sink
+            val videoSinkElement = playbin.get("video-sink") as? Element
+            val sinkPad = videoSinkElement?.getStaticPad("sink")
+            val caps = sinkPad?.currentCaps
+            val structure = caps?.getStructure(0)
+
+            if (structure != null) {
+                try {
+                    val width = structure.getInteger("width")
+                    val height = structure.getInteger("height")
+
+                    if (width > 0 && height > 0) {
+                        metadata.width = width
+                        metadata.height = height
+                    }
+
+                    // Try to get frame rate if available
+                    if (structure.hasField("framerate")) {
+                        val fraction = structure.getFraction("framerate")
+                        if (fraction != null && fraction.denominator > 0) {
+                            val frameRate = fraction.numerator.toFloat() / fraction.denominator.toFloat()
+                            metadata.frameRate = frameRate
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Ignore errors when getting specific fields
+                }
+            }
+
+            // Get audio channels and sample rate if available
+            val audioSinkPad = playbin.getStaticPad("audio_sink")
+            val audioCaps = audioSinkPad?.currentCaps
+            val audioStructure = audioCaps?.getStructure(0)
+
+            if (audioStructure != null) {
+                try {
+                    if (audioStructure.hasField("channels")) {
+                        val channels = audioStructure.getInteger("channels")
+                        metadata.audioChannels = channels
+                    }
+
+                    if (audioStructure.hasField("rate")) {
+                        val rate = audioStructure.getInteger("rate")
+                        metadata.audioSampleRate = rate
+                    }
+                } catch (e: Exception) {
+                    // Ignore errors when getting specific fields
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore general errors
+        }
+    }
+
     // ---- Controls ----
     override fun openUri(uri: String) {
         stop()
@@ -446,6 +595,19 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             }
             playbin.setURI(uriObj)
             _hasMedia = true
+
+            // Reset metadata for the new media
+            metadata.title = null
+            metadata.artist = null
+            metadata.duration = null
+            metadata.width = null
+            metadata.height = null
+            metadata.bitrate = null
+            metadata.frameRate = null
+            metadata.mimeType = null
+            metadata.audioChannels = null
+            metadata.audioSampleRate = null
+
             play()
         } catch (e: Exception) {
             _error = VideoPlayerError.SourceError("Unable to open URI: ${e.message}")
@@ -464,6 +626,9 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             _isPlaying = true
             isUserPaused = false
             updateLoadingState()
+
+            // Update metadata when starting playback
+            updateVideoMetadata()
         } catch (e: Exception) {
             _error = VideoPlayerError.UnknownError("Playback failed: ${e.message}")
             _isPlaying = false
