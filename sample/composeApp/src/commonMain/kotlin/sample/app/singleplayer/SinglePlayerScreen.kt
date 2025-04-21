@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
@@ -28,6 +29,31 @@ import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.name
 import sample.app.SubtitleManagementDialog
+
+@Composable
+private fun MetadataRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 8.dp)
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -320,6 +346,58 @@ fun SinglePlayerScreen() {
                     ) {
                         Text("Left: ${playerState.leftLevel.toInt()}%")
                         Text("Right: ${playerState.rightLevel.toInt()}%")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Video Metadata Display
+                if (playerState.hasMedia) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Video Metadata",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+
+                            // Display metadata properties in a grid layout
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                playerState.metadata.title?.let {
+                                    MetadataRow("Title", it)
+                                }
+                                playerState.metadata.artist?.let {
+                                    MetadataRow("Artist", it)
+                                }
+                                playerState.metadata.width?.let { width ->
+                                    playerState.metadata.height?.let { height ->
+                                        MetadataRow("Resolution", "$width × $height")
+                                    }
+                                }
+                                playerState.metadata.frameRate?.let {
+                                    MetadataRow("Frame Rate", "$it fps")
+                                }
+                                playerState.metadata.bitrate?.let {
+                                    MetadataRow("Bitrate", "${it / 1000} kbps")
+                                }
+                                playerState.metadata.mimeType?.let {
+                                    MetadataRow("Format", it)
+                                }
+                                playerState.metadata.audioChannels?.let { channels ->
+                                    playerState.metadata.audioSampleRate?.let { sampleRate ->
+                                        MetadataRow("Audio", "$channels channels, ${sampleRate / 1000} kHz")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
