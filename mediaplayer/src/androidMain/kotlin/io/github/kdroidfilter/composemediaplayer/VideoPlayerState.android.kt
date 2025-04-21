@@ -30,7 +30,7 @@ import kotlinx.coroutines.*
 /**
  * Logger for WebAssembly video player surface
  */
-internal val androidVideoLogger = Logger.withTag("WasmVideoPlayerSurface")
+internal val androidVideoLogger = Logger.withTag("AndroidVideoPlayerSurface")
     .apply { Logger.setMinSeverity(Severity.Warn) }
 
 @UnstableApi
