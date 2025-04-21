@@ -19,8 +19,7 @@ import platform.AVFoundation.*
 import platform.CoreGraphics.CGFloat
 import platform.CoreMedia.CMTimeGetSeconds
 import platform.CoreMedia.CMTimeMakeWithSeconds
-import platform.Foundation.NSNotificationCenter
-import platform.Foundation.NSURL
+import platform.Foundation.*
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 
@@ -97,6 +96,9 @@ actual open class VideoPlayerState {
     val videoAspectRatio: CGFloat
         get() = _videoAspectRatio
 
+    // Video metadata
+    private var _metadata = VideoMetadata(audioChannels = 2)
+
     private fun startPositionUpdates() {
         stopPositionUpdates()
         val interval = CMTimeMakeWithSeconds(1.0 / 60.0, 600) // approx. 60 fps
@@ -109,6 +111,11 @@ actual open class VideoPlayerState {
                 _currentTime = currentSeconds
                 _duration = durationSeconds
 
+                // Update duration in metadata
+                if (durationSeconds > 0 && !durationSeconds.isNaN()) {
+                    _metadata.duration = (durationSeconds * 1000).toLong()
+                }
+
                 if (!userDragging && durationSeconds > 0 && !currentSeconds.isNaN() && !durationSeconds.isNaN()) {
                     sliderPos = ((currentSeconds / durationSeconds) * 1000).toFloat()
                 }
@@ -116,9 +123,21 @@ actual open class VideoPlayerState {
                 _durationText = if (durationSeconds.isNaN()) "00:00" else formatTime(durationSeconds.toFloat())
 
                 player?.currentItem?.presentationSize?.useContents {
-                    val newAspect = if (height != 0.0) width / height else 16.0 / 9.0
-                    if (newAspect != _videoAspectRatio) {
-                        _videoAspectRatio = newAspect
+                    // Only update if dimensions are valid (greater than 0)
+                    if (width > 0 && height > 0) {
+                        val newAspect = width / height
+
+                        // Update aspect ratio if it has changed
+                        if (newAspect != _videoAspectRatio) {
+                            _videoAspectRatio = newAspect
+
+                            // Update width and height in metadata if they're not already set or if they're zero
+                            if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
+                                _metadata.width = width.toInt()
+                                _metadata.height = height.toInt()
+                                Logger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
+                            }
+                        }
                     }
                 }
 
@@ -161,9 +180,79 @@ actual open class VideoPlayerState {
         // Set loading state to true at the beginning of loading a new video
         _isLoading = true
 
-        val playerItem = AVPlayerItem(nsUrl)
+        // Reset metadata to default values
+        _metadata = VideoMetadata(audioChannels = 2)
+
+        // Create an AVAsset to extract metadata
+        val asset = AVURLAsset.URLAssetWithURL(nsUrl, null)
+
+        // Extract metadata from tracks
+
+        // Process video tracks
+        val videoTracks = asset.tracksWithMediaType(AVMediaTypeVideo)
+        if (videoTracks.isNotEmpty()) {
+            val videoTrack = videoTracks.firstOrNull() as? AVAssetTrack
+            videoTrack?.let { track ->
+                // Get frame rate
+                val nominalFrameRate = track.nominalFrameRate
+                if (nominalFrameRate > 0) {
+                    _metadata.frameRate = nominalFrameRate
+                }
+
+                // Get bitrate
+                val trackBitrate = track.estimatedDataRate
+                if (trackBitrate > 0) {
+                    _metadata.bitrate = (trackBitrate * 1000).toLong()
+                }
+
+                // Get resolution from naturalSize
+                track.naturalSize.useContents {
+                    if (width > 0 && height > 0) {
+                        _metadata.width = width.toInt()
+                        _metadata.height = height.toInt()
+                        _videoAspectRatio = if (height != 0.0) width / height else 16.0 / 9.0
+                        Logger.d { "Video resolution from track: ${width.toInt()}x${height.toInt()}" }
+                    }
+                }
+            }
+        }
+
+        // Process audio tracks
+        val audioTracks = asset.tracksWithMediaType(AVMediaTypeAudio)
+        if (audioTracks.isNotEmpty()) {
+            // Update audio channels count based on number of audio tracks
+            _metadata.audioChannels = audioTracks.size
+
+            // Try to get sample rate (simplified approach)
+            _metadata.audioSampleRate = 44100 // Default to common value
+        }
+
+        // Create player item from asset to get more accurate metadata
+        val playerItem = AVPlayerItem(asset)
         playerItem.presentationSize.useContents {
-            _videoAspectRatio = if (height != 0.0) width / height else 16.0 / 9.0
+            // Only update aspect ratio and dimensions if not already set or if they are zero
+            if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
+                _videoAspectRatio = if (height != 0.0) width / height else 16.0 / 9.0
+
+                // Update width and height in metadata only if they're valid
+                if (width > 0 && height > 0) {
+                    _metadata.width = width.toInt()
+                    _metadata.height = height.toInt()
+                    Logger.d { "Video resolution from presentationSize: ${width.toInt()}x${height.toInt()}" }
+                }
+            }
+        }
+
+        // Try to get duration
+        val durationSeconds = CMTimeGetSeconds(playerItem.duration)
+        if (durationSeconds > 0 && !durationSeconds.isNaN()) {
+            _metadata.duration = (durationSeconds * 1000).toLong()
+        }
+
+        // Try to extract title from the file name
+        val fileName = nsUrl.lastPathComponent
+        if (fileName != null) {
+            _metadata.title = fileName
         }
 
         player = AVPlayer(playerItem = playerItem).apply {
@@ -224,6 +313,9 @@ actual open class VideoPlayerState {
         player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
         _isPlaying = false
         _hasMedia = false
+
+        // Reset metadata
+        _metadata = VideoMetadata(audioChannels = 2)
     }
 
     actual fun seekTo(value: Float) {
@@ -268,6 +360,9 @@ actual open class VideoPlayerState {
         player = null
         _hasMedia = false
         _isPlaying = false
+
+        // Reset metadata
+        _metadata = VideoMetadata(audioChannels = 2)
     }
 
     actual fun openFile(file: PlatformFile) {
@@ -276,11 +371,7 @@ actual open class VideoPlayerState {
     }
 
     actual val metadata: VideoMetadata
-        get() = VideoMetadata(
-            audioChannels = 2, // Assuming stereo audio for iOS videos
-            width = player?.currentItem?.presentationSize?.useContents { width.toInt() },
-            height = player?.currentItem?.presentationSize?.useContents { height.toInt() }
-        )
+        get() = _metadata
     actual var subtitlesEnabled: Boolean
         get() = TODO("Not yet implemented")
         set(_) {}
