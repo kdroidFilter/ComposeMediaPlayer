@@ -90,6 +90,6 @@ fun WindowsVideoPlayerSurface(
     }
 
     if (playerState.isFullscreen && !isInFullscreenWindow) {
-        openFullscreenWindow(playerState)
+        openFullscreenWindow(playerState, overlay = overlay)
     }
 }

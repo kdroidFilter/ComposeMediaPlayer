@@ -365,6 +365,9 @@ private fun VideoContent(
                                 backgroundColor = playerState.subtitleBackgroundColor
                             )
                         }
+
+                        // Render the overlay content on top of the video in fullscreen mode
+                        overlay()
                     }
                 }
             }

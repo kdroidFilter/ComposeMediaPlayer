@@ -139,7 +139,11 @@ fun SinglePlayerScreen() {
                         modifier = Modifier
                             .fillMaxSize()
                             .clip(RoundedCornerShape(16.dp))
-                    )
+                    ){
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(text = "Overlay Content")
+                        }
+                    }
 
                     if (playerState.isLoading) {
                         Box(
