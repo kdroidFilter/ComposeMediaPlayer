@@ -17,10 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
-import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
@@ -392,6 +389,7 @@ fun SinglePlayerScreen() {
                                     MetadataRow("Format", it)
                                 }
                                 playerState.metadata.audioChannels?.let { channels ->
+                                    MetadataRow("Audio", "$channels channels")
                                     playerState.metadata.audioSampleRate?.let { sampleRate ->
                                         MetadataRow("Audio", "$channels channels, ${sampleRate / 1000} kHz")
                                     }
