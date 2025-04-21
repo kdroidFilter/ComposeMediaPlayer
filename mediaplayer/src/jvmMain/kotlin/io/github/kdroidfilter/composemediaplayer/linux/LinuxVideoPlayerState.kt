@@ -279,87 +279,85 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         })
 
         // TAG (metadata)
-        playbin.bus.connect(object : Bus.TAG {
-            override fun tagsFound(source: GstObject?, tagList: TagList?) {
-                if (tagList != null) {
-                    EventQueue.invokeLater {
+        playbin.bus.connect(Bus.TAG { source, tagList ->
+            if (tagList != null) {
+                EventQueue.invokeLater {
+                    try {
+                        // Extract metadata from TagList
                         try {
-                            // Extract metadata from TagList
-                            try {
-                                // Try to extract title
-                                val title = tagList.getString("title", 0)
-                                if (title != null) {
-                                    metadata.title = title
-                                }
-                            } catch (e: Exception) {
-                                // Ignore errors when getting title
+                            // Try to extract title
+                            val title = tagList.getString("title", 0)
+                            if (title != null) {
+                                metadata.title = title
                             }
-
-                            try {
-                                // Try to extract artist
-                                val artist = tagList.getString("artist", 0)
-                                if (artist != null) {
-                                    metadata.artist = artist
-                                }
-                            } catch (e: Exception) {
-                                // Ignore errors when getting artist
-                            }
-
-                            try {
-                                // Try to extract bitrate
-                                val bitrate = tagList.getString("bitrate", 0)
-                                if (bitrate != null) {
-                                    try {
-                                        metadata.bitrate = bitrate.toLong()
-                                    } catch (e: NumberFormatException) {
-                                        // Ignore if the string can't be converted to a long
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                // Ignore errors when getting bitrate
-                            }
-
-                            try {
-                                // Try to extract MIME type from container format
-                                val containerFormat = tagList.getString("container-format", 0)
-                                if (containerFormat != null) {
-                                    metadata.mimeType = containerFormat
-                                } else {
-                                    // Try audio codec as fallback
-                                    val audioCodec = tagList.getString("audio-codec", 0)
-                                    if (audioCodec != null) {
-                                        metadata.mimeType = audioCodec
-                                    } else {
-                                        // Try video codec as fallback
-                                        val videoCodec = tagList.getString("video-codec", 0)
-                                        if (videoCodec != null) {
-                                            metadata.mimeType = videoCodec
-                                        }
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                // Ignore errors when getting MIME type
-                            }
-
-                            try {
-                                // Try to extract audio channels
-                                val audioChannels = tagList.getString("audio-channels", 0)
-                                if (audioChannels != null) {
-                                    try {
-                                        metadata.audioChannels = audioChannels.toInt()
-                                    } catch (e: NumberFormatException) {
-                                        // Ignore if the string can't be converted to an integer
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                // Ignore errors when getting audio channels
-                            }
-
-                            // We'll also update metadata from the pipeline
-                            updateVideoMetadata()
                         } catch (e: Exception) {
-                            e.printStackTrace()
+                            // Ignore errors when getting title
                         }
+
+                        try {
+                            // Try to extract artist
+                            val artist = tagList.getString("artist", 0)
+                            if (artist != null) {
+                                metadata.artist = artist
+                            }
+                        } catch (e: Exception) {
+                            // Ignore errors when getting artist
+                        }
+
+                        try {
+                            // Try to extract bitrate
+                            val bitrate = tagList.getString("bitrate", 0)
+                            if (bitrate != null) {
+                                try {
+                                    metadata.bitrate = bitrate.toLong()
+                                } catch (e: NumberFormatException) {
+                                    // Ignore if the string can't be converted to a long
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Ignore errors when getting bitrate
+                        }
+
+                        try {
+                            // Try to extract MIME type from container format
+                            val containerFormat = tagList.getString("container-format", 0)
+                            if (containerFormat != null) {
+                                metadata.mimeType = containerFormat
+                            } else {
+                                // Try audio codec as fallback
+                                val audioCodec = tagList.getString("audio-codec", 0)
+                                if (audioCodec != null) {
+                                    metadata.mimeType = audioCodec
+                                } else {
+                                    // Try video codec as fallback
+                                    val videoCodec = tagList.getString("video-codec", 0)
+                                    if (videoCodec != null) {
+                                        metadata.mimeType = videoCodec
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Ignore errors when getting MIME type
+                        }
+
+                        try {
+                            // Try to extract audio channels
+                            val audioChannels = tagList.getString("audio-channels", 0)
+                            if (audioChannels != null) {
+                                try {
+                                    metadata.audioChannels = audioChannels.toInt()
+                                } catch (e: NumberFormatException) {
+                                    // Ignore if the string can't be converted to an integer
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Ignore errors when getting audio channels
+                        }
+
+                        // We'll also update metadata from the pipeline
+                        updateVideoMetadata()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
                 }
             }
@@ -557,24 +555,49 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             }
 
             // Get audio channels and sample rate if available
-            val audioSinkPad = playbin.getStaticPad("audio_sink")
-            val audioCaps = audioSinkPad?.currentCaps
-            val audioStructure = audioCaps?.getStructure(0)
+            // On Linux, we need to use a different approach to get audio metadata
+            try {
+                // Try to get audio information from the audio-filter element (level)
+                val levelElement = playbin.get("audio-filter") as? Element
+                if (levelElement != null) {
+                    val sinkPad = levelElement.getStaticPad("sink")
+                    val audioCaps = sinkPad?.currentCaps
+                    val audioStructure = audioCaps?.getStructure(0)
 
-            if (audioStructure != null) {
-                try {
-                    if (audioStructure.hasField("channels")) {
-                        val channels = audioStructure.getInteger("channels")
-                        metadata.audioChannels = channels
-                    }
+                    if (audioStructure != null) {
+                        if (audioStructure.hasField("channels")) {
+                            val channels = audioStructure.getInteger("channels")
+                            metadata.audioChannels = channels
+                        }
 
-                    if (audioStructure.hasField("rate")) {
-                        val rate = audioStructure.getInteger("rate")
-                        metadata.audioSampleRate = rate
+                        if (audioStructure.hasField("rate")) {
+                            val rate = audioStructure.getInteger("rate")
+                            metadata.audioSampleRate = rate
+                        }
                     }
-                } catch (e: Exception) {
-                    // Ignore errors when getting specific fields
                 }
+
+                // If we couldn't get the info from audio-filter, try the traditional approach
+                if (metadata.audioChannels == null || metadata.audioSampleRate == null) {
+                    val audioSinkPad = playbin.getStaticPad("audio_sink")
+                    val audioCaps = audioSinkPad?.currentCaps
+                    val audioStructure = audioCaps?.getStructure(0)
+
+                    if (audioStructure != null) {
+                        if (audioStructure.hasField("channels") && metadata.audioChannels == null) {
+                            val channels = audioStructure.getInteger("channels")
+                            metadata.audioChannels = channels
+                        }
+
+                        if (audioStructure.hasField("rate") && metadata.audioSampleRate == null) {
+                            val rate = audioStructure.getInteger("rate")
+                            metadata.audioSampleRate = rate
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore errors when getting specific fields
+                e.printStackTrace()
             }
         } catch (e: Exception) {
             // Ignore general errors
