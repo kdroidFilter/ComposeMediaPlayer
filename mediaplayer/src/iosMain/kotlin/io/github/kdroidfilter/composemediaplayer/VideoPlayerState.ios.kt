@@ -276,7 +276,11 @@ actual open class VideoPlayerState {
     }
 
     actual val metadata: VideoMetadata
-        get() = TODO("Not yet implemented")
+        get() = VideoMetadata(
+            audioChannels = 2, // Assuming stereo audio for iOS videos
+            width = player?.currentItem?.presentationSize?.useContents { width.toInt() },
+            height = player?.currentItem?.presentationSize?.useContents { height.toInt() }
+        )
     actual var subtitlesEnabled: Boolean
         get() = TODO("Not yet implemented")
         set(_) {}
