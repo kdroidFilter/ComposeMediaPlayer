@@ -390,6 +390,61 @@ private fun VideoContent(
                         if (height != 0) {
                             onVideoRatioChange(width.toFloat() / height.toFloat())
                             wasmVideoLogger.d { "The video ratio is updated: ${width.toFloat() / height.toFloat()}" }
+
+                            // Update metadata properties
+                            playerState.metadata.width = width
+                            playerState.metadata.height = height
+                            playerState.metadata.duration = (video.duration * 1000).toLong() // Convert seconds to milliseconds
+
+                            // Try to get mimeType from the video source
+                            val src = video.src
+                            if (src.isNotEmpty()) {
+                                val extension = src.substringAfterLast('.', "").lowercase()
+                                playerState.metadata.mimeType = when (extension) {
+                                    "mp4" -> "video/mp4"
+                                    "webm" -> "video/webm"
+                                    "ogg" -> "video/ogg"
+                                    "mov" -> "video/quicktime"
+                                    "avi" -> "video/x-msvideo"
+                                    "mkv" -> "video/x-matroska"
+                                    else -> null
+                                }
+
+                                // Try to extract title from the filename
+                                try {
+                                    val filename = src.substringAfterLast('/', "")
+                                                     .substringAfterLast('\\', "")
+                                                     .substringBeforeLast('.', "")
+                                    if (filename.isNotEmpty()) {
+                                        playerState.metadata.title = filename
+                                    }
+                                } catch (e: Exception) {
+                                    wasmVideoLogger.w { "Failed to extract title from filename: ${e.message}" }
+                                }
+                            }
+
+                            // Set frameRate - use a common default value since it's not directly available
+                            // Most videos are either 24, 25, 30, or 60 fps - 30 is a reasonable default
+                            playerState.metadata.frameRate = 30.0f
+
+                            // Estimate bitrate based on video dimensions and a quality factor
+                            // This is a very rough estimate
+                            if (width > 0 && height > 0) {
+                                val qualityFactor = when {
+                                    width >= 3840 -> 20000000L // 4K video (~20 Mbps)
+                                    width >= 1920 -> 8000000L  // 1080p video (~8 Mbps)
+                                    width >= 1280 -> 5000000L  // 720p video (~5 Mbps)
+                                    else -> 2000000L           // SD video (~2 Mbps)
+                                }
+                                playerState.metadata.bitrate = qualityFactor
+                            }
+
+                            // Artist is typically not available in video files without additional metadata
+                            // We could set it to a default value or leave it as null
+
+                            wasmVideoLogger.d { "Updated metadata: width=${width}, height=${height}, duration=${playerState.metadata.duration}, " +
+                                               "mimeType=${playerState.metadata.mimeType}, title=${playerState.metadata.title}, " +
+                                               "frameRate=${playerState.metadata.frameRate}, bitrate=${playerState.metadata.bitrate}" }
                         }
                     }
 
