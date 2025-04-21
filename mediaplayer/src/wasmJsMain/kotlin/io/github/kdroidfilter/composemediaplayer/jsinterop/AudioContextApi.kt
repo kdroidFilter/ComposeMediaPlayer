@@ -14,6 +14,7 @@ external class AudioContext : JsAny {
     constructor()
     val destination: AudioDestinationNode
     val state: String
+    val sampleRate: Int
     fun createMediaElementSource(mediaElement: HTMLMediaElement): MediaElementAudioSourceNode
     fun createChannelSplitter(numberOfOutputs: Int = definedExternally): ChannelSplitterNode
     fun createAnalyser(): AnalyserNode
@@ -32,7 +33,9 @@ external open class AudioNode : JsAny {
 /**
  * Audio context output
  */
-external class AudioDestinationNode : AudioNode
+external class AudioDestinationNode : AudioNode {
+    val maxChannelCount: Int
+}
 
 /**
  * Audio source based on a media element (audio or video)

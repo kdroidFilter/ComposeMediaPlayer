@@ -28,6 +28,14 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
     private var leftData: Uint8Array? = null
     private var rightData: Uint8Array? = null
 
+    // Audio properties
+    private var _audioChannels: Int = 0
+    private var _audioSampleRate: Int = 0
+
+    // Getters for audio properties
+    val audioChannels: Int get() = _audioChannels
+    val audioSampleRate: Int get() = _audioSampleRate
+
     /**
      * Initializes Web Audio (creates a source, a splitter, etc.)
      * In case of error (CORS), we simply return false => the video remains managed by HTML
@@ -68,7 +76,11 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
         leftData = Uint8Array(size)
         rightData = Uint8Array(size)
 
-        wasmAudioLogger.d { "Web Audio successfully initialized and capturing audio." }
+        // Extract audio properties
+        _audioSampleRate = ctx.sampleRate
+        _audioChannels = ctx.destination.maxChannelCount.coerceAtMost(2) // Most common is 2 (stereo)
+
+        wasmAudioLogger.d { "Web Audio successfully initialized and capturing audio. Sample rate: $_audioSampleRate Hz, Channels: $_audioChannels" }
         return true
     }
 

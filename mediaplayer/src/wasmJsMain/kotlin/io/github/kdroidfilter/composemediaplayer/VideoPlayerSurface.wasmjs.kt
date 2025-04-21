@@ -477,6 +477,10 @@ fun setupVideoElement(
     // Reset error state when setting up a new video element
     playerState.clearError()
 
+    // Reset audio metadata
+    playerState.metadata.audioChannels = null
+    playerState.metadata.audioSampleRate = null
+
     // Note: Fullscreen styling is now handled directly by the HtmlView component
 
     // Helper => initialize analysis if enableAudioDetection
@@ -489,6 +493,13 @@ fun setupVideoElement(
                 // CORS error detected, disable audio analysis for this video
                 corsErrorDetected = true
                 wasmVideoLogger.w { "CORS error detected during audio analyzer initialization. Audio level processing disabled for this video." }
+            } else {
+                // Update metadata with audio properties
+                audioAnalyzer?.let { analyzer ->
+                    playerState.metadata.audioChannels = analyzer.audioChannels
+                    playerState.metadata.audioSampleRate = analyzer.audioSampleRate
+                    wasmVideoLogger.d { "Updated metadata with audio properties: channels=${analyzer.audioChannels}, sampleRate=${analyzer.audioSampleRate}" }
+                }
             }
         }
     }
