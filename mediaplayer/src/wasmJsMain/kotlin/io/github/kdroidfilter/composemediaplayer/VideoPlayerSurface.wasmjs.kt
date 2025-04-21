@@ -35,7 +35,11 @@ internal val wasmVideoLogger = Logger.withTag("WasmVideoPlayerSurface").apply { 
 
 
 @Composable
-actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier) {
+actual fun VideoPlayerSurface(
+    playerState: VideoPlayerState, 
+    modifier: Modifier,
+    overlay: @Composable () -> Unit
+) {
     if (playerState.hasMedia) {
 
         var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
@@ -54,7 +58,8 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
             onVideoElementChange = { videoElement = it },
             onVideoRatioChange = { videoRatio = it },
             onCorsChange = { useCors = it },
-            scope = scope
+            scope = scope,
+            overlay = overlay
         )
 
         // Handle fullscreen update
@@ -259,7 +264,8 @@ private fun VideoContent(
     onVideoElementChange: (HTMLVideoElement?) -> Unit,
     onVideoRatioChange: (Float?) -> Unit,
     onCorsChange: (Boolean) -> Unit,
-    scope: CoroutineScope
+    scope: CoroutineScope,
+    overlay: @Composable () -> Unit = {}
 ) {
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Transparent).drawBehind {
@@ -307,6 +313,9 @@ private fun VideoContent(
                 backgroundColor = playerState.subtitleBackgroundColor
             )
         }
+
+        // Render the overlay content on top of the video
+        overlay()
 
         if (playerState.isFullscreen) {
             FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {

@@ -20,12 +20,15 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
  *
  * @param playerState The state of the Windows video player, used to manage video playback and rendering.
  * @param modifier The modifier to be used to adjust the layout or styling of the composable.
+ * @param overlay Optional composable content to be displayed on top of the video surface.
+ *               This can be used to add custom controls, information, or any UI elements.
  * @param isInFullscreenWindow Whether this surface is already being displayed in a fullscreen window.
  */
 @Composable
 fun WindowsVideoPlayerSurface(
     playerState: WindowsVideoPlayerState,
     modifier: Modifier = Modifier,
+    overlay: @Composable () -> Unit = {},
     isInFullscreenWindow: Boolean = false,
 ) {
     // Keep track of when this instance is first composed with this player state
@@ -81,6 +84,9 @@ fun WindowsVideoPlayerSurface(
                 )
             }
         }
+
+        // Render the overlay content on top of the video
+        overlay()
     }
 
     if (playerState.isFullscreen && !isInFullscreenWindow) {

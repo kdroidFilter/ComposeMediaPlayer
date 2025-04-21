@@ -19,7 +19,11 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 
 @UnstableApi
 @Composable
-actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier) {
+actual fun VideoPlayerSurface(
+    playerState: VideoPlayerState, 
+    modifier: Modifier,
+    overlay: @Composable () -> Unit
+) {
     val context = LocalContext.current
 
     // Handle fullscreen mode
@@ -114,6 +118,8 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                 )
             }
         }
+
+        // Render the overlay content on top of the video
+        overlay()
     }
 }
-

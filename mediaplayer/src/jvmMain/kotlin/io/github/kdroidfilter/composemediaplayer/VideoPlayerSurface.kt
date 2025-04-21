@@ -18,13 +18,19 @@ import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerSurfa
  * @param playerState The current state of the video player, encapsulating playback state
  *                    and platform-specific implementation details.
  * @param modifier A [Modifier] for styling or adjusting the layout of the video player surface.
+ * @param overlay Optional composable content to be displayed on top of the video surface.
+ *               This can be used to add custom controls, information, or any UI elements.
  */
 @Composable
-actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier) {
+actual fun VideoPlayerSurface(
+    playerState: VideoPlayerState, 
+    modifier: Modifier,
+    overlay: @Composable () -> Unit
+) {
     when (val delegate = playerState.delegate) {
-        is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier)
-        is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier)
-        is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier)
+        is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, overlay)
+        is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier, overlay)
+        is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier, overlay)
         else -> throw IllegalArgumentException("Unsupported player state type")
     }
 }

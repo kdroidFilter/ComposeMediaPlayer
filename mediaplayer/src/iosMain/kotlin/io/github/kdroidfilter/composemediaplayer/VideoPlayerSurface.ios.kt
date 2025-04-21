@@ -18,8 +18,12 @@ import platform.UIKit.*
 
 @OptIn(ExperimentalForeignApi::class)
 @Composable
-actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier) {
-    VideoPlayerSurfaceImpl(playerState, modifier, isInFullscreenView = false)
+actual fun VideoPlayerSurface(
+    playerState: VideoPlayerState, 
+    modifier: Modifier,
+    overlay: @Composable () -> Unit
+) {
+    VideoPlayerSurfaceImpl(playerState, modifier, overlay, isInFullscreenView = false)
 }
 
 @OptIn(ExperimentalForeignApi::class)
@@ -27,6 +31,7 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
 fun VideoPlayerSurfaceImpl(
     playerState: VideoPlayerState, 
     modifier: Modifier,
+    overlay: @Composable () -> Unit,
     isInFullscreenView: Boolean = false
 ) {
     // Create and store the AVPlayerViewController
@@ -87,13 +92,16 @@ fun VideoPlayerSurfaceImpl(
                     avPlayerViewController.view.setFrame(containerView.bounds)
                 }
             )
+
+            // Render the overlay content on top of the video
+            overlay()
         }
     }
 
     // Handle fullscreen mode
     if (playerState.isFullscreen && !isInFullscreenView) {
         openFullscreenView(playerState) { state, mod, inFullscreen ->
-            VideoPlayerSurfaceImpl(state, mod, inFullscreen)
+            VideoPlayerSurfaceImpl(state, mod, overlay, inFullscreen)
         }
     }
 }

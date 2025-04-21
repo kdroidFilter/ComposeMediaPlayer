@@ -24,6 +24,8 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
  *                    including playback control, timeline management, and video frames.
  * @param modifier An optional `Modifier` for customizing the layout and appearance of the
  *                 composable container. Defaults to an empty `Modifier`.
+ * @param overlay Optional composable content to be displayed on top of the video surface.
+ *               This can be used to add custom controls, information, or any UI elements.
  * @param isInFullscreenWindow Whether this surface is already being displayed in a fullscreen window.
  */
 
@@ -31,6 +33,7 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 fun LinuxVideoPlayerSurface(
     playerState: LinuxVideoPlayerState,
     modifier: Modifier = Modifier,
+    overlay: @Composable () -> Unit = {},
     isInFullscreenWindow: Boolean = false
 ) {
     Box(
@@ -73,6 +76,9 @@ fun LinuxVideoPlayerSurface(
                 backgroundColor = playerState.subtitleBackgroundColor
             )
         }
+
+        // Render the overlay content on top of the video
+        overlay()
     }
 
     if (playerState.isFullscreen && !isInFullscreenWindow) {

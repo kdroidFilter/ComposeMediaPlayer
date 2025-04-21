@@ -10,6 +10,12 @@ import androidx.compose.ui.Modifier
  *                    video position, volume, and other related properties.
  * @param modifier    The modifier to be applied to the video player surface for
  *                    layout and styling adjustments.
+ * @param overlay     Optional composable content to be displayed on top of the video surface.
+ *                    This can be used to add custom controls, information, or any UI elements.
  */
 @Composable
-expect fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
+expect fun VideoPlayerSurface(
+    playerState: VideoPlayerState, 
+    modifier: Modifier = Modifier,
+    overlay: @Composable () -> Unit = {}
+)
