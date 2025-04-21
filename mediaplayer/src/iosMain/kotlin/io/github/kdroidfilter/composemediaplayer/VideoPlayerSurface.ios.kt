@@ -79,8 +79,7 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
                     // Only start playback if media is loaded, not already playing, and user hasn't paused
                     if (playerState.player != null && playerState.hasMedia && !playerState.isPlaying) {
                         Logger.d { "Starting playback" }
-                        // Don't automatically play - let the user control playback
-                        // playerState.play()
+
                     }
                 }
             )
