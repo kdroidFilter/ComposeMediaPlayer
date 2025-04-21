@@ -2,8 +2,6 @@ package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,7 +19,6 @@ import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
-import kotlinx.browser.window
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -59,8 +56,6 @@ actual fun VideoPlayerSurface(playerState: VideoPlayerState, modifier: Modifier)
             onCorsChange = { useCors = it },
             scope = scope
         )
-
-
 
         // Handle fullscreen update
         LaunchedEffect(playerState.isFullscreen) {
@@ -369,28 +364,33 @@ private fun VideoContent(
         // Create HTML video element
         // Use key to force recreation when CORS mode changes
         key(useCors) {
-            HtmlView(factory = {
-                createVideoElement(useCors)
-            }, modifier = modifier, update = { video ->
-                onVideoElementChange(video)
+            HtmlView(
+                factory = {
+                    createVideoElement(useCors)
+                }, 
+                modifier = modifier, 
+                update = { video ->
+                    onVideoElementChange(video)
 
-                video.addEventListener("loadedmetadata") {
-                    val width = video.videoWidth
-                    val height = video.videoHeight
-                    if (height != 0) {
-                        onVideoRatioChange(width.toFloat() / height.toFloat())
-                        wasmVideoLogger.d { "The video ratio is updated: ${width.toFloat() / height.toFloat()}" }
+                    video.addEventListener("loadedmetadata") {
+                        val width = video.videoWidth
+                        val height = video.videoHeight
+                        if (height != 0) {
+                            onVideoRatioChange(width.toFloat() / height.toFloat())
+                            wasmVideoLogger.d { "The video ratio is updated: ${width.toFloat() / height.toFloat()}" }
+                        }
                     }
-                }
 
-                setupVideoElement(
-                    video,
-                    playerState,
-                    scope,
-                    enableAudioDetection = true,
-                    useCors = useCors,
-                    onCorsError = { onCorsChange(false) })
-            })
+                    setupVideoElement(
+                        video,
+                        playerState,
+                        scope,
+                        enableAudioDetection = true,
+                        useCors = useCors,
+                        onCorsError = { onCorsChange(false) })
+                },
+                isFullscreen = playerState.isFullscreen
+            )
         }
     }
 }
@@ -464,6 +464,8 @@ fun setupVideoElement(
 
     // Reset error state when setting up a new video element
     playerState.clearError()
+
+    // Note: Fullscreen styling is now handled directly by the HtmlView component
 
     // Helper => initialize analysis if enableAudioDetection
     fun initAudioAnalyzer() {
@@ -615,16 +617,6 @@ fun setupVideoElement(
         }
     }
 
-    window.addEventListener("resize", {
-        scope.launch {
-            if (playerState.isFullscreen) {
-                delay(500)
-                applyVideoStyles()
-            }
-        }
-    })
-
-
     // ended => pause the video
     video.addEventListener("ended") {
         scope.launch {
@@ -664,9 +656,14 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
     }
 }
 
+/**
+ * Apply fullscreen styles to the video element
+ * This function is kept for backward compatibility but should not be called directly.
+ * Instead, use the fullscreenStyleCallback in VideoPlayerState.
+ */
 suspend fun applyVideoStyles() {
     val video = document.querySelector("video") as? HTMLVideoElement
-    delay(500)
+    delay(501)
     video?.let {
         it.style.width = "100%"
         it.style.height = "100%"

@@ -67,14 +67,24 @@ private class FocusSwitcher<T : Element>(private val info: ComponentInfo<T>, pri
     }
 }
 
-private fun setElementPosition(element: HTMLElement, width: Float, height: Float, x: Float, y: Float) {
+private fun setElementPosition(element: HTMLElement, width: Float, height: Float, x: Float, y: Float, isFullscreen: Boolean = false) {
     element.style.apply {
         position = "absolute"
         margin = "0px"
-        this.width = "${width}px"
-        this.height = "${height}px"
-        left = "${x}px"
-        top = "${y}px"
+
+        if (isFullscreen) {
+            // In fullscreen mode, make the element fill the entire screen
+            this.width = "100%"
+            this.height = "100%"
+            left = "0"
+            top = "0"
+        } else {
+            // Normal positioning based on the container
+            this.width = "${width}px"
+            this.height = "${height}px"
+            left = "${x}px"
+            top = "${y}px"
+        }
     }
 }
 
@@ -82,7 +92,8 @@ private fun setElementPosition(element: HTMLElement, width: Float, height: Float
 internal fun <T : Element> HtmlView(
     factory: Document.() -> T,
     modifier: Modifier = Modifier,
-    update: (T) -> Unit = NoOpUpdate
+    update: (T) -> Unit = NoOpUpdate,
+    isFullscreen: Boolean = false
 ) {
     val info = remember { ComponentInfo<T>() }
     val root = LocalLayerContainer.current
@@ -98,7 +109,8 @@ internal fun <T : Element> HtmlView(
             size.width / density,
             size.height / density,
             pos.x / density,
-            pos.y / density
+            pos.y / density,
+            isFullscreen
         )
     }) {
         focusSwitcher.Content()
