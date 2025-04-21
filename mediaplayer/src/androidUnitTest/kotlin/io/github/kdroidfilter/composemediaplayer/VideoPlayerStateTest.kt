@@ -192,4 +192,32 @@ class VideoPlayerStateTest {
         // Clean up
         playerState.dispose()
     }
+
+    /**
+     * Test metadata functionality
+     */
+    @Test
+    fun testMetadataFunctionality() {
+        if (skipIfContextProviderNotAvailable()) return
+
+        val playerState = VideoPlayerState()
+
+        // Verify metadata object is initialized
+        assertNotNull(playerState.metadata)
+
+        // Initially metadata fields should be null
+        assertEquals(null, playerState.metadata.title)
+        assertEquals(null, playerState.metadata.artist)
+        assertEquals(null, playerState.metadata.duration)
+        assertEquals(null, playerState.metadata.width)
+        assertEquals(null, playerState.metadata.height)
+        assertEquals(null, playerState.metadata.bitrate)
+        assertEquals(null, playerState.metadata.frameRate)
+        assertEquals(null, playerState.metadata.mimeType)
+        assertEquals(null, playerState.metadata.audioChannels)
+        assertEquals(null, playerState.metadata.audioSampleRate)
+
+        // Clean up
+        playerState.dispose()
+    }
 }

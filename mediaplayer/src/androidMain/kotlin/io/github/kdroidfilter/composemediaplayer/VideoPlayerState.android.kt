@@ -231,6 +231,9 @@ actual open class VideoPlayerState {
                         _duration = player.duration.toDouble() / 1000.0
                         _isPlaying = player.isPlaying
                         if (player.isPlaying) startPositionUpdates()
+
+                        // Extract format metadata when the player is ready
+                        extractFormatMetadata(player)
                     }
                 }
 
@@ -347,6 +350,10 @@ actual open class VideoPlayerState {
             try {
                 _error = null
                 player.setMediaItem(mediaItem)
+
+                // Extract metadata from the MediaItem before preparing the player
+                extractMediaItemMetadata(mediaItem)
+
                 player.prepare()
                 player.volume = volume
                 player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
@@ -401,6 +408,74 @@ actual open class VideoPlayerState {
      */
     actual fun toggleFullscreen() {
         _isFullscreen = !_isFullscreen
+    }
+
+    /**
+     * Extracts metadata from the player
+     */
+    private fun extractFormatMetadata(player: Player) {
+        try {
+            // Extract duration if available
+            if (player.duration > 0 && player.duration != C.TIME_UNSET) {
+                _metadata.duration = player.duration
+            }
+
+            // Extract format information from tracks
+            player.currentTracks.groups.forEach { group ->
+                for (i in 0 until group.length) {
+                    val trackFormat = group.getTrackFormat(i)
+
+                    when (group.getType()) {
+                        C.TRACK_TYPE_VIDEO -> {
+                            // Video format metadata
+                            if (trackFormat.frameRate > 0) {
+                                _metadata.frameRate = trackFormat.frameRate
+                            }
+
+                            if (trackFormat.bitrate > 0) {
+                                _metadata.bitrate = trackFormat.bitrate.toLong()
+                            }
+
+                            trackFormat.sampleMimeType?.let {
+                                _metadata.mimeType = it
+                            }
+                        }
+                        C.TRACK_TYPE_AUDIO -> {
+                            // Audio format metadata
+                            if (trackFormat.channelCount > 0) {
+                                _metadata.audioChannels = trackFormat.channelCount
+                            }
+
+                            if (trackFormat.sampleRate > 0) {
+                                _metadata.audioSampleRate = trackFormat.sampleRate
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Extract media item metadata
+            extractMediaItemMetadata(player.currentMediaItem)
+
+            androidVideoLogger.d { "Metadata extracted: $_metadata" }
+        } catch (e: Exception) {
+            androidVideoLogger.e { "Error extracting format metadata: ${e.message}" }
+        }
+    }
+
+    /**
+     * Extracts metadata from the MediaItem
+     */
+    private fun extractMediaItemMetadata(mediaItem: MediaItem?) {
+        try {
+            mediaItem?.mediaMetadata?.let { metadata ->
+                // Extract title and artist if available
+                metadata.title?.toString()?.let { _metadata.title = it }
+                metadata.artist?.toString()?.let { _metadata.artist = it }
+            }
+        } catch (e: Exception) {
+            androidVideoLogger.e { "Error extracting media item metadata: ${e.message}" }
+        }
     }
 
     private fun resetStates(keepMedia: Boolean = false) {
