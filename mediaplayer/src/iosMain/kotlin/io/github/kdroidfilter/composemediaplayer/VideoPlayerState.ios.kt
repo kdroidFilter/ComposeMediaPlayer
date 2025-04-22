@@ -372,14 +372,24 @@ actual open class VideoPlayerState {
 
     actual val metadata: VideoMetadata
         get() = _metadata
+    // Subtitle state
+    private var _subtitlesEnabled by mutableStateOf(false)
     actual var subtitlesEnabled: Boolean
-        get() = TODO("Not yet implemented")
-        set(_) {}
+        get() = _subtitlesEnabled
+        set(value) {
+            _subtitlesEnabled = value
+        }
+
+    private var _currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
     actual var currentSubtitleTrack: SubtitleTrack?
-        get() = TODO("Not yet implemented")
-        set(_) {}
+        get() = _currentSubtitleTrack
+        set(value) {
+            _currentSubtitleTrack = value
+        }
+
+    private val _availableSubtitleTracks = mutableListOf<SubtitleTrack>()
     actual val availableSubtitleTracks: MutableList<SubtitleTrack>
-        get() = TODO("Not yet implemented")
+        get() = _availableSubtitleTracks
 
     actual var subtitleTextStyle: TextStyle = TextStyle(
         color = Color.White,
@@ -390,9 +400,37 @@ actual open class VideoPlayerState {
 
     actual var subtitleBackgroundColor: Color = Color.Black.copy(alpha = 0.5f)
 
+    /**
+     * Selects a subtitle track for display.
+     * If track is null, disables subtitles.
+     * 
+     * @param track The subtitle track to select, or null to disable subtitles
+     */
     actual fun selectSubtitleTrack(track: SubtitleTrack?) {
+        Logger.d { "selectSubtitleTrack called with track: $track" }
+        if (track == null) {
+            disableSubtitles()
+            return
+        }
+
+        // Update current track and enable flag
+        currentSubtitleTrack = track
+        subtitlesEnabled = true
+
+        // iOS uses Compose-based subtitles, so we don't need to configure
+        // the native player for subtitle display
     }
 
+    /**
+     * Disables subtitle display.
+     */
     actual fun disableSubtitles() {
+        Logger.d { "disableSubtitles called" }
+        // Update state
+        currentSubtitleTrack = null
+        subtitlesEnabled = false
+
+        // iOS uses Compose-based subtitles, so we don't need to configure
+        // the native player for subtitle display
     }
 }

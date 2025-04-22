@@ -12,6 +12,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.UIKitView
 import co.touchlab.kermit.Logger
+import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.AVKit.AVPlayerViewController
 import platform.UIKit.*
@@ -92,6 +94,26 @@ fun VideoPlayerSurfaceImpl(
                     avPlayerViewController.view.setFrame(containerView.bounds)
                 }
             )
+
+            // Add Compose-based subtitle layer
+            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+                // Calculate current time in milliseconds
+                val currentTimeMs = (playerState.sliderPos / 1000f * 
+                    playerState.durationText.toTimeMs()).toLong()
+
+                // Calculate duration in milliseconds
+                val durationMs = playerState.durationText.toTimeMs()
+
+                ComposeSubtitleLayer(
+                    currentTimeMs = currentTimeMs,
+                    durationMs = durationMs,
+                    isPlaying = playerState.isPlaying,
+                    subtitleTrack = playerState.currentSubtitleTrack,
+                    subtitlesEnabled = playerState.subtitlesEnabled,
+                    textStyle = playerState.subtitleTextStyle,
+                    backgroundColor = playerState.subtitleBackgroundColor
+                )
+            }
 
             // Render the overlay content on top of the video
             overlay()

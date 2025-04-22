@@ -122,11 +122,15 @@ class VideoPlayerStateTest {
 
     /**
      * Test subtitle functionality
-     * Note: Some subtitle functionality is marked as TODO in the iOS implementation
      */
     @Test
     fun testSubtitleFunctionality() {
         val playerState = VideoPlayerState()
+
+        // Verify initial subtitle state
+        assertFalse(playerState.subtitlesEnabled)
+        assertEquals(null, playerState.currentSubtitleTrack)
+        assertTrue(playerState.availableSubtitleTracks.isEmpty())
 
         // Create a test subtitle track
         val testTrack = SubtitleTrack(
@@ -138,8 +142,16 @@ class VideoPlayerStateTest {
         // Select the subtitle track
         playerState.selectSubtitleTrack(testTrack)
 
+        // Verify subtitle state after selecting a track
+        assertTrue(playerState.subtitlesEnabled)
+        assertEquals(testTrack, playerState.currentSubtitleTrack)
+
         // Disable subtitles
         playerState.disableSubtitles()
+
+        // Verify subtitle state after disabling subtitles
+        assertFalse(playerState.subtitlesEnabled)
+        assertEquals(null, playerState.currentSubtitleTrack)
 
         // Clean up
         playerState.dispose()
