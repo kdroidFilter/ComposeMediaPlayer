@@ -89,6 +89,9 @@ actual open class VideoPlayerState {
     // End-of-playback notification observer
     private var endObserver: Any? = null
 
+    // Stalled playback notification observer
+    private var stalledObserver: Any? = null
+
     // Internal time values (in seconds)
     private var _currentTime: Double = 0.0
     private var _duration: Double = 0.0
@@ -165,10 +168,15 @@ actual open class VideoPlayerState {
         }
     }
 
-    private fun removeEndObserver() {
+    private fun removeObservers() {
         endObserver?.let {
             NSNotificationCenter.defaultCenter.removeObserver(it)
             endObserver = null
+        }
+
+        stalledObserver?.let {
+            NSNotificationCenter.defaultCenter.removeObserver(it)
+            stalledObserver = null
         }
     }
 
@@ -180,7 +188,7 @@ actual open class VideoPlayerState {
         }
 
         stopPositionUpdates()
-        removeEndObserver()
+        removeObservers()
         player?.pause()
 
         // Set loading state to true at the beginning of loading a new video
@@ -189,112 +197,119 @@ actual open class VideoPlayerState {
         // Reset metadata to default values
         _metadata = VideoMetadata(audioChannels = 2)
 
-        // Create an AVAsset to extract metadata
-        val asset = AVURLAsset.URLAssetWithURL(nsUrl, null)
+        // Create a temporary player with minimal setup to show something immediately
+        val tempPlayerItem = AVPlayerItem(nsUrl)
+        player = AVPlayer(playerItem = tempPlayerItem).apply {
+            volume = this@VideoPlayerState.volume
+            rate = 0.0f // Don't start playing yet
+        }
+        _hasMedia = true
 
-        // Extract metadata from tracks
+        // Process the asset on a background thread to avoid blocking the UI
+        dispatch_async(platform.darwin.dispatch_get_global_queue(platform.darwin.DISPATCH_QUEUE_PRIORITY_DEFAULT.toLong(), 0u)) {
+            // Create an AVAsset to extract metadata
+            val asset = AVURLAsset.URLAssetWithURL(nsUrl, null)
 
-        // Process video tracks
-        val videoTracks = asset.tracksWithMediaType(AVMediaTypeVideo)
-        if (videoTracks.isNotEmpty()) {
-            val videoTrack = videoTracks.firstOrNull() as? AVAssetTrack
-            videoTrack?.let { track ->
-                // Get frame rate
-                val nominalFrameRate = track.nominalFrameRate
-                if (nominalFrameRate > 0) {
-                    _metadata.frameRate = nominalFrameRate
-                }
+            // Extract metadata from tracks
+            var videoAspectRatioTemp = 16.0 / 9.0
+            var widthTemp: Int? = null
+            var heightTemp: Int? = null
 
-                // Get bitrate
-                val trackBitrate = track.estimatedDataRate
-                if (trackBitrate > 0) {
-                    _metadata.bitrate = (trackBitrate * 1000).toLong()
-                }
+            // Process video tracks
+            val videoTracks = asset.tracksWithMediaType(AVMediaTypeVideo)
+            if (videoTracks.isNotEmpty()) {
+                val videoTrack = videoTracks.firstOrNull() as? AVAssetTrack
+                videoTrack?.let { track ->
+                    // Get frame rate
+                    val nominalFrameRate = track.nominalFrameRate
+                    if (nominalFrameRate > 0) {
+                        _metadata.frameRate = nominalFrameRate
+                    }
 
-                // Get resolution from naturalSize
-                track.naturalSize.useContents {
-                    if (width > 0 && height > 0) {
-                        _metadata.width = width.toInt()
-                        _metadata.height = height.toInt()
-                        // Try to use real aspect ratio if available, fallback to 16:9
-                        _videoAspectRatio = width / height
-                        Logger.d { "Video resolution from track: ${width.toInt()}x${height.toInt()}" }
+                    // Get bitrate
+                    val trackBitrate = track.estimatedDataRate
+                    if (trackBitrate > 0) {
+                        _metadata.bitrate = (trackBitrate * 1000).toLong()
+                    }
+
+                    // Get resolution from naturalSize
+                    track.naturalSize.useContents {
+                        if (width > 0 && height > 0) {
+                            widthTemp = width.toInt()
+                            heightTemp = height.toInt()
+                            // Try to use real aspect ratio if available, fallback to 16:9
+                            videoAspectRatioTemp = width / height
+                            Logger.d { "Video resolution from track: ${width.toInt()}x${height.toInt()}" }
+                        }
                     }
                 }
             }
-        }
 
-        // Process audio tracks
-        val audioTracks = asset.tracksWithMediaType(AVMediaTypeAudio)
-        if (audioTracks.isNotEmpty()) {
-            // Update audio channels count based on number of audio tracks
-            _metadata.audioChannels = audioTracks.size
+            // Process audio tracks
+            val audioTracks = asset.tracksWithMediaType(AVMediaTypeAudio)
+            if (audioTracks.isNotEmpty()) {
+                // Update audio channels count based on number of audio tracks
+                _metadata.audioChannels = audioTracks.size
 
-            // Try to get sample rate (simplified approach)
-            _metadata.audioSampleRate = 44100 // Default to common value
-        }
+                // Try to get sample rate (simplified approach)
+                _metadata.audioSampleRate = 44100 // Default to common value
+            }
 
-        // Create player item from asset to get more accurate metadata
-        val playerItem = AVPlayerItem(asset)
-        playerItem.presentationSize.useContents {
-            // Only update aspect ratio and dimensions if not already set or if they are zero
-            if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
-                // Try to use real aspect ratio if available, fallback to 16:9
-                if (width > 0 && height > 0) {
-                    _videoAspectRatio = width / height
-                } else {
-                    _videoAspectRatio = 16.0 / 9.0
+            // Create player item from asset to get more accurate metadata
+            val playerItem = AVPlayerItem(asset)
+            var durationSeconds = 0.0
+
+            // Try to get duration
+            durationSeconds = CMTimeGetSeconds(playerItem.duration)
+            if (durationSeconds > 0 && !durationSeconds.isNaN()) {
+                _metadata.duration = (durationSeconds * 1000).toLong()
+            }
+
+            // Try to extract title from the file name
+            val fileName = nsUrl.lastPathComponent
+            if (fileName != null) {
+                _metadata.title = fileName
+            }
+
+            // Update UI on the main thread
+            dispatch_async(dispatch_get_main_queue()) {
+                // Update metadata
+                if (widthTemp != null && heightTemp != null) {
+                    _metadata.width = widthTemp
+                    _metadata.height = heightTemp
+                    _videoAspectRatio = videoAspectRatioTemp
                 }
 
-                // Update width and height in metadata only if they're valid
-                if (width > 0 && height > 0) {
-                    _metadata.width = width.toInt()
-                    _metadata.height = height.toInt()
-                    Logger.d { "Video resolution from presentationSize: ${width.toInt()}x${height.toInt()}" }
+                // Create the final player with the fully loaded asset
+                player = AVPlayer(playerItem = playerItem).apply {
+                    volume = this@VideoPlayerState.volume
+                    rate = _playbackSpeed
+                    actionAtItemEnd = AVPlayerActionAtItemEndNone
                 }
+
+                endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+                    name = AVPlayerItemDidPlayToEndTimeNotification,
+                    `object` = player?.currentItem,
+                    queue = null
+                ) { _ ->
+                    if (userInitiatedPause) return@addObserverForName
+                    if (_duration > 0 && (_duration - _currentTime) > 0.1) {
+                        return@addObserverForName
+                    }
+                    if (loop) {
+                        player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
+                        player?.rate = _playbackSpeed
+                        player?.play()
+                    } else {
+                        player?.pause()
+                        _isPlaying = false
+                    }
+                }
+
+                startPositionUpdates()
+                play()
             }
         }
-
-        // Try to get duration
-        val durationSeconds = CMTimeGetSeconds(playerItem.duration)
-        if (durationSeconds > 0 && !durationSeconds.isNaN()) {
-            _metadata.duration = (durationSeconds * 1000).toLong()
-        }
-
-        // Try to extract title from the file name
-        val fileName = nsUrl.lastPathComponent
-        if (fileName != null) {
-            _metadata.title = fileName
-        }
-
-        player = AVPlayer(playerItem = playerItem).apply {
-            volume = this@VideoPlayerState.volume
-            rate = _playbackSpeed
-            actionAtItemEnd = AVPlayerActionAtItemEndNone
-        }
-
-        endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
-            name = AVPlayerItemDidPlayToEndTimeNotification,
-            `object` = player?.currentItem,
-            queue = null
-        ) { _ ->
-            if (userInitiatedPause) return@addObserverForName
-            if (_duration > 0 && (_duration - _currentTime) > 0.1) {
-                return@addObserverForName
-            }
-            if (loop) {
-                player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
-                player?.rate = _playbackSpeed
-                player?.play()
-            } else {
-                player?.pause()
-                _isPlaying = false
-            }
-        }
-
-        startPositionUpdates()
-        _hasMedia = true
-        play()
     }
 
     actual fun play() {
@@ -311,7 +326,25 @@ actual open class VideoPlayerState {
         player?.play()
         _isPlaying = true
         _hasMedia = true
-        // Don't set _isLoading to false here - let the periodic time observer handle it
+
+        // Add a listener to detect when the player is ready to play
+        player?.currentItem?.let { item ->
+            if (item.playbackLikelyToKeepUp) {
+                _isLoading = false
+            } else {
+                // If not ready yet, add a notification observer for when it becomes ready
+                stalledObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+                    name = AVPlayerItemPlaybackStalledNotification,
+                    `object` = item,
+                    queue = null
+                ) { _ ->
+                    // Check if playback is likely to keep up now
+                    if (item.playbackLikelyToKeepUp) {
+                        _isLoading = false
+                    }
+                }
+            }
+        }
     }
 
     actual fun pause() {
@@ -375,7 +408,7 @@ actual open class VideoPlayerState {
     actual fun dispose() {
         Logger.d { "dispose called" }
         stopPositionUpdates()
-        removeEndObserver()
+        removeObservers()
         player?.pause()
         player = null
         _hasMedia = false
