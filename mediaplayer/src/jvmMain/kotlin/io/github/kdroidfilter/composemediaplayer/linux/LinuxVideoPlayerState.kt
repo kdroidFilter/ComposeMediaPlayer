@@ -96,6 +96,21 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             _loop = value
         }
 
+    private var _playbackSpeed by mutableStateOf(1.0f)
+    override var playbackSpeed: Float
+        get() = _playbackSpeed
+        set(value) {
+            _playbackSpeed = value.coerceIn(0.5f, 2.0f)
+            if (hasMedia) {
+                try {
+                    // Set the playback rate property directly
+                    playbin.set("rate", _playbackSpeed.toDouble())
+                } catch (e: Exception) {
+                    // Ignore errors when setting playback speed
+                }
+            }
+        }
+
     private var _volume by mutableStateOf(1f)
     override var volume: Float
         get() = _volume

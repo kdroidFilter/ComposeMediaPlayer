@@ -232,6 +232,11 @@ actual fun VideoPlayerSurface(
             videoElement?.loop = playerState.loop
         }
 
+        // Handle playback speed update
+        LaunchedEffect(playerState.playbackSpeed) {
+            videoElement?.playbackRate = playerState.playbackSpeed.toDouble()
+        }
+
         // When CORS mode changes, we log it and store the current position and playing state
         var lastPosition by remember { mutableStateOf(0.0) }
         var wasPlaying by remember { mutableStateOf(false) }
@@ -699,9 +704,10 @@ fun setupVideoElement(
         }
     }
 
-    // volume, loop
+    // volume, loop, playback speed
     video.volume = playerState.volume.toDouble()
     video.loop = playerState.loop
+    video.playbackRate = playerState.playbackSpeed.toDouble()
 
     // If source already exists + want to play
     if (video.src.isNotEmpty() && playerState.isPlaying) {

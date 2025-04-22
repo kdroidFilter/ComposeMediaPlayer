@@ -77,6 +77,14 @@ actual open class VideoPlayerState {
     actual var sliderPos by mutableStateOf(0.0f)
     actual var userDragging by mutableStateOf(false)
     actual var loop by mutableStateOf(false)
+
+    private var _playbackSpeed by mutableStateOf(1.0f)
+    actual var playbackSpeed: Float
+        get() = _playbackSpeed
+        set(value) {
+            _playbackSpeed = value.coerceIn(0.5f, 2.0f)
+        }
+
     actual var isFullscreen by mutableStateOf(false)
 
     // Audio level indicators

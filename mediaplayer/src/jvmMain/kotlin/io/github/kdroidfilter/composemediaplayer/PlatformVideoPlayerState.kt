@@ -36,6 +36,7 @@ interface PlatformVideoPlayerState {
     var sliderPos: Float
     var userDragging: Boolean
     var loop: Boolean
+    var playbackSpeed: Float
     val leftLevel: Float
     val rightLevel: Float
     val positionText: String

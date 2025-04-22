@@ -147,6 +147,17 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         get() = _loop
         set(value) { _loop = value }
 
+    private var _playbackSpeed by mutableStateOf(1.0f)
+    override var playbackSpeed: Float
+        get() = _playbackSpeed
+        set(value) {
+            _playbackSpeed = value.coerceIn(0.5f, 2.0f)
+            // Note: Playback speed control is not directly supported in the current
+            // Windows Media Foundation implementation. This property is added for
+            // API compatibility but does not affect playback speed.
+            windowsLogger.w { "Playback speed control is not supported in the Windows implementation" }
+        }
+
     // Updating audio levels via GetAudioLevels
     private var _leftLevel by mutableStateOf(0f)
     override val leftLevel: Float get() = _leftLevel

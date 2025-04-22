@@ -72,6 +72,12 @@ actual open class VideoPlayerState {
             delegate.loop = value
         }
 
+    actual open var playbackSpeed: Float
+        get() = delegate.playbackSpeed
+        set(value) {
+            delegate.playbackSpeed = value
+        }
+
     actual open var isFullscreen: Boolean
         get() = delegate.isFullscreen
         set(value) {

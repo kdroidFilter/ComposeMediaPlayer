@@ -119,6 +119,18 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             }
         }
 
+    // Playback speed control
+    private val _playbackSpeedState = mutableStateOf(1.0f)
+    override var playbackSpeed: Float
+        get() = _playbackSpeedState.value
+        set(value) {
+            _playbackSpeedState.value = value.coerceIn(0.5f, 2.0f)
+            // Note: Playback speed control is not directly supported in the current
+            // Mac implementation. This property is added for API compatibility
+            // but does not affect playback speed.
+            macLogger.w { "Playback speed control is not supported in the Mac implementation" }
+        }
+
     private val updateInterval: Long
         get() = if (captureFrameRate > 0) {
             (1000.0f / captureFrameRate).toLong()

@@ -163,6 +163,17 @@ actual open class VideoPlayerState {
             exoPlayer?.repeatMode = if (value) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
         }
 
+    // Playback speed control
+    private var _playbackSpeed by mutableStateOf(1.0f)
+    actual var playbackSpeed: Float
+        get() = _playbackSpeed
+        set(value) {
+            _playbackSpeed = value.coerceIn(0.5f, 2.0f)
+            exoPlayer?.let { player ->
+                player.playbackParameters = PlaybackParameters(_playbackSpeed)
+            }
+        }
+
     // Audio levels
     private var _leftLevel by mutableStateOf(0f)
     private var _rightLevel by mutableStateOf(0f)

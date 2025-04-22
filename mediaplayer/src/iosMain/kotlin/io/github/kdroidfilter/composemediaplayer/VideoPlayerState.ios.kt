@@ -43,6 +43,15 @@ actual open class VideoPlayerState {
     actual var userDragging: Boolean = false
     actual var loop: Boolean = false
 
+    // Playback speed control
+    private var _playbackSpeed by mutableStateOf(1.0f)
+    actual var playbackSpeed: Float
+        get() = _playbackSpeed
+        set(value) {
+            _playbackSpeed = value.coerceIn(0.5f, 2.0f)
+            player?.rate = _playbackSpeed
+        }
+
     // Playback states
     actual val hasMedia: Boolean get() = _hasMedia
     actual val isPlaying: Boolean get() = _isPlaying
