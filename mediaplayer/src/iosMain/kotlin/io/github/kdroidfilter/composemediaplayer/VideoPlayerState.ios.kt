@@ -269,6 +269,7 @@ actual open class VideoPlayerState {
 
         player = AVPlayer(playerItem = playerItem).apply {
             volume = this@VideoPlayerState.volume
+            rate = _playbackSpeed
             actionAtItemEnd = AVPlayerActionAtItemEndNone
         }
 
@@ -283,6 +284,7 @@ actual open class VideoPlayerState {
             }
             if (loop) {
                 player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
+                player?.rate = _playbackSpeed
                 player?.play()
             } else {
                 player?.pause()
@@ -303,6 +305,7 @@ actual open class VideoPlayerState {
             return
         }
         player?.volume = volume
+        player?.rate = _playbackSpeed
         player?.play()
         _isPlaying = true
         _hasMedia = true
@@ -343,6 +346,9 @@ actual open class VideoPlayerState {
             // Then immediately perform another seek with a higher timescale
             // This ensures at least one of the seeks will work properly
             player?.seekToTime(CMTimeMakeWithSeconds(targetTime, 600))
+
+            // Ensure playback speed is maintained after seeking
+            player?.rate = _playbackSpeed
 
             // Reset loading state after a short delay
             dispatch_async(dispatch_get_main_queue()) {
