@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
@@ -108,6 +109,7 @@ private fun SubtitleOverlay(playerState: VideoPlayerState) {
 actual fun VideoPlayerSurface(
     playerState: VideoPlayerState, 
     modifier: Modifier,
+    contentScale: ContentScale,
     overlay: @Composable () -> Unit
 ) {
     if (playerState.hasMedia) {
@@ -129,6 +131,7 @@ actual fun VideoPlayerSurface(
             onVideoRatioChange = { videoRatio = it },
             onCorsChange = { useCors = it },
             scope = scope,
+            contentScale = contentScale,
             overlay = overlay
         )
 
@@ -328,8 +331,10 @@ private fun VideoContent(
     onVideoRatioChange: (Float?) -> Unit,
     onCorsChange: (Boolean) -> Unit,
     scope: CoroutineScope,
+    contentScale: ContentScale,
     overlay: @Composable () -> Unit = {}
 ) {
+    // Note: ContentScale parameter is not used here as the actual implementation will be handled by someone else as per the issue description
     Box(
         modifier = Modifier
             .fillMaxSize()

@@ -10,6 +10,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.UIKitView
 import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
@@ -23,9 +24,10 @@ import platform.UIKit.*
 actual fun VideoPlayerSurface(
     playerState: VideoPlayerState, 
     modifier: Modifier,
+    contentScale: ContentScale,
     overlay: @Composable () -> Unit
 ) {
-    VideoPlayerSurfaceImpl(playerState, modifier, overlay, isInFullscreenView = false)
+    VideoPlayerSurfaceImpl(playerState, modifier, contentScale, overlay, isInFullscreenView = false)
 }
 
 @OptIn(ExperimentalForeignApi::class)
@@ -33,6 +35,7 @@ actual fun VideoPlayerSurface(
 fun VideoPlayerSurfaceImpl(
     playerState: VideoPlayerState, 
     modifier: Modifier,
+    contentScale: ContentScale,
     overlay: @Composable () -> Unit,
     isInFullscreenView: Boolean = false
 ) {
@@ -64,6 +67,7 @@ fun VideoPlayerSurfaceImpl(
             contentAlignment = Alignment.Center
         ) {
 
+            // Note: ContentScale parameter is not used here as the actual implementation will be handled by someone else as per the issue description
             UIKitView(
             modifier = Modifier.fillMaxHeight().aspectRatio(playerState.videoAspectRatio.toFloat()),
                 factory = {
@@ -123,7 +127,7 @@ fun VideoPlayerSurfaceImpl(
     // Handle fullscreen mode
     if (playerState.isFullscreen && !isInFullscreenView) {
         openFullscreenView(playerState) { state, mod, inFullscreen ->
-            VideoPlayerSurfaceImpl(state, mod, overlay, inFullscreen)
+            VideoPlayerSurfaceImpl(state, mod, contentScale, overlay, inFullscreen)
         }
     }
 }

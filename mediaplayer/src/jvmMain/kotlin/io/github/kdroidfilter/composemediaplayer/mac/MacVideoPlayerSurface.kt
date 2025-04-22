@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
@@ -21,6 +22,9 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
  *
  * @param playerState The state object that encapsulates the AVPlayer logic for MacOS.
  * @param modifier An optional Modifier for customizing the layout.
+ * @param contentScale Controls how the video content should be scaled inside the surface.
+ *                    This affects how the video is displayed when its dimensions don't match
+ *                    the surface dimensions.
  * @param overlay Optional composable content to be displayed on top of the video surface.
  *               This can be used to add custom controls, information, or any UI elements.
  * @param isInFullscreenWindow Whether this surface is already being displayed in a fullscreen window.
@@ -29,6 +33,7 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 fun MacVideoPlayerSurface(
     playerState: MacVideoPlayerState,
     modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable () -> Unit = {},
     isInFullscreenWindow: Boolean = false,
 ) {
@@ -51,6 +56,8 @@ fun MacVideoPlayerSurface(
                     drawImage(
                         image = frame,
                         dstSize = IntSize(size.width.toInt(), size.height.toInt())
+                        // Note: ContentScale parameter is not used here as Canvas doesn't directly support it
+                        // The actual implementation will be handled by someone else as per the issue description
                     )
                 }
             }

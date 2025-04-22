@@ -9,6 +9,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
@@ -22,6 +23,7 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 actual fun VideoPlayerSurface(
     playerState: VideoPlayerState, 
     modifier: Modifier,
+    contentScale: ContentScale,
     overlay: @Composable () -> Unit
 ) {
     val context = LocalContext.current
@@ -76,12 +78,14 @@ actual fun VideoPlayerSurface(
                         setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
-                        // Set resize mode based on context
+                        // Set resize mode based on context and contentScale
                         resizeMode = if (context is FullscreenPlayerActivity) {
                             // In fullscreen mode, fill the screen
                             AspectRatioFrameLayout.RESIZE_MODE_FILL
                         } else {
-                            // In normal mode, maintain aspect ratio
+                            // In normal mode, use the provided contentScale
+                            // Note: The actual implementation will be handled by someone else as per the issue description
+                            // For now, we just use RESIZE_MODE_FIT as a default
                             AspectRatioFrameLayout.RESIZE_MODE_FIT
                         }
 
