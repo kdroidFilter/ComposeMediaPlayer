@@ -262,58 +262,84 @@ fun SinglePlayerScreen() {
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Volume control
+                        // Volume and playback speed controls
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.width(200.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                IconButton(
-                                    onClick = {
-                                        if (playerState.volume > 0f) {
-                                            playerState.volume = 0f
-                                        } else {
-                                            playerState.volume = 1f
-                                        }
-                                    }
+                                // Volume control
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.width(200.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = if (playerState.volume > 0f)
-                                            Icons.AutoMirrored.Filled.VolumeUp
-                                        else
-                                            Icons.AutoMirrored.Filled.VolumeOff,
-                                        contentDescription = "Volume",
-                                        tint = MaterialTheme.colorScheme.primary
+                                    IconButton(
+                                        onClick = {
+                                            if (playerState.volume > 0f) {
+                                                playerState.volume = 0f
+                                            } else {
+                                                playerState.volume = 1f
+                                            }
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = if (playerState.volume > 0f)
+                                                Icons.AutoMirrored.Filled.VolumeUp
+                                            else
+                                                Icons.AutoMirrored.Filled.VolumeOff,
+                                            contentDescription = "Volume",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    Slider(
+                                        value = playerState.volume,
+                                        onValueChange = { playerState.volume = it },
+                                        valueRange = 0f..1f,
+                                        modifier = Modifier.width(100.dp)
+                                    )
+                                    Text(
+                                        text = "${(playerState.volume * 100).toInt()}%",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.width(40.dp)
                                     )
                                 }
-                                Slider(
-                                    value = playerState.volume,
-                                    onValueChange = { playerState.volume = it },
-                                    valueRange = 0f..1f,
-                                    modifier = Modifier.width(100.dp)
-                                )
-                                Text(
-                                    text = "${(playerState.volume * 100).toInt()}%",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(40.dp)
-                                )
+                                // Loop control
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "Loop",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Switch(
+                                        checked = playerState.loop,
+                                        onCheckedChange = { playerState.loop = it }
+                                    )
+                                }
                             }
-                            // Loop control
+
+                            // Playback speed control
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(start = 8.dp)
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                             ) {
                                 Text(
-                                    text = "Loop",
-                                    style = MaterialTheme.typography.bodyMedium
+                                    text = "Speed",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.width(50.dp)
                                 )
-                                Switch(
-                                    checked = playerState.loop,
-                                    onCheckedChange = { playerState.loop = it }
+                                Slider(
+                                    value = playerState.playbackSpeed,
+                                    onValueChange = { playerState.playbackSpeed = it },
+                                    valueRange = 0.5f..2.0f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${playerState.playbackSpeed}x",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(40.dp)
                                 )
                             }
                         }
