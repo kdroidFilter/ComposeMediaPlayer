@@ -20,7 +20,9 @@ import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import org.freedesktop.gstreamer.*
 import org.freedesktop.gstreamer.elements.AppSink
 import org.freedesktop.gstreamer.elements.PlayBin
+import org.freedesktop.gstreamer.Format
 import org.freedesktop.gstreamer.event.SeekFlags
+import org.freedesktop.gstreamer.event.SeekType
 import org.freedesktop.gstreamer.message.MessageType
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
@@ -96,18 +98,38 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             _loop = value
         }
 
-    private var _playbackSpeed by mutableStateOf(1.0f)
+    private var _playbackSpeed by mutableStateOf(1f)
     override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
-            _playbackSpeed = value.coerceIn(0.5f, 2.0f)
-            if (hasMedia) {
+            val newSpeed = value.coerceIn(0.5f, 2.0f)
+            if (_playbackSpeed != newSpeed && hasMedia) {
                 try {
-                    // Set the playback rate property directly
-                    playbin.set("rate", _playbackSpeed.toDouble())
+                    // Get current position
+                    val currentPosition = playbin.queryPosition(Format.TIME)
+
+                    // Set the new speed
+                    _playbackSpeed = newSpeed
+
+                    // Perform a seek operation with the new playback speed
+                    // This is the proper way to change playback speed in GStreamer
+                    playbin.seek(
+                        _playbackSpeed.toDouble(),  // Rate (speed multiplier)
+                        Format.TIME,                // Format
+                        EnumSet.of(SeekFlags.FLUSH, SeekFlags.ACCURATE), // Flags
+                        SeekType.SET,               // Start seek type
+                        currentPosition,            // Start position
+                        SeekType.NONE,              // Stop seek type
+                        -1L                         // Stop position (not used)
+                    )
+
                 } catch (e: Exception) {
-                    // Ignore errors when setting playback speed
+                    e.printStackTrace()
+                    // Revert to previous speed if there was an error
+                    _playbackSpeed = 1f
                 }
+            } else {
+                _playbackSpeed = newSpeed
             }
         }
 
