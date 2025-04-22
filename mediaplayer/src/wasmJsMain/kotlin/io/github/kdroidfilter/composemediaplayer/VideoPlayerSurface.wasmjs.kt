@@ -11,6 +11,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.htmlinterop.HtmlView
@@ -32,6 +33,75 @@ import kotlin.math.abs
  * Logger for WebAssembly video player surface
  */
 internal val wasmVideoLogger = Logger.withTag("WasmVideoPlayerSurface").apply { Logger.setMinSeverity(Severity.Warn) }
+
+/**
+ * Extension function to create a Modifier that draws a transparent rectangle respecting the video ratio
+ * @param videoRatio The aspect ratio of the video (width / height)
+ */
+fun Modifier.videoRatioClip(videoRatio: Float?): Modifier {
+    return this.drawBehind {
+        videoRatio?.let { ratio ->
+            drawVideoRatioRect(ratio)
+        }
+    }
+}
+
+/**
+ * Helper function to draw a transparent rectangle respecting the video ratio
+ * @param ratio The aspect ratio of the video (width / height)
+ */
+private fun DrawScope.drawVideoRatioRect(ratio: Float) {
+    // We calculate a centered rectangle respecting the ratio of the video
+    val containerWidth = size.width
+    val containerHeight = size.height
+    val rectWidth: Float
+    val rectHeight: Float
+
+    if (containerWidth / containerHeight > ratio) {
+        // The Box is too wide, we base ourselves on the height
+        rectHeight = containerHeight
+        rectWidth = rectHeight * ratio
+    } else {
+        // The Box is too high, we base ourselves on the width
+        rectWidth = containerWidth
+        rectHeight = rectWidth / ratio
+    }
+
+    val offsetX = (containerWidth - rectWidth) / 2f
+    val offsetY = (containerHeight - rectHeight) / 2f
+
+    drawRect(
+        color = Color.Transparent,
+        blendMode = BlendMode.Clear,
+        topLeft = Offset(offsetX, offsetY),
+        size = Size(rectWidth, rectHeight)
+    )
+}
+
+/**
+ * Reusable composable for displaying subtitles
+ * @param playerState The video player state
+ */
+@Composable
+private fun SubtitleOverlay(playerState: VideoPlayerState) {
+    if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+        // Calculate current time in milliseconds
+        val currentTimeMs = (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
+
+        // Calculate duration in milliseconds
+        val durationMs = playerState.durationText.toTimeMs()
+
+        ComposeSubtitleLayer(
+            currentTimeMs = currentTimeMs,
+            durationMs = durationMs,
+            isPlaying = playerState.isPlaying,
+            subtitleTrack = playerState.currentSubtitleTrack,
+            subtitlesEnabled = playerState.subtitlesEnabled,
+            textStyle = playerState.subtitleTextStyle,
+            backgroundColor = playerState.subtitleBackgroundColor
+        )
+    }
+}
 
 
 @Composable
@@ -64,24 +134,17 @@ actual fun VideoPlayerSurface(
 
         // Handle fullscreen update
         LaunchedEffect(playerState.isFullscreen) {
-            videoElement?.let { video ->
+            try {
                 if (playerState.isFullscreen) {
-                    try {
-                        // Request fullscreen on the video element using helper function
-                        wasmVideoLogger.d { "Requesting fullscreen" }
-//                        requestFullscreen(video)
-                    } catch (e: Exception) {
-                        wasmVideoLogger.e { "Error requesting fullscreen: ${e.message}" }
-                    }
+                    wasmVideoLogger.d { "Requesting fullscreen" }
+                    // No need to call requestFullScreen here as it's handled by toggleFullscreen in VideoPlayerState
                 } else {
-                    try {
-                        // Exit fullscreen if we're in fullscreen mode using helper function
-                        wasmVideoLogger.d { "Exiting fullscreen" }
-                        exitFullscreen()
-                    } catch (e: Exception) {
-                        wasmVideoLogger.e { "Error exiting fullscreen: ${e.message}" }
-                    }
+                    wasmVideoLogger.d { "Exiting fullscreen" }
+                    // Ensure we exit fullscreen if needed
+                    FullscreenManager.exitFullscreen()
                 }
+            } catch (e: Exception) {
+                wasmVideoLogger.e { "Error handling fullscreen: ${e.message}" }
             }
         }
 
@@ -268,103 +331,31 @@ private fun VideoContent(
     overlay: @Composable () -> Unit = {}
 ) {
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Transparent).drawBehind {
-            videoRatio?.let { ratio ->
-                // We calculate a centered rectangle respecting the ratio of the video
-                val containerWidth = size.width
-                val containerHeight = size.height
-                val rectWidth: Float
-                val rectHeight: Float
-                if (containerWidth / containerHeight > ratio) {
-                    // The Box is too wide, we base ourselves on the height
-                    rectHeight = containerHeight
-                    rectWidth = rectHeight * ratio
-                } else {
-                    // The Box is too high, we base ourselves on the width
-                    rectWidth = containerWidth
-                    rectHeight = rectWidth / ratio
-                }
-                val offsetX = (containerWidth - rectWidth) / 2f
-                val offsetY = (containerHeight - rectHeight) / 2f
-
-                drawRect(
-                    color = Color.Transparent,
-                    blendMode = BlendMode.Clear,
-                    topLeft = Offset(offsetX, offsetY),
-                    size = Size(rectWidth, rectHeight)
-                )
-            }
-        }) {
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Transparent)
+            .videoRatioClip(videoRatio)
+    ) {
         // Add Compose-based subtitle layer
-        if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
-            // Calculate current time in milliseconds
-            val currentTimeMs = (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
-
-            // Calculate duration in milliseconds
-            val durationMs = playerState.durationText.toTimeMs()
-
-            ComposeSubtitleLayer(
-                currentTimeMs = currentTimeMs,
-                durationMs = durationMs,
-                isPlaying = playerState.isPlaying,
-                subtitleTrack = playerState.currentSubtitleTrack,
-                subtitlesEnabled = playerState.subtitlesEnabled,
-                textStyle = playerState.subtitleTextStyle,
-                backgroundColor = playerState.subtitleBackgroundColor
-            )
-        }
+        SubtitleOverlay(playerState)
 
         // Render the overlay content on top of the video
         overlay()
 
         if (playerState.isFullscreen) {
             FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                    Box(Modifier.fillMaxSize().background(Color.Transparent).drawBehind {
-                        videoRatio?.let { ratio ->
-                            // We calculate a centered rectangle respecting the ratio of the video
-                            val containerWidth = size.width
-                            val containerHeight = size.height
-                            val rectWidth: Float
-                            val rectHeight: Float
-                            if (containerWidth / containerHeight > ratio) {
-                                // The Box is too wide, we base ourselves on the height
-                                rectHeight = containerHeight
-                                rectWidth = rectHeight * ratio
-                            } else {
-                                // The Box is too high, we base ourselves on the width
-                                rectWidth = containerWidth
-                                rectHeight = rectWidth / ratio
-                            }
-                            val offsetX = (containerWidth - rectWidth) / 2f
-                            val offsetY = (containerHeight - rectHeight) / 2f
-
-                            drawRect(
-                                color = Color.Transparent,
-                                blendMode = BlendMode.Clear,
-                                topLeft = Offset(offsetX, offsetY),
-                                size = Size(rectWidth, rectHeight)
-                            )
-                        }
-                    }) {
-                        if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
-                            // Calculate current time in milliseconds
-                            val currentTimeMs =
-                                (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
-
-                            // Calculate duration in milliseconds
-                            val durationMs = playerState.durationText.toTimeMs()
-
-                            ComposeSubtitleLayer(
-                                currentTimeMs = currentTimeMs,
-                                durationMs = durationMs,
-                                isPlaying = playerState.isPlaying,
-                                subtitleTrack = playerState.currentSubtitleTrack,
-                                subtitlesEnabled = playerState.subtitlesEnabled,
-                                textStyle = playerState.subtitleTextStyle,
-                                backgroundColor = playerState.subtitleBackgroundColor
-                            )
-                        }
+                Box(
+                    modifier = Modifier.fillMaxSize().background(Color.Black), 
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Transparent)
+                            .videoRatioClip(videoRatio)
+                    ) {
+                        // Add Compose-based subtitle layer in fullscreen mode
+                        SubtitleOverlay(playerState)
 
                         // Render the overlay content on top of the video in fullscreen mode
                         overlay()
@@ -726,32 +717,63 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
 }
 
 /**
- * Exit fullscreen if document is in fullscreen mode
+ * Manages fullscreen functionality for the video player
  */
- fun exitFullscreen() {
-    if (document.fullscreenElement != null) {
-        document.exitFullscreen()
+object FullscreenManager {
+    /**
+     * Exit fullscreen if document is in fullscreen mode
+     */
+    fun exitFullscreen() {
+        if (document.fullscreenElement != null) {
+            document.exitFullscreen()
+        }
+    }
+
+    /**
+     * Apply fullscreen styles to the video element
+     * This function is kept for backward compatibility but should not be called directly.
+     * Instead, use the fullscreenStyleCallback in VideoPlayerState.
+     */
+    suspend fun applyVideoStyles() {
+        val video = document.querySelector("video") as? HTMLVideoElement
+        delay(501)
+        video?.let {
+            it.style.width = "100%"
+            it.style.height = "100%"
+            it.style.margin = "0px"
+            it.style.left = "0"
+            it.style.top = "0"
+        }
+    }
+
+    /**
+     * Request fullscreen mode
+     */
+    fun requestFullScreen() {
+        val document = document.documentElement
+        document?.requestFullscreen()
+    }
+
+    /**
+     * Toggle fullscreen mode
+     * @param isCurrentlyFullscreen Whether the player is currently in fullscreen mode
+     * @param onFullscreenChange Callback to update the fullscreen state
+     */
+    fun toggleFullscreen(isCurrentlyFullscreen: Boolean, onFullscreenChange: (Boolean) -> Unit) {
+        if (!isCurrentlyFullscreen) {
+            requestFullScreen()
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                delay(500)
+                applyVideoStyles()
+            }
+        } else {
+            exitFullscreen()
+        }
+        onFullscreenChange(!isCurrentlyFullscreen)
     }
 }
 
-/**
- * Apply fullscreen styles to the video element
- * This function is kept for backward compatibility but should not be called directly.
- * Instead, use the fullscreenStyleCallback in VideoPlayerState.
- */
-suspend fun applyVideoStyles() {
-    val video = document.querySelector("video") as? HTMLVideoElement
-    delay(501)
-    video?.let {
-        it.style.width = "100%"
-        it.style.height = "100%"
-        it.style.margin = "0px"
-        it.style.left = "0"
-        it.style.top = "0"
-    }
-}
-
-fun requestFullScreen() {
-    val document = document.documentElement
-    document?.requestFullscreen()
-}
+// Backward compatibility functions
+fun exitFullscreen() = FullscreenManager.exitFullscreen()
+suspend fun applyVideoStyles() = FullscreenManager.applyVideoStyles()
+fun requestFullScreen() = FullscreenManager.requestFullScreen()
