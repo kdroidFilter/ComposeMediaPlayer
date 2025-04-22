@@ -304,12 +304,14 @@ actual open class VideoPlayerState {
             Logger.d { "play: player is null" }
             return
         }
+        // Set loading to true when play is called
+        _isLoading = true
         player?.volume = volume
         player?.rate = _playbackSpeed
         player?.play()
         _isPlaying = true
         _hasMedia = true
-        _isLoading = false
+        // Don't set _isLoading to false here - let the periodic time observer handle it
     }
 
     actual fun pause() {
