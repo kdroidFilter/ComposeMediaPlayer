@@ -211,109 +211,97 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         val caps = Caps.fromString("video/x-raw,format=RGBA")
         videoSink.caps = caps
         videoSink.set("emit-signals", true)
-        videoSink.connect(object : AppSink.NEW_SAMPLE {
-            override fun newSample(appSink: AppSink): FlowReturn {
-                val sample = appSink.pullSample()
-                if (sample != null) {
-                    processSample(sample)
-                    sample.dispose()
-                }
-                return FlowReturn.OK
+        videoSink.connect(AppSink.NEW_SAMPLE { appSink ->
+            val sample = appSink.pullSample()
+            if (sample != null) {
+                processSample(sample)
+                sample.dispose()
             }
+            FlowReturn.OK
         })
         playbin.setVideoSink(videoSink)
 
         // ---- GStreamer bus handling ----
 
         // End of stream
-        playbin.bus.connect(object : Bus.EOS {
-            override fun endOfStream(source: GstObject) {
-                EventQueue.invokeLater {
-                    if (loop) {
-                        // Restart from beginning if loop = true
-                        playbin.seekSimple(Format.TIME, EnumSet.of(SeekFlags.FLUSH), 0)
-                    } else {
-                        stop()
-                    }
-                    _isPlaying = loop
+        playbin.bus.connect(Bus.EOS {
+            EventQueue.invokeLater {
+                if (loop) {
+                    // Restart from beginning if loop = true
+                    playbin.seekSimple(Format.TIME, EnumSet.of(SeekFlags.FLUSH), 0)
+                } else {
+                    stop()
                 }
+                _isPlaying = loop
             }
         })
 
         // Errors
-        playbin.bus.connect(object : Bus.ERROR {
-            override fun errorMessage(source: GstObject, code: Int, message: String) {
-                EventQueue.invokeLater {
-                    _error = when {
-                        message.contains("codec", ignoreCase = true) ||
-                                message.contains("decode", ignoreCase = true) ->
-                            VideoPlayerError.CodecError(message)
+        playbin.bus.connect(Bus.ERROR { source, code, message ->
+            EventQueue.invokeLater {
+                _error = when {
+                    message.contains("codec", ignoreCase = true) ||
+                            message.contains("decode", ignoreCase = true) ->
+                        VideoPlayerError.CodecError(message)
 
-                        message.contains("network", ignoreCase = true) ||
-                                message.contains("connection", ignoreCase = true) ||
-                                message.contains("dns", ignoreCase = true) ||
-                                message.contains("http", ignoreCase = true) ->
-                            VideoPlayerError.NetworkError(message)
+                    message.contains("network", ignoreCase = true) ||
+                            message.contains("connection", ignoreCase = true) ||
+                            message.contains("dns", ignoreCase = true) ||
+                            message.contains("http", ignoreCase = true) ->
+                        VideoPlayerError.NetworkError(message)
 
-                        message.contains("source", ignoreCase = true) ||
-                                message.contains("uri", ignoreCase = true) ||
-                                message.contains("resource", ignoreCase = true) ->
-                            VideoPlayerError.SourceError(message)
+                    message.contains("source", ignoreCase = true) ||
+                            message.contains("uri", ignoreCase = true) ||
+                            message.contains("resource", ignoreCase = true) ->
+                        VideoPlayerError.SourceError(message)
 
-                        else ->
-                            VideoPlayerError.UnknownError(message)
-                    }
-                    stop()
+                    else ->
+                        VideoPlayerError.UnknownError(message)
                 }
+                stop()
             }
         })
 
         // Buffering
-        playbin.bus.connect(object : Bus.BUFFERING {
-            override fun bufferingData(source: GstObject, percent: Int) {
-                EventQueue.invokeLater {
-                    bufferingPercent = percent
-                    // When reaching 100%, we consider that any seek has finished
-                    if (percent == 100) {
-                        _isSeeking = false
-                    }
-                    updateLoadingState()
+        playbin.bus.connect(Bus.BUFFERING { source, percent ->
+            EventQueue.invokeLater {
+                bufferingPercent = percent
+                // When reaching 100%, we consider that any seek has finished
+                if (percent == 100) {
+                    _isSeeking = false
                 }
+                updateLoadingState()
             }
         })
 
         // Pipeline state change
-        playbin.bus.connect(object : Bus.STATE_CHANGED {
-            override fun stateChanged(
-                source: GstObject,
-                old: State,
-                current: State,
-                pending: State,
-            ) {
-                EventQueue.invokeLater {
-                    when (current) {
-                        State.PLAYING -> {
-                            _isPlaying = true
-                            isUserPaused = false
-                            updateLoadingState()
-                            updateAspectRatio()
-                        }
-                        State.PAUSED -> {
-                            _isPlaying = false
-                            updateLoadingState()
-                        }
-                        State.READY -> {
-                            _isPlaying = false
-                            updateLoadingState()
-                        }
-                        else -> {
-                            _isPlaying = false
-                            updateLoadingState()
-                        }
+        playbin.bus.connect { source, old, current, pending ->
+            EventQueue.invokeLater {
+                when (current) {
+                    State.PLAYING -> {
+                        _isPlaying = true
+                        isUserPaused = false
+                        updateLoadingState()
+                        updateAspectRatio()
+                    }
+
+                    State.PAUSED -> {
+                        _isPlaying = false
+                        updateLoadingState()
+                    }
+
+                    State.READY -> {
+                        _isPlaying = false
+                        updateLoadingState()
+                    }
+
+                    else -> {
+                        _isPlaying = false
+                        updateLoadingState()
                     }
                 }
             }
-        })
+        }
 
         // TAG (metadata)
         playbin.bus.connect(Bus.TAG { source, tagList ->
@@ -327,7 +315,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                             if (title != null) {
                                 metadata.title = title
                             }
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             // Ignore errors when getting title
                         }
 
@@ -337,7 +325,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                             if (artist != null) {
                                 metadata.artist = artist
                             }
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             // Ignore errors when getting artist
                         }
 
@@ -347,11 +335,11 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                             if (bitrate != null) {
                                 try {
                                     metadata.bitrate = bitrate.toLong()
-                                } catch (e: NumberFormatException) {
+                                } catch (_: NumberFormatException) {
                                     // Ignore if the string can't be converted to a long
                                 }
                             }
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             // Ignore errors when getting bitrate
                         }
 
@@ -373,7 +361,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                                     }
                                 }
                             }
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             // Ignore errors when getting MIME type
                         }
 
@@ -383,11 +371,11 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                             if (audioChannels != null) {
                                 try {
                                     metadata.audioChannels = audioChannels.toInt()
-                                } catch (e: NumberFormatException) {
+                                } catch (_: NumberFormatException) {
                                     // Ignore if the string can't be converted to an integer
                                 }
                             }
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             // Ignore errors when getting audio channels
                         }
 
@@ -484,7 +472,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             playbin.set("suburi", "")
             val currentFlags = playbin.get("flags") as Int
             playbin.set("flags", currentFlags and GST_PLAY_FLAG_TEXT.inv())
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Ignore errors, as we're not using GStreamer's subtitle rendering anyway
         }
     }
@@ -503,7 +491,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             playbin.set("suburi", "")
             val currentFlags = playbin.get("flags") as Int
             playbin.set("flags", currentFlags and GST_PLAY_FLAG_TEXT.inv())
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Ignore errors, as we're not using GStreamer's subtitle rendering anyway
         }
     }
@@ -586,7 +574,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                             metadata.frameRate = frameRate
                         }
                     }
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     // Ignore errors when getting specific fields
                 }
             }
@@ -636,7 +624,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                 // Ignore errors when getting specific fields
                 e.printStackTrace()
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Ignore general errors
         }
     }
