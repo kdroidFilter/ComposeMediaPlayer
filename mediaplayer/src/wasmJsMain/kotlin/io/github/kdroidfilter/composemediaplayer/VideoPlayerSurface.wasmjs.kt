@@ -197,6 +197,16 @@ actual fun VideoPlayerSurface(
                     wasmVideoLogger.d { "Calling load() on video element" }
                     it.load()
 
+                    // Apply playback speed
+                    if (playerState.playbackSpeed != 1.0f) {
+                        wasmVideoLogger.d { "Setting playback speed to ${playerState.playbackSpeed}" }
+                        try {
+                            it.playbackRate = playerState.playbackSpeed.toDouble()
+                        } catch (e: Exception) {
+                            wasmVideoLogger.e { "Error setting playback speed: ${e.message}" }
+                        }
+                    }
+
                     if (playerState.isPlaying) {
                         try {
                             wasmVideoLogger.d { "Attempting to play video" }
@@ -205,7 +215,12 @@ actual fun VideoPlayerSurface(
                             wasmVideoLogger.e { "Error playing video: ${e.message}" }
                         }
                     } else {
-                        it.pause()
+                        try {
+                            wasmVideoLogger.d { "Attempting to pause video" }
+                            it.pause()
+                        } catch (e: Exception) {
+                            wasmVideoLogger.e { "Error pausing video: ${e.message}" }
+                        }
                     }
                 }
             }
@@ -215,9 +230,19 @@ actual fun VideoPlayerSurface(
         LaunchedEffect(playerState.isPlaying) {
             videoElement?.let {
                 if (playerState.isPlaying) {
-                    it.play()
+                    try {
+                        wasmVideoLogger.d { "Attempting to play video in play/pause effect" }
+                        it.play()
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error playing video in play/pause effect: ${e.message}" }
+                    }
                 } else {
-                    it.pause()
+                    try {
+                        wasmVideoLogger.d { "Attempting to pause video in play/pause effect" }
+                        it.pause()
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error pausing video in play/pause effect: ${e.message}" }
+                    }
                 }
             }
         }
@@ -234,30 +259,56 @@ actual fun VideoPlayerSurface(
 
         // Handle playback speed update
         LaunchedEffect(playerState.playbackSpeed) {
-            videoElement?.playbackRate = playerState.playbackSpeed.toDouble()
-        }
-
-        // When CORS mode changes, we log it and store the current position and playing state
-        var lastPosition by remember { mutableStateOf(0.0) }
-        var wasPlaying by remember { mutableStateOf(false) }
-
-        LaunchedEffect(useCors) {
-            wasmVideoLogger.d { "CORS mode changed to $useCors" }
-            // Store current position and playing state before the video element is recreated
             videoElement?.let {
-                lastPosition = it.currentTime
-                wasPlaying = playerState.isPlaying
+                try {
+                    it.playbackRate = playerState.playbackSpeed.toDouble()
+                } catch (e: Exception) {
+                    wasmVideoLogger.e { "Error updating playback speed: ${e.message}" }
+                }
             }
         }
 
-        // After the video element is recreated, restore the position and playing state
+        // When CORS mode changes, we log it and store the current position, playing state, and playback speed
+        var lastPosition by remember { mutableStateOf(0.0) }
+        var wasPlaying by remember { mutableStateOf(false) }
+        var lastPlaybackSpeed by remember { mutableStateOf(1.0f) }
+
+        LaunchedEffect(useCors) {
+            wasmVideoLogger.d { "CORS mode changed to $useCors" }
+            // Store current position, playing state, and playback speed before the video element is recreated
+            videoElement?.let {
+                lastPosition = it.currentTime
+                wasPlaying = playerState.isPlaying
+                lastPlaybackSpeed = playerState.playbackSpeed
+            }
+        }
+
+        // After the video element is recreated, restore the position, playing state, and playback speed
         LaunchedEffect(videoElement, useCors) {
             videoElement?.let {
                 if (lastPosition > 0) {
-                    it.currentTime = lastPosition
-                    // Reset lastPosition to avoid applying it again
-                    lastPosition = 0.0
+                    try {
+                        it.currentTime = lastPosition
+                        // Reset lastPosition to avoid applying it again
+                        lastPosition = 0.0
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error restoring position to ${lastPosition}s: ${e.message}" }
+                        // Still reset lastPosition to avoid repeated attempts that might fail
+                        lastPosition = 0.0
+                    }
                 }
+
+                // Apply the saved playback speed
+                if (lastPlaybackSpeed != 1.0f) {
+                    try {
+                        it.playbackRate = lastPlaybackSpeed.toDouble()
+                    } catch (e: Exception) {
+                        wasmVideoLogger.e { "Error restoring playback speed: ${e.message}" }
+                    }
+                    // Reset lastPlaybackSpeed to avoid applying it again
+                    lastPlaybackSpeed = 1.0f
+                }
+
                 if (wasPlaying) {
                     try {
                         it.play()
@@ -279,7 +330,11 @@ actual fun VideoPlayerSurface(
                         val newTime = (playerState.sliderPos / VideoPlayerState.PERCENTAGE_MULTIPLIER) * duration
                         // Avoid seeking if the difference is small
                         if (abs((videoElement?.currentTime ?: 0.0) - newTime) > 0.5) {
-                            videoElement?.currentTime = newTime.toDouble()
+                            try {
+                                videoElement?.currentTime = newTime.toDouble()
+                            } catch (e: Exception) {
+                                wasmVideoLogger.e { "Error seeking to ${newTime}s: ${e.message}" }
+                            }
                         }
                     }
                 }
@@ -682,10 +737,21 @@ fun setupVideoElement(
         }
     }
 
-    // loadedmetadata => set isLoading false + play if needed
+    // loadedmetadata => set isLoading false + apply playback speed + play if needed
     video.addEventListener("loadedmetadata") {
         scope.launch {
             playerState._isLoading = false
+
+            // Apply playback speed
+            if (playerState.playbackSpeed != 1.0f) {
+                wasmVideoLogger.d { "Setting playback speed to ${playerState.playbackSpeed} in loadedmetadata" }
+                try {
+                    video.playbackRate = playerState.playbackSpeed.toDouble()
+                } catch (e: Exception) {
+                    wasmVideoLogger.e { "Error setting playback speed in loadedmetadata: ${e.message}" }
+                }
+            }
+
             if (playerState.isPlaying) {
                 try {
                     video.play()
@@ -707,7 +773,11 @@ fun setupVideoElement(
     // volume, loop, playback speed
     video.volume = playerState.volume.toDouble()
     video.loop = playerState.loop
-    video.playbackRate = playerState.playbackSpeed.toDouble()
+    try {
+        video.playbackRate = playerState.playbackSpeed.toDouble()
+    } catch (e: Exception) {
+        wasmVideoLogger.e { "Error setting initial playback speed: ${e.message}" }
+    }
 
     // If source already exists + want to play
     if (video.src.isNotEmpty() && playerState.isPlaying) {
@@ -773,7 +843,7 @@ object FullscreenManager {
     fun toggleFullscreen(isCurrentlyFullscreen: Boolean, onFullscreenChange: (Boolean) -> Unit) {
         if (!isCurrentlyFullscreen) {
             requestFullScreen()
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
                 delay(500)
                 applyVideoStyles()
             }

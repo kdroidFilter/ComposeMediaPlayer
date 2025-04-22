@@ -289,7 +289,7 @@ actual open class VideoPlayerState {
             _positionText = if (displayTime.isNaN()) "00:00" else formatTime(displayTime)
             _durationText = if (duration.isNaN()) "00:00" else formatTime(duration)
 
-            if (!userDragging && duration > 0f && !duration.isNaN()) {
+            if (!userDragging && duration > 0f && !duration.isNaN() && !_isLoading) {
                 sliderPos = if (isNearEnd) {
                     PERCENTAGE_MULTIPLIER // Set to 100% if near end
                 } else {
