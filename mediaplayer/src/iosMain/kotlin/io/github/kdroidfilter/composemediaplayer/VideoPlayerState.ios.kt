@@ -134,18 +134,15 @@ actual open class VideoPlayerState {
                 player?.currentItem?.presentationSize?.useContents {
                     // Only update if dimensions are valid (greater than 0)
                     if (width > 0 && height > 0) {
-                        val newAspect = width / height
+                        // Try to use real aspect ratio if available, fallback to 16:9
+                        val realAspect = width / height
+                        _videoAspectRatio = realAspect
 
-                        // Update aspect ratio if it has changed
-                        if (newAspect != _videoAspectRatio) {
-                            _videoAspectRatio = newAspect
-
-                            // Update width and height in metadata if they're not already set or if they're zero
-                            if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
-                                _metadata.width = width.toInt()
-                                _metadata.height = height.toInt()
-                                Logger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
-                            }
+                        // Update width and height in metadata if they're not already set or if they're zero
+                        if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
+                            _metadata.width = width.toInt()
+                            _metadata.height = height.toInt()
+                            Logger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
                         }
                     }
                 }
@@ -219,7 +216,8 @@ actual open class VideoPlayerState {
                     if (width > 0 && height > 0) {
                         _metadata.width = width.toInt()
                         _metadata.height = height.toInt()
-                        _videoAspectRatio = if (height != 0.0) width / height else 16.0 / 9.0
+                        // Try to use real aspect ratio if available, fallback to 16:9
+                        _videoAspectRatio = width / height
                         Logger.d { "Video resolution from track: ${width.toInt()}x${height.toInt()}" }
                     }
                 }
@@ -241,7 +239,12 @@ actual open class VideoPlayerState {
         playerItem.presentationSize.useContents {
             // Only update aspect ratio and dimensions if not already set or if they are zero
             if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
-                _videoAspectRatio = if (height != 0.0) width / height else 16.0 / 9.0
+                // Try to use real aspect ratio if available, fallback to 16:9
+                if (width > 0 && height > 0) {
+                    _videoAspectRatio = width / height
+                } else {
+                    _videoAspectRatio = 16.0 / 9.0
+                }
 
                 // Update width and height in metadata only if they're valid
                 if (width > 0 && height > 0) {
