@@ -1,56 +1,27 @@
 package sample.app.singleplayer
 
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.name
 import sample.app.SubtitleManagementDialog
-
-@Composable
-private fun MetadataRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 8.dp)
-        )
-    }
-}
+// Import the extracted composable functions
+import sample.app.singleplayer.PlayerHeader
+import sample.app.singleplayer.VideoDisplay
+import sample.app.singleplayer.TimelineControls
+import sample.app.singleplayer.PrimaryControls
+import sample.app.singleplayer.ControlsCard
+import sample.app.singleplayer.MetadataDisplay
+import sample.app.singleplayer.ErrorSnackbar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,366 +78,57 @@ fun SinglePlayerScreen() {
                     .padding(16.dp)
             ) {
                 // Header with title and loading indicator
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Compose Media Player",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-                    if (playerState.isLoading) {
-                        CircularProgressIndicator()
-                    }
-                }
+                PlayerHeader(
+                    title = "Compose Media Player",
+                    isLoading = playerState.isLoading
+                )
 
                 // Video display area
-                Box(
+                VideoDisplay(
+                    playerState = playerState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.BottomCenter
-                ) {
-
-                    VideoPlayerSurface(
-                        playerState = playerState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(16.dp))
-                    ){
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(text = "Overlay Content")
-                        }
-                    }
-
-                    if (playerState.isLoading) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Transparent),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator()
-                        }
-                    }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Video timeline and slider
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Slider(
-                        value = playerState.sliderPos,
-                        onValueChange = {
-                            playerState.sliderPos = it
-                            playerState.userDragging = true
-                        },
-                        onValueChangeFinished = {
-                            playerState.userDragging = false
-                            playerState.seekTo(playerState.sliderPos)
-                        },
-                        valueRange = 0f..1000f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary,
-                            inactiveTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
-                        )
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = playerState.positionText,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = playerState.durationText,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
+                TimelineControls(playerState = playerState)
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Primary controls: load video, play/pause, stop
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FilledIconButton(
-                        onClick = { videoFileLauncher.launch() },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    ) {
-                        Icon(Icons.Default.UploadFile, contentDescription = "Load Video")
-                    }
-                    FilledIconButton(
-                        onClick = {
-                            if (playerState.isPlaying) playerState.pause() else playerState.play()
-                        },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer
-                        )
-                    ) {
-                        Icon(
-                            imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (playerState.isPlaying) "Pause" else "Play"
-                        )
-                    }
-                    FilledIconButton(
-                        onClick = { playerState.stop() },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Icon(Icons.Default.Stop, contentDescription = "Stop")
-                    }
-
-                    FilledIconButton(
-                        onClick = { showSubtitleDialog = true },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    ) {
-                        Icon(Icons.Default.Subtitles, contentDescription = "Subtitles")
-                    }
-
-                    FilledIconButton(
-                        onClick = { playerState.toggleFullscreen() },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer
-                        )
-                    ) {
-                        Icon(Icons.Default.Fullscreen, contentDescription = "Subtitles")
-                    }
-
-                }
+                PrimaryControls(
+                    playerState = playerState,
+                    videoFileLauncher = { videoFileLauncher.launch() },
+                    onSubtitleDialogRequest = { showSubtitleDialog = true }
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Secondary controls: volume, loop, video URL input and subtitle management dialog trigger
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        // Volume and playback speed controls
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Volume control
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.width(200.dp)
-                                ) {
-                                    IconButton(
-                                        onClick = {
-                                            if (playerState.volume > 0f) {
-                                                playerState.volume = 0f
-                                            } else {
-                                                playerState.volume = 1f
-                                            }
-                                        }
-                                    ) {
-                                        Icon(
-                                            imageVector = if (playerState.volume > 0f)
-                                                Icons.AutoMirrored.Filled.VolumeUp
-                                            else
-                                                Icons.AutoMirrored.Filled.VolumeOff,
-                                            contentDescription = "Volume",
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    Slider(
-                                        value = playerState.volume,
-                                        onValueChange = { playerState.volume = it },
-                                        valueRange = 0f..1f,
-                                        modifier = Modifier.width(100.dp)
-                                    )
-                                    Text(
-                                        text = "${(playerState.volume * 100).toInt()}%",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        modifier = Modifier.width(40.dp)
-                                    )
-                                }
-                                // Loop control
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(start = 8.dp)
-                                ) {
-                                    Text(
-                                        text = "Loop",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Switch(
-                                        checked = playerState.loop,
-                                        onCheckedChange = { playerState.loop = it }
-                                    )
-                                }
-                            }
-
-                            // Playback speed control
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                            ) {
-                                Text(
-                                    text = "Speed",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.width(50.dp)
-                                )
-                                Slider(
-                                    value = playerState.playbackSpeed,
-                                    onValueChange = { playerState.playbackSpeed = it },
-                                    valueRange = 0.5f..2.0f,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Text(
-                                    text = "${playerState.playbackSpeed}x",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(40.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        // Video URL input
-                        OutlinedTextField(
-                            value = videoUrl,
-                            onValueChange = { videoUrl = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Video URL") },
-                            trailingIcon = {
-                                IconButton(
-                                    onClick = {
-                                        if (videoUrl.isNotEmpty()) {
-                                            playerState.openUri(videoUrl)
-                                        }
-                                    }
-                                ) {
-                                    Icon(Icons.Default.PlayCircle, contentDescription = "Open URL")
-                                }
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Left: ${playerState.leftLevel.toInt()}%")
-                        Text("Right: ${playerState.rightLevel.toInt()}%")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Video Metadata Display
-                if (playerState.hasMedia) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Video Metadata",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-
-                            // Display metadata properties in a grid layout
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                playerState.metadata.title?.let {
-                                    MetadataRow("Title", it)
-                                }
-                                playerState.metadata.artist?.let {
-                                    MetadataRow("Artist", it)
-                                }
-                                playerState.metadata.width?.let { width ->
-                                    playerState.metadata.height?.let { height ->
-                                        MetadataRow("Resolution", "$width × $height")
-                                    }
-                                }
-                                playerState.metadata.frameRate?.let {
-                                    MetadataRow("Frame Rate", "$it fps")
-                                }
-                                playerState.metadata.bitrate?.let {
-                                    MetadataRow("Bitrate", "${it / 1000} kbps")
-                                }
-                                playerState.metadata.mimeType?.let {
-                                    MetadataRow("Format", it)
-                                }
-                                playerState.metadata.audioChannels?.let { channels ->
-                                    MetadataRow("Audio", "$channels channels")
-                                    playerState.metadata.audioSampleRate?.let { sampleRate ->
-                                        MetadataRow("Audio", "$channels channels, ${sampleRate / 1000} kHz")
-                                    }
-                                }
-                            }
+                // Secondary controls: volume, loop, video URL input
+                ControlsCard(
+                    playerState = playerState,
+                    videoUrl = videoUrl,
+                    onVideoUrlChange = { videoUrl = it },
+                    onOpenUrl = {
+                        if (videoUrl.isNotEmpty()) {
+                            playerState.openUri(videoUrl)
                         }
                     }
-                }
-
+                )
             }
 
             // Animated error Snackbar
             playerState.error?.let { error ->
-                AnimatedVisibility(
-                    visible = true,
-                    enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
-                    exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
+                ErrorSnackbar(
+                    error = error,
+                    onDismiss = { playerState.clearError() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(16.dp)
-                ) {
-                    Snackbar(
-                        action = {
-                            TextButton(
-                                onClick = { playerState.clearError() },
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.inversePrimary
-                                )
-                            ) {
-                                Text("Close")
-                            }
-                        },
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                    ) {
-                        Text(
-                            text = when (error) {
-                                is VideoPlayerError.CodecError -> "Codec error: ${error.message}"
-                                is VideoPlayerError.NetworkError -> "Network error: ${error.message}"
-                                is VideoPlayerError.SourceError -> "Source error: ${error.message}"
-                                is VideoPlayerError.UnknownError -> "Unknown error: ${error.message}"
-                            },
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
+                )
             }
 
             // Subtitle management dialog
