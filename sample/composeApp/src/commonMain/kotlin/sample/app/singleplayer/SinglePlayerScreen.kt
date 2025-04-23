@@ -21,6 +21,7 @@ import sample.app.singleplayer.TimelineControls
 import sample.app.singleplayer.PrimaryControls
 import sample.app.singleplayer.ControlsCard
 import sample.app.singleplayer.MetadataDisplay
+import sample.app.singleplayer.MetadataDialog
 import sample.app.singleplayer.ErrorSnackbar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +68,9 @@ fun SinglePlayerScreen() {
         // State to show/hide the subtitle management dialog
         var showSubtitleDialog by remember { mutableStateOf(false) }
 
+        // State to show/hide the metadata dialog
+        var showMetadataDialog by remember { mutableStateOf(false) }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -102,7 +106,8 @@ fun SinglePlayerScreen() {
                 PrimaryControls(
                     playerState = playerState,
                     videoFileLauncher = { videoFileLauncher.launch() },
-                    onSubtitleDialogRequest = { showSubtitleDialog = true }
+                    onSubtitleDialogRequest = { showSubtitleDialog = true },
+                    onMetadataDialogRequest = { showMetadataDialog = true }
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -147,6 +152,16 @@ fun SinglePlayerScreen() {
                     subtitleFileLauncher = { subtitleFileLauncher.launch() },
                     onDismiss = {
                         showSubtitleDialog = false
+                    }
+                )
+            }
+
+            // Metadata dialog
+            if (showMetadataDialog) {
+                MetadataDialog(
+                    playerState = playerState,
+                    onDismiss = {
+                        showMetadataDialog = false
                     }
                 )
             }
