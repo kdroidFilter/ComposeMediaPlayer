@@ -507,11 +507,11 @@ private fun VideoContent(
     overlay: @Composable () -> Unit = {}
 ) {
     @Composable
-    fun VideoBox() {
+    fun VideoBox(isFullscreenMode: Boolean = false) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Transparent)
+                .background(if (isFullscreenMode) Color.Black else Color.Transparent)
                 .videoRatioClip(videoRatio, contentScale)
         ) {
             SubtitleOverlay(playerState)
@@ -520,7 +520,7 @@ private fun VideoContent(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        VideoBox()
+        VideoBox(isFullscreenMode = false)
 
         if (playerState.isFullscreen) {
             FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {
@@ -528,7 +528,7 @@ private fun VideoContent(
                     modifier = Modifier.fillMaxSize().background(Color.Black),
                     contentAlignment = Alignment.Center
                 ) {
-                    VideoBox()
+                    VideoBox(isFullscreenMode = true)
                 }
             }
         }
@@ -620,6 +620,7 @@ private fun createVideoElement(useCors: Boolean = true): HTMLVideoElement {
         style.zIndex = "-1"
         style.width = "100%"
         style.height = "100%"
+        style.backgroundColor = "black" // Always set background color to black
         // Don't set objectFit here, it will be set by setElementPosition based on contentScale
 
         // Handle CORS mode

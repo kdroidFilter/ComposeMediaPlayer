@@ -81,6 +81,7 @@ private fun setElementPosition(
     element.style.apply {
         position = "absolute"
         margin = "0px"
+        backgroundColor = "black" // Always set background color to black
 
         if (isFullscreen) {
             // In fullscreen mode, make the element fill the entire screen
@@ -88,6 +89,15 @@ private fun setElementPosition(
             this.height = "100%"
             left = "0"
             top = "0"
+
+            // Set object-fit based on contentScale even in fullscreen mode
+            when (contentScale) {
+                ContentScale.FillWidth -> objectFit = "contain"
+                ContentScale.FillHeight -> objectFit = "contain"
+                ContentScale.FillBounds -> objectFit = "fill"
+                ContentScale.Crop -> objectFit = "cover"
+                else -> objectFit = "contain"
+            }
         } else {
             // Calculate dimensions based on contentScale and container size
             val containerWidth = width
