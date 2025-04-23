@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -598,53 +599,67 @@ fun ContentScaleDialog(
             )
         },
         text = {
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
             ) {
-                ContentScaleOption(
-                    name = "Fit",
-                    description = "Scale the content to fit within the bounds while maintaining aspect ratio",
-                    isSelected = currentContentScale == ContentScale.Fit,
-                    onClick = { onContentScaleSelected(ContentScale.Fit) }
-                )
-                ContentScaleOption(
-                    name = "Crop",
-                    description = "Scale the content to fill the bounds while maintaining aspect ratio",
-                    isSelected = currentContentScale == ContentScale.Crop,
-                    onClick = { onContentScaleSelected(ContentScale.Crop) }
-                )
-                ContentScaleOption(
-                    name = "Inside",
-                    description = "Scale the content to fit within the bounds while maintaining aspect ratio",
-                    isSelected = currentContentScale == ContentScale.Inside,
-                    onClick = { onContentScaleSelected(ContentScale.Inside) }
-                )
-                ContentScaleOption(
-                    name = "None",
-                    description = "Don't scale the content",
-                    isSelected = currentContentScale == ContentScale.None,
-                    onClick = { onContentScaleSelected(ContentScale.None) }
-                )
-                ContentScaleOption(
-                    name = "Fill Bounds",
-                    description = "Scale the content to fill the bounds exactly",
-                    isSelected = currentContentScale == ContentScale.FillBounds,
-                    onClick = { onContentScaleSelected(ContentScale.FillBounds) }
-                )
-                ContentScaleOption(
-                    name = "Fill Height",
-                    description = "Scale the content to fill the height while maintaining aspect ratio",
-                    isSelected = currentContentScale == ContentScale.FillHeight,
-                    onClick = { onContentScaleSelected(ContentScale.FillHeight) }
-                )
-                ContentScaleOption(
-                    name = "Fill Width",
-                    description = "Scale the content to fill the width while maintaining aspect ratio",
-                    isSelected = currentContentScale == ContentScale.FillWidth,
-                    onClick = { onContentScaleSelected(ContentScale.FillWidth) }
-                )
+                item {
+                    ContentScaleOption(
+                        name = "Fit",
+                        description = "Scale the content to fit within the bounds while maintaining aspect ratio",
+                        isSelected = currentContentScale == ContentScale.Fit,
+                        onClick = { onContentScaleSelected(ContentScale.Fit) }
+                    )
+                }
+                item {
+                    ContentScaleOption(
+                        name = "Crop",
+                        description = "Scale the content to fill the bounds while maintaining aspect ratio",
+                        isSelected = currentContentScale == ContentScale.Crop,
+                        onClick = { onContentScaleSelected(ContentScale.Crop) }
+                    )
+                }
+                item {
+                    ContentScaleOption(
+                        name = "Inside",
+                        description = "Scale the content to fit within the bounds while maintaining aspect ratio",
+                        isSelected = currentContentScale == ContentScale.Inside,
+                        onClick = { onContentScaleSelected(ContentScale.Inside) }
+                    )
+                }
+                item {
+                    ContentScaleOption(
+                        name = "None",
+                        description = "Don't scale the content",
+                        isSelected = currentContentScale == ContentScale.None,
+                        onClick = { onContentScaleSelected(ContentScale.None) }
+                    )
+                }
+                item {
+                    ContentScaleOption(
+                        name = "Fill Bounds",
+                        description = "Scale the content to fill the bounds exactly",
+                        isSelected = currentContentScale == ContentScale.FillBounds,
+                        onClick = { onContentScaleSelected(ContentScale.FillBounds) }
+                    )
+                }
+                item {
+                    ContentScaleOption(
+                        name = "Fill Height",
+                        description = "Scale the content to fill the height while maintaining aspect ratio",
+                        isSelected = currentContentScale == ContentScale.FillHeight,
+                        onClick = { onContentScaleSelected(ContentScale.FillHeight) }
+                    )
+                }
+                item {
+                    ContentScaleOption(
+                        name = "Fill Width",
+                        description = "Scale the content to fill the width while maintaining aspect ratio",
+                        isSelected = currentContentScale == ContentScale.FillWidth,
+                        onClick = { onContentScaleSelected(ContentScale.FillWidth) }
+                    )
+                }
             }
         },
         confirmButton = {
