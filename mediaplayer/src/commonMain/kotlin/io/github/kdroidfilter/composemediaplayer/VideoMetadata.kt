@@ -34,4 +34,22 @@ data class VideoMetadata(
     var mimeType: String? = null,
     var audioChannels: Int? = null,
     var audioSampleRate: Int? = null,
-)
+) {
+    /**
+     * Checks if all properties of this metadata object are null.
+     *
+     * @return true if all properties are null, false otherwise.
+     */
+    fun isAllNull(): Boolean {
+        return title == null &&
+               artist == null &&
+               duration == null &&
+               width == null &&
+               height == null &&
+               bitrate == null &&
+               frameRate == null &&
+               mimeType == null &&
+               audioChannels == null &&
+               audioSampleRate == null
+    }
+}

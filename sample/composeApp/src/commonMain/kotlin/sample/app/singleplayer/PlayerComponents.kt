@@ -2,12 +2,15 @@ package sample.app.singleplayer
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +24,7 @@ import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
+import kotlinx.coroutines.delay
 
 @Composable
 fun MetadataRow(label: String, value: String) {
@@ -88,7 +92,80 @@ fun VideoDisplay(
                 .clip(RoundedCornerShape(16.dp))
         ) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = "Overlay Content")
+                if (playerState.isFullscreen) {
+                    var controlsVisible by remember { mutableStateOf(false) }
+
+                    // Reset timer when controls become visible
+                    LaunchedEffect(controlsVisible) {
+                        if (controlsVisible) {
+                            delay(3000) // Hide controls after 3 seconds
+                            controlsVisible = false
+                        }
+                    }
+
+                    // Detect taps to show controls
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { controlsVisible = true }
+                            .pointerInput(Unit) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        // Show controls when mouse moves
+                                        if (event.type == PointerEventType.Move) {
+                                            controlsVisible = true
+                                        }
+                                    }
+                                }
+                            }
+                    ) {
+                        // Show controls when visible
+                        AnimatedVisibility(
+                            visible = controlsVisible,
+                            enter = fadeIn(),
+                            exit = fadeOut(),
+                            modifier = Modifier.align(Alignment.Center)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(
+                                        color = Color.Black.copy(alpha = 0.7f),
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    .padding(16.dp)
+                            ) {
+                                // Play/Pause button
+                                IconButton(
+                                    onClick = {
+                                        if (playerState.isPlaying) playerState.pause() else playerState.play()
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = if (playerState.isPlaying) "Pause" else "Play",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(56.dp)
+                                    )
+                                }
+
+                                // Exit fullscreen button
+                                IconButton(
+                                    onClick = { playerState.toggleFullscreen() }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FullscreenExit,
+                                        contentDescription = "Exit Fullscreen",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(56.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -334,17 +411,9 @@ fun MetadataDisplay(
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "Video Metadata",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
+        if (!playerState.metadata.isAllNull()) {
             // Display metadata properties in a grid layout
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
                 playerState.metadata.title?.let {
                     MetadataRow("Title", it)
                 }
@@ -366,7 +435,6 @@ fun MetadataDisplay(
                     MetadataRow("Format", it)
                 }
                 playerState.metadata.audioChannels?.let { channels ->
-                    MetadataRow("Audio", "$channels channels")
                     playerState.metadata.audioSampleRate?.let { sampleRate ->
                         MetadataRow("Audio", "$channels channels, ${sampleRate / 1000} kHz")
                     }
