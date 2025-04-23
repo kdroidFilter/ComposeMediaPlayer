@@ -89,6 +89,11 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         get() = _userDragging
         set(value) {
             _userDragging = value
+
+            // If user just finished dragging and we have a pending playback speed update, apply it now
+            if (!value && pendingPlaybackSpeedUpdate) {
+                applyPlaybackSpeed()
+            }
         }
 
     private var _loop by mutableStateOf(false)
@@ -99,38 +104,63 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         }
 
     private var _playbackSpeed by mutableStateOf(1f)
+    private var pendingPlaybackSpeedUpdate = false
+    private var speedUpdateTimer: Timer? = null
+    private val PLAYBACK_SPEED_DEBOUNCE_MS = 200
+
     override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
             val newSpeed = value.coerceIn(0.5f, 2.0f)
-            if (_playbackSpeed != newSpeed && hasMedia) {
-                try {
-                    // Get current position
-                    val currentPosition = playbin.queryPosition(Format.TIME)
+            // Update the UI immediately
+            _playbackSpeed = newSpeed
 
-                    // Set the new speed
-                    _playbackSpeed = newSpeed
-
-                    // Perform a seek operation with the new playback speed
-                    // This is the proper way to change playback speed in GStreamer
-                    playbin.seek(
-                        _playbackSpeed.toDouble(),  // Rate (speed multiplier)
-                        Format.TIME,                // Format
-                        EnumSet.of(SeekFlags.FLUSH, SeekFlags.ACCURATE), // Flags
-                        SeekType.SET,               // Start seek type
-                        currentPosition,            // Start position
-                        SeekType.NONE,              // Stop seek type
-                        -1L                         // Stop position (not used)
-                    )
-
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    // Revert to previous speed if there was an error
-                    _playbackSpeed = 1f
+            if (hasMedia) {
+                // If we're dragging, defer the actual seek operation
+                if (userDragging) {
+                    pendingPlaybackSpeedUpdate = true
+                    return
                 }
-            } else {
-                _playbackSpeed = newSpeed
+
+                // Cancel any pending timer
+                speedUpdateTimer?.stop()
+
+                // Apply the speed change immediately for UI feedback
+                // but debounce the actual GStreamer operation
+                pendingPlaybackSpeedUpdate = true
+
+                // Create a new timer for debouncing
+                speedUpdateTimer = Timer(PLAYBACK_SPEED_DEBOUNCE_MS, {
+                    if (pendingPlaybackSpeedUpdate) {
+                        applyPlaybackSpeed()
+                    }
+                })
+                speedUpdateTimer?.isRepeats = false
+                speedUpdateTimer?.start()
             }
+        }
+
+    private fun applyPlaybackSpeed() {
+        pendingPlaybackSpeedUpdate = false
+        try {
+            // Get current position
+            val currentPosition = playbin.queryPosition(Format.TIME)
+
+            // Perform a seek operation with the new playback speed
+            // This is the proper way to change playback speed in GStreamer
+            playbin.seek(
+                _playbackSpeed.toDouble(),  // Rate (speed multiplier)
+                Format.TIME,                // Format
+                EnumSet.of(SeekFlags.FLUSH, SeekFlags.ACCURATE), // Flags
+                SeekType.SET,               // Start seek type
+                currentPosition,            // Start position
+                SeekType.NONE,              // Stop seek type
+                -1L                         // Stop position (not used)
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            // Don't revert the speed value as it would cause UI inconsistency
+        }
         }
 
     private var _volume by mutableStateOf(1f)
@@ -827,6 +857,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     // ---- Release resources ----
     override fun dispose() {
         sliderTimer.stop()
+        speedUpdateTimer?.stop()
         playbin.stop()
         playbin.dispose()
         videoSink.dispose()
