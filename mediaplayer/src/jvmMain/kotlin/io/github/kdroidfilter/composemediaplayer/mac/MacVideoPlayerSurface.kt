@@ -2,17 +2,16 @@ package io.github.kdroidfilter.composemediaplayer.mac
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
+import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 
 
@@ -38,9 +37,7 @@ fun MacVideoPlayerSurface(
     isInFullscreenWindow: Boolean = false,
 ) {
     Box(
-        modifier = modifier.onSizeChanged {
-            // If MacVideoPlayerState had an onResized method, we would call it here
-        },
+        modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
         if (playerState.hasMedia) {
@@ -49,15 +46,12 @@ fun MacVideoPlayerSurface(
 
             currentFrame?.let { frame ->
                 Canvas(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .aspectRatio(playerState.aspectRatio),
+                    modifier = contentScale.toCanvasModifier(playerState.aspectRatio,playerState.metadata.width,playerState.metadata.height),
                 ) {
-                    drawImage(
-                        image = frame,
-                        dstSize = IntSize(size.width.toInt(), size.height.toInt())
-                        // Note: ContentScale parameter is not used here as Canvas doesn't directly support it
-                        // The actual implementation will be handled by someone else as per the issue description
+                    drawScaledImage(
+                        image        = frame,
+                        dstSize      = IntSize(size.width.toInt(), size.height.toInt()),
+                        contentScale = contentScale
                     )
                 }
             }

@@ -101,7 +101,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
 
     // Non-blocking aspect ratio property
     private val _aspectRatio = mutableStateOf(16f / 9f)
-    internal val aspectRatio: Float get() = _aspectRatio.value
+    override val aspectRatio: Float get() = _aspectRatio.value
 
     // Player settings
     // Volume variable is stored independently so it can always be modified.

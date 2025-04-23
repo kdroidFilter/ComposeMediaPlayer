@@ -85,6 +85,7 @@ actual open class VideoPlayerState {
         }
 
     actual open val metadata: VideoMetadata get() = delegate.metadata
+    actual open val aspectRatio: Float get() = delegate.aspectRatio
 
     actual var subtitlesEnabled = delegate.subtitlesEnabled
     actual var currentSubtitleTrack : SubtitleTrack? = delegate.currentSubtitleTrack

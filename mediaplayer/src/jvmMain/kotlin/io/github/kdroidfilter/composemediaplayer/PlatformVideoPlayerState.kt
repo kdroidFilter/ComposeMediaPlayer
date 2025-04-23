@@ -46,6 +46,7 @@ interface PlatformVideoPlayerState {
     var isFullscreen: Boolean
 
     val metadata: VideoMetadata
+    val aspectRatio: Float
 
     // Subtitle management
     var subtitlesEnabled: Boolean

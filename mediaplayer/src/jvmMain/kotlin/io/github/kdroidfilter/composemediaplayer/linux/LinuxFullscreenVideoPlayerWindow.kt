@@ -1,7 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.linux
 
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.common.openFullscreenWindow
 
 /**
@@ -15,7 +15,8 @@ import io.github.kdroidfilter.composemediaplayer.common.openFullscreenWindow
 @Composable
 fun openFullscreenWindow(
     playerState: LinuxVideoPlayerState,
-    overlay: @Composable () -> Unit = {}
+    overlay: @Composable () -> Unit = {},
+    contentScale: ContentScale
 ) {
     openFullscreenWindow(
         playerState = playerState,
@@ -24,7 +25,8 @@ fun openFullscreenWindow(
                 playerState = state as LinuxVideoPlayerState,
                 modifier = modifier,
                 overlay = overlay,
-                isInFullscreenWindow = isInFullscreenWindow
+                isInFullscreenWindow = isInFullscreenWindow,
+                contentScale = contentScale
             )
         }
     )

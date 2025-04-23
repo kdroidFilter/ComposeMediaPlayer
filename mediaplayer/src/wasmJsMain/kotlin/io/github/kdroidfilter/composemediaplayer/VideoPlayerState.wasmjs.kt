@@ -59,6 +59,7 @@ actual open class VideoPlayerState {
 
     // Media metadata
     actual val metadata = VideoMetadata()
+    actual val aspectRatio : Float = 16f / 9f //TO DO: Get from video source
 
     // Subtitle management
     actual var subtitlesEnabled by mutableStateOf(false)

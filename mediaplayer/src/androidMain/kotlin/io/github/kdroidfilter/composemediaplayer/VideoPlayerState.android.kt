@@ -182,7 +182,7 @@ actual open class VideoPlayerState {
 
     // Aspect ratio
     private var _aspectRatio by mutableStateOf(16f / 9f)
-    val aspectRatio: Float get() = _aspectRatio
+    actual val aspectRatio: Float get() = _aspectRatio
 
     // Fullscreen state
     private var _isFullscreen by mutableStateOf(false)
@@ -451,6 +451,7 @@ actual open class VideoPlayerState {
                                 _metadata.mimeType = it
                             }
                         }
+
                         C.TRACK_TYPE_AUDIO -> {
                             // Audio format metadata
                             if (trackFormat.channelCount > 0) {

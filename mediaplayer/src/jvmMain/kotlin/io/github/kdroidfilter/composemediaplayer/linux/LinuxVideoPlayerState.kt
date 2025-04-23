@@ -228,7 +228,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     private var lastAspectRatioUpdateTime: Long = 0
     private val ASPECT_RATIO_DEBOUNCE_MS = 500
     private var _aspectRatio by mutableStateOf(DEFAULT_ASPECT_RATIO)
-    val aspectRatio: Float
+    override val aspectRatio: Float
         get() = _aspectRatio
 
     init {

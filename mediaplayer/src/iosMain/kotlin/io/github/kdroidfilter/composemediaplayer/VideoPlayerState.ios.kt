@@ -108,6 +108,8 @@ actual open class VideoPlayerState {
     val videoAspectRatio: CGFloat
         get() = _videoAspectRatio
 
+    actual val aspectRatio: Float = _videoAspectRatio.toFloat()
+
     // Video metadata
     private var _metadata = VideoMetadata(audioChannels = 2)
 

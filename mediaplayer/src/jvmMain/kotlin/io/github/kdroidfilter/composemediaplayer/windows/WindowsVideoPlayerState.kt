@@ -174,7 +174,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     internal val currentFrameState = mutableStateOf<ImageBitmap?>(null)
 
     // Aspect ratio property
-    internal val aspectRatio: Float
+    override val aspectRatio: Float
         get() = if (videoWidth > 0 && videoHeight > 0)
             videoWidth.toFloat() / videoHeight.toFloat()
         else 16f / 9f
