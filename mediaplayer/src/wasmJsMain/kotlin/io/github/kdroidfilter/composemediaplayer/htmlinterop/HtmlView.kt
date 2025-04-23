@@ -120,7 +120,7 @@ private fun setElementPosition(
                         this.height = "${scaledHeight}px"
                         left = "${x}px"
                         top = "${y + (containerHeight - scaledHeight) / 2}px"
-                        objectFit = "none" // Don't use CSS object-fit for this case
+                        objectFit = "contain" // Use contain to preserve aspect ratio
                     }
                     ContentScale.FillHeight -> {
                         // Fill height, maintain aspect ratio
@@ -129,7 +129,7 @@ private fun setElementPosition(
                         this.height = "${containerHeight}px"
                         left = "${x + (containerWidth - scaledWidth) / 2}px"
                         top = "${y}px"
-                        objectFit = "none" // Don't use CSS object-fit for this case
+                        objectFit = "contain" // Use contain to preserve aspect ratio
                     }
                     ContentScale.FillBounds -> {
                         // Fill the entire container without respecting aspect ratio

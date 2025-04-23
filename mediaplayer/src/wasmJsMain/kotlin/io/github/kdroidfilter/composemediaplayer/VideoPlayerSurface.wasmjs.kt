@@ -620,7 +620,7 @@ private fun createVideoElement(useCors: Boolean = true): HTMLVideoElement {
         style.zIndex = "-1"
         style.width = "100%"
         style.height = "100%"
-        style.objectFit = "contain" // Default to maintain aspect ratio
+        // Don't set objectFit here, it will be set by setElementPosition based on contentScale
 
         // Handle CORS mode
         if (useCors) {
