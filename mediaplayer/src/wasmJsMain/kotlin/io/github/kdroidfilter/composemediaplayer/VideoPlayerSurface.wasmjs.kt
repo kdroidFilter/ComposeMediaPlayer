@@ -91,39 +91,132 @@ private fun HTMLVideoElement.addEventListeners(
     }
 }
 
-fun Modifier.videoRatioClip(videoRatio: Float?): Modifier = 
-    drawBehind { videoRatio?.let { drawVideoRatioRect(it) } }
+fun Modifier.videoRatioClip(videoRatio: Float?, contentScale: ContentScale = ContentScale.Fit): Modifier = 
+    drawBehind { videoRatio?.let { drawVideoRatioRect(it, contentScale) } }
 
 // Optimized drawing function to reduce calculations during rendering
-private fun DrawScope.drawVideoRatioRect(ratio: Float) {
+private fun DrawScope.drawVideoRatioRect(ratio: Float, contentScale: ContentScale) {
     val containerWidth = size.width
     val containerHeight = size.height
     val containerRatio = containerWidth / containerHeight
 
-    // Avoid division operation when possible
-    val (rectWidth, rectHeight) = if (containerRatio > ratio) {
-        // Container is wider than video
-        val height = containerHeight
-        val width = height * ratio
-        width to height
-    } else {
-        // Container is taller than or equal to video
-        val width = containerWidth
-        val height = width / ratio
-        width to height
+    when (contentScale) {
+        ContentScale.Fit, ContentScale.Inside -> {
+            // Fit behavior - maintain aspect ratio and fit within container
+            val (rectWidth, rectHeight) = if (containerRatio > ratio) {
+                // Container is wider than video
+                val height = containerHeight
+                val width = height * ratio
+                width to height
+            } else {
+                // Container is taller than or equal to video
+                val width = containerWidth
+                val height = width / ratio
+                width to height
+            }
+
+            // Calculate offset only once
+            val xOffset = (containerWidth - rectWidth) / 2f
+            val yOffset = (containerHeight - rectHeight) / 2f
+
+            // Use pre-calculated values
+            drawRect(
+                color = Color.Transparent,
+                blendMode = BlendMode.Clear,
+                topLeft = Offset(xOffset, yOffset),
+                size = Size(rectWidth, rectHeight)
+            )
+        }
+        ContentScale.Crop -> {
+            // Crop behavior - maintain aspect ratio and fill container
+            val (rectWidth, rectHeight) = if (containerRatio < ratio) {
+                // Container is taller than video
+                val height = containerHeight
+                val width = height * ratio
+                width to height
+            } else {
+                // Container is wider than or equal to video
+                val width = containerWidth
+                val height = width / ratio
+                width to height
+            }
+
+            // Calculate offset only once
+            val xOffset = (containerWidth - rectWidth) / 2f
+            val yOffset = (containerHeight - rectHeight) / 2f
+
+            // Use pre-calculated values
+            drawRect(
+                color = Color.Transparent,
+                blendMode = BlendMode.Clear,
+                topLeft = Offset(xOffset, yOffset),
+                size = Size(rectWidth, rectHeight)
+            )
+        }
+        ContentScale.FillWidth -> {
+            // Fill width behavior - maintain aspect ratio and fill width
+            val width = containerWidth
+            val height = width / ratio
+
+            val yOffset = (containerHeight - height) / 2f
+
+            drawRect(
+                color = Color.Transparent,
+                blendMode = BlendMode.Clear,
+                topLeft = Offset(0f, yOffset),
+                size = Size(width, height)
+            )
+        }
+        ContentScale.FillHeight -> {
+            // Fill height behavior - maintain aspect ratio and fill height
+            val height = containerHeight
+            val width = height * ratio
+
+            val xOffset = (containerWidth - width) / 2f
+
+            drawRect(
+                color = Color.Transparent,
+                blendMode = BlendMode.Clear,
+                topLeft = Offset(xOffset, 0f),
+                size = Size(width, height)
+            )
+        }
+        ContentScale.FillBounds -> {
+            // Fill bounds behavior - fill entire container without maintaining aspect ratio
+            drawRect(
+                color = Color.Transparent,
+                blendMode = BlendMode.Clear,
+                topLeft = Offset(0f, 0f),
+                size = Size(containerWidth, containerHeight)
+            )
+        }
+        else -> {
+            // Default to Fit behavior
+            val (rectWidth, rectHeight) = if (containerRatio > ratio) {
+                // Container is wider than video
+                val height = containerHeight
+                val width = height * ratio
+                width to height
+            } else {
+                // Container is taller than or equal to video
+                val width = containerWidth
+                val height = width / ratio
+                width to height
+            }
+
+            // Calculate offset only once
+            val xOffset = (containerWidth - rectWidth) / 2f
+            val yOffset = (containerHeight - rectHeight) / 2f
+
+            // Use pre-calculated values
+            drawRect(
+                color = Color.Transparent,
+                blendMode = BlendMode.Clear,
+                topLeft = Offset(xOffset, yOffset),
+                size = Size(rectWidth, rectHeight)
+            )
+        }
     }
-
-    // Calculate offset only once
-    val xOffset = (containerWidth - rectWidth) / 2f
-    val yOffset = (containerHeight - rectHeight) / 2f
-
-    // Use pre-calculated values
-    drawRect(
-        color = Color.Transparent,
-        blendMode = BlendMode.Clear,
-        topLeft = Offset(xOffset, yOffset),
-        size = Size(rectWidth, rectHeight)
-    )
 }
 
 @Composable
@@ -419,7 +512,7 @@ private fun VideoContent(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Transparent)
-                .videoRatioClip(videoRatio)
+                .videoRatioClip(videoRatio, contentScale)
         ) {
             SubtitleOverlay(playerState)
             overlay()
@@ -512,7 +605,9 @@ private fun VideoContent(
                         onCorsError = { onCorsChange(false) }
                     )
                 },
-                isFullscreen = playerState.isFullscreen
+                isFullscreen = playerState.isFullscreen,
+                contentScale = contentScale,
+                videoRatio = videoRatio
             )
         }
     }
@@ -525,6 +620,7 @@ private fun createVideoElement(useCors: Boolean = true): HTMLVideoElement {
         style.zIndex = "-1"
         style.width = "100%"
         style.height = "100%"
+        style.objectFit = "contain" // Default to maintain aspect ratio
 
         // Handle CORS mode
         if (useCors) {

@@ -5,6 +5,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.*
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
@@ -67,7 +68,16 @@ private class FocusSwitcher<T : Element>(private val info: ComponentInfo<T>, pri
     }
 }
 
-private fun setElementPosition(element: HTMLElement, width: Float, height: Float, x: Float, y: Float, isFullscreen: Boolean = false) {
+private fun setElementPosition(
+    element: HTMLElement, 
+    width: Float, 
+    height: Float, 
+    x: Float, 
+    y: Float, 
+    isFullscreen: Boolean = false,
+    contentScale: ContentScale = ContentScale.Fit,
+    videoRatio: Float? = null
+) {
     element.style.apply {
         position = "absolute"
         margin = "0px"
@@ -79,11 +89,79 @@ private fun setElementPosition(element: HTMLElement, width: Float, height: Float
             left = "0"
             top = "0"
         } else {
-            // Normal positioning based on the container
-            this.width = "${width}px"
-            this.height = "${height}px"
-            left = "${x}px"
-            top = "${y}px"
+            // Calculate dimensions based on contentScale and container size
+            val containerWidth = width
+            val containerHeight = height
+
+            if (videoRatio != null) {
+                val containerRatio = containerWidth / containerHeight
+
+                when (contentScale) {
+                    ContentScale.Fit, ContentScale.Inside -> {
+                        // Scale to fit within container while maintaining aspect ratio
+                        this.width = "${containerWidth}px"
+                        this.height = "${containerHeight}px"
+                        left = "${x}px"
+                        top = "${y}px"
+                        objectFit = "contain" // Use CSS object-fit to maintain aspect ratio and fit within container
+                    }
+                    ContentScale.Crop -> {
+                        // Scale to cover container while maintaining aspect ratio
+                        this.width = "${containerWidth}px"
+                        this.height = "${containerHeight}px"
+                        left = "${x}px"
+                        top = "${y}px"
+                        objectFit = "cover" // Use CSS object-fit to maintain aspect ratio and cover container
+                    }
+                    ContentScale.FillWidth -> {
+                        // Fill width, maintain aspect ratio
+                        val scaledHeight = containerWidth / videoRatio
+                        this.width = "${containerWidth}px"
+                        this.height = "${scaledHeight}px"
+                        left = "${x}px"
+                        top = "${y + (containerHeight - scaledHeight) / 2}px"
+                        objectFit = "none" // Don't use CSS object-fit for this case
+                    }
+                    ContentScale.FillHeight -> {
+                        // Fill height, maintain aspect ratio
+                        val scaledWidth = containerHeight * videoRatio
+                        this.width = "${scaledWidth}px"
+                        this.height = "${containerHeight}px"
+                        left = "${x + (containerWidth - scaledWidth) / 2}px"
+                        top = "${y}px"
+                        objectFit = "none" // Don't use CSS object-fit for this case
+                    }
+                    ContentScale.FillBounds -> {
+                        // Fill the entire container without respecting aspect ratio
+                        this.width = "${containerWidth}px"
+                        this.height = "${containerHeight}px"
+                        left = "${x}px"
+                        top = "${y}px"
+                        objectFit = "fill" // Use CSS object-fit to stretch without preserving ratio
+                    }
+                    else -> {
+                        // Default positioning based on the container
+                        this.width = "${width}px"
+                        this.height = "${height}px"
+                        left = "${x}px"
+                        top = "${y}px"
+                        objectFit = "contain" // Default to maintain aspect ratio
+                    }
+                }
+            } else {
+                // No video ratio available, use default positioning
+                this.width = "${width}px"
+                this.height = "${height}px"
+                left = "${x}px"
+                top = "${y}px"
+
+                // Set object-fit based on contentScale even when ratio is unknown
+                when (contentScale) {
+                    ContentScale.FillBounds -> objectFit = "fill" // Stretch without preserving ratio
+                    ContentScale.Crop -> objectFit = "cover" // Cover while maintaining aspect ratio
+                    else -> objectFit = "contain" // Default to maintain aspect ratio
+                }
+            }
         }
     }
 }
@@ -93,7 +171,9 @@ internal fun <T : Element> HtmlView(
     factory: Document.() -> T,
     modifier: Modifier = Modifier,
     update: (T) -> Unit = NoOpUpdate,
-    isFullscreen: Boolean = false
+    isFullscreen: Boolean = false,
+    contentScale: ContentScale = ContentScale.Fit,
+    videoRatio: Float? = null
 ) {
     val info = remember { ComponentInfo<T>() }
     val root = LocalLayerContainer.current
@@ -110,7 +190,9 @@ internal fun <T : Element> HtmlView(
             size.height / density,
             pos.x / density,
             pos.y / density,
-            isFullscreen
+            isFullscreen,
+            contentScale,
+            videoRatio
         )
     }) {
         focusSwitcher.Content()
@@ -125,7 +207,7 @@ internal fun <T : Element> HtmlView(
 
         root.insertBefore(info.container, root.firstChild)
         info.container.append(info.component)
-        setElementPosition(info.component as HTMLElement, 0f, 0f, 0f, 0f)
+        setElementPosition(info.component as HTMLElement, 0f, 0f, 0f, 0f, false, contentScale, videoRatio)
 
         onDispose {
             root.removeChild(info.container)
