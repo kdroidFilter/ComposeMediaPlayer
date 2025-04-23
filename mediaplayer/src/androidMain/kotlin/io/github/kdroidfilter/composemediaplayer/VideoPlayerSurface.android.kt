@@ -20,6 +20,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
+import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 
 @UnstableApi
@@ -40,7 +41,8 @@ actual fun VideoPlayerSurface(
                 VideoPlayerContent(
                     playerState = playerState,
                     modifier = Modifier.fillMaxHeight(),
-                    overlay = overlay
+                    overlay = overlay,
+                    contentScale = contentScale
                 )
             }
         }
@@ -49,7 +51,8 @@ actual fun VideoPlayerSurface(
         VideoPlayerContent(
             playerState = playerState,
             modifier = modifier,
-            overlay = overlay
+            overlay = overlay,
+            contentScale = contentScale
         )
     }
 }
@@ -59,7 +62,8 @@ actual fun VideoPlayerSurface(
 private fun VideoPlayerContent(
     playerState: VideoPlayerState,
     modifier: Modifier,
-    overlay: @Composable () -> Unit
+    overlay: @Composable () -> Unit,
+    contentScale: ContentScale
 ) {
     Box(
         modifier = modifier,
@@ -68,9 +72,7 @@ private fun VideoPlayerContent(
         if (playerState.hasMedia) {
             AndroidView(
                 modifier =
-                    Modifier
-                        .fillMaxHeight()
-                        .aspectRatio(playerState.aspectRatio),
+                    contentScale.toCanvasModifier(playerState.aspectRatio,playerState.metadata.width,playerState.metadata.height),
                 factory = { context ->
                     // Create PlayerView with subtitles support
                     PlayerView(context).apply {
@@ -81,7 +83,15 @@ private fun VideoPlayerContent(
                         setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
-                        AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        // Map Compose ContentScale to ExoPlayer resize modes
+                        resizeMode = when (contentScale) {
+                            ContentScale.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            ContentScale.FillBounds -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                            ContentScale.Fit, ContentScale.Inside -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            ContentScale.FillWidth -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
+                            ContentScale.FillHeight -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
+                            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }
 
                         // Disable native subtitle view since we're using Compose-based subtitles
                         subtitleView?.visibility = android.view.View.GONE
