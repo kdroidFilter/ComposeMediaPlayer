@@ -248,11 +248,52 @@ actual fun VideoPlayerSurface(
         }
 
         // Handle property updates - combined for better performance
-        LaunchedEffect(playerState.volume, playerState.loop, playerState.playbackSpeed) {
+        // Store pending volume change to apply after seeking is complete
+        var pendingVolumeChange by remember { mutableStateOf<Double?>(null) }
+
+        LaunchedEffect(playerState.loop, playerState.playbackSpeed) {
             videoElement?.let { video ->
-                video.volume = playerState.volume.toDouble()
+                // Always update these properties immediately
                 video.loop = playerState.loop
                 video.safeSetPlaybackRate(playerState.playbackSpeed)
+            }
+        }
+
+        // Apply pending volume change when seeking is complete
+        DisposableEffect(videoElement) {
+            val video = videoElement ?: return@DisposableEffect onDispose {}
+
+            // Set the volume callback to respect seeking state
+            playerState.applyVolumeCallback = { value ->
+                if (playerState._isLoading) {
+                    // Store the volume change to apply after seeking is complete
+                    pendingVolumeChange = value.toDouble()
+                } else {
+                    // Apply volume change immediately if not seeking
+                    video.volume = value.toDouble()
+                    pendingVolumeChange = null
+                }
+            }
+
+            // Apply current volume immediately if needed
+            if (!playerState._isLoading) {
+                video.volume = playerState.volume.toDouble()
+            } else {
+                pendingVolumeChange = playerState.volume.toDouble()
+            }
+
+            val seekedListener: (Event) -> Unit = {
+                pendingVolumeChange?.let { volume ->
+                    video.volume = volume
+                    pendingVolumeChange = null
+                }
+            }
+
+            video.addEventListener("seeked", seekedListener)
+
+            onDispose {
+                video.removeEventListener("seeked", seekedListener)
+                playerState.applyVolumeCallback = null
             }
         }
 
@@ -621,7 +662,8 @@ fun setupVideoElement(
     }
 
     // Set initial properties
-    video.volume = playerState.volume.toDouble()
+    // Don't set volume here, it will be handled by the applyVolumeCallback in the DisposableEffect
+    // This avoids potential race conditions with the seeking state
     video.loop = playerState.loop
     video.safeSetPlaybackRate(playerState.playbackSpeed)
 
