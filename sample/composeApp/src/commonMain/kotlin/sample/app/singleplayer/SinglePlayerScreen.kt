@@ -1,13 +1,15 @@
 package sample.app.singleplayer
 
+// Import the extracted composable functions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.BoxWithConstraints
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.getUri
@@ -15,15 +17,6 @@ import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.name
 import sample.app.SubtitleManagementDialog
-// Import the extracted composable functions
-import sample.app.singleplayer.PlayerHeader
-import sample.app.singleplayer.VideoDisplay
-import sample.app.singleplayer.TimelineControls
-import sample.app.singleplayer.PrimaryControls
-import sample.app.singleplayer.ControlsCard
-import sample.app.singleplayer.MetadataDisplay
-import sample.app.singleplayer.MetadataDialog
-import sample.app.singleplayer.ErrorSnackbar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,6 +65,12 @@ fun SinglePlayerScreen() {
         // State to show/hide the metadata dialog
         var showMetadataDialog by remember { mutableStateOf(false) }
 
+        // State to show/hide the content scale dialog
+        var showContentScaleDialog by remember { mutableStateOf(false) }
+
+        // State to store the selected content scale
+        var selectedContentScale by remember { mutableStateOf<ContentScale>(ContentScale.Fit) }
+
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -100,7 +99,8 @@ fun SinglePlayerScreen() {
                             playerState = playerState,
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxWidth()
+                                .fillMaxWidth(),
+                            contentScale = selectedContentScale
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -123,7 +123,8 @@ fun SinglePlayerScreen() {
                             playerState = playerState,
                             videoFileLauncher = { videoFileLauncher.launch() },
                             onSubtitleDialogRequest = { showSubtitleDialog = true },
-                            onMetadataDialogRequest = { showMetadataDialog = true }
+                            onMetadataDialogRequest = { showMetadataDialog = true },
+                            onContentScaleDialogRequest = { showContentScaleDialog = true }
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -156,7 +157,8 @@ fun SinglePlayerScreen() {
                         playerState = playerState,
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxWidth()
+                            .fillMaxWidth(),
+                        contentScale = selectedContentScale
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -171,7 +173,8 @@ fun SinglePlayerScreen() {
                         playerState = playerState,
                         videoFileLauncher = { videoFileLauncher.launch() },
                         onSubtitleDialogRequest = { showSubtitleDialog = true },
-                        onMetadataDialogRequest = { showMetadataDialog = true }
+                        onMetadataDialogRequest = { showMetadataDialog = true },
+                        onContentScaleDialogRequest = { showContentScaleDialog = true }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -227,6 +230,20 @@ fun SinglePlayerScreen() {
                     playerState = playerState,
                     onDismiss = {
                         showMetadataDialog = false
+                    }
+                )
+            }
+
+            // Content scale dialog
+            if (showContentScaleDialog) {
+                ContentScaleDialog(
+                    currentContentScale = selectedContentScale,
+                    onContentScaleSelected = { contentScale ->
+                        selectedContentScale = contentScale
+                        showContentScaleDialog = false
+                    },
+                    onDismiss = {
+                        showContentScaleDialog = false
                     }
                 )
             }

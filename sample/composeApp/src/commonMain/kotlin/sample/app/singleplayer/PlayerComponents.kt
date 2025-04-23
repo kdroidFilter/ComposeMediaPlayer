@@ -9,18 +9,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
@@ -73,7 +73,8 @@ fun PlayerHeader(
 @Composable
 fun VideoDisplay(
     playerState: VideoPlayerState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit
 ) {
     Box(
         modifier = modifier
@@ -85,7 +86,8 @@ fun VideoDisplay(
             playerState = playerState,
             modifier = Modifier
                 .fillMaxSize()
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp)),
+            contentScale = contentScale
         ) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (playerState.isFullscreen) {
@@ -221,7 +223,8 @@ fun PrimaryControls(
     playerState: VideoPlayerState,
     videoFileLauncher: () -> Unit,
     onSubtitleDialogRequest: () -> Unit,
-    onMetadataDialogRequest: () -> Unit
+    onMetadataDialogRequest: () -> Unit,
+    onContentScaleDialogRequest: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -283,6 +286,15 @@ fun PrimaryControls(
             )
         ) {
             Icon(Icons.Default.Info, contentDescription = "Metadata")
+        }
+
+        FilledIconButton(
+            onClick = { onContentScaleDialogRequest() },
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
+        ) {
+            Icon(Icons.Default.AspectRatio, contentDescription = "Content Scale")
         }
     }
 }
@@ -568,4 +580,116 @@ fun MetadataDialog(
         containerColor = MaterialTheme.colorScheme.background,
         tonalElevation = 6.dp
     )
+}
+
+@Composable
+fun ContentScaleDialog(
+    currentContentScale: ContentScale,
+    onContentScaleSelected: (ContentScale) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Select Content Scale",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+            ) {
+                ContentScaleOption(
+                    name = "Fit",
+                    description = "Scale the content to fit within the bounds while maintaining aspect ratio",
+                    isSelected = currentContentScale == ContentScale.Fit,
+                    onClick = { onContentScaleSelected(ContentScale.Fit) }
+                )
+                ContentScaleOption(
+                    name = "Crop",
+                    description = "Scale the content to fill the bounds while maintaining aspect ratio",
+                    isSelected = currentContentScale == ContentScale.Crop,
+                    onClick = { onContentScaleSelected(ContentScale.Crop) }
+                )
+                ContentScaleOption(
+                    name = "Inside",
+                    description = "Scale the content to fit within the bounds while maintaining aspect ratio",
+                    isSelected = currentContentScale == ContentScale.Inside,
+                    onClick = { onContentScaleSelected(ContentScale.Inside) }
+                )
+                ContentScaleOption(
+                    name = "None",
+                    description = "Don't scale the content",
+                    isSelected = currentContentScale == ContentScale.None,
+                    onClick = { onContentScaleSelected(ContentScale.None) }
+                )
+                ContentScaleOption(
+                    name = "Fill Bounds",
+                    description = "Scale the content to fill the bounds exactly",
+                    isSelected = currentContentScale == ContentScale.FillBounds,
+                    onClick = { onContentScaleSelected(ContentScale.FillBounds) }
+                )
+                ContentScaleOption(
+                    name = "Fill Height",
+                    description = "Scale the content to fill the height while maintaining aspect ratio",
+                    isSelected = currentContentScale == ContentScale.FillHeight,
+                    onClick = { onContentScaleSelected(ContentScale.FillHeight) }
+                )
+                ContentScaleOption(
+                    name = "Fill Width",
+                    description = "Scale the content to fill the width while maintaining aspect ratio",
+                    isSelected = currentContentScale == ContentScale.FillWidth,
+                    onClick = { onContentScaleSelected(ContentScale.FillWidth) }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", style = MaterialTheme.typography.labelLarge)
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+        tonalElevation = 6.dp
+    )
+}
+
+@Composable
+private fun ContentScaleOption(
+    name: String,
+    description: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(
+            selected = isSelected,
+            onClick = onClick
+        )
+        Column(
+            modifier = Modifier
+                .padding(start = 8.dp)
+                .weight(1f)
+        ) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
