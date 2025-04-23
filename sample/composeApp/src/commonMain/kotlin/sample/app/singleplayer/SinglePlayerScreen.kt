@@ -72,55 +72,122 @@ fun SinglePlayerScreen() {
         // State to show/hide the metadata dialog
         var showMetadataDialog by remember { mutableStateOf(false) }
 
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp)
-            ) {
-                // Header with title
-                PlayerHeader(title = "Compose Media Player Sample",)
+            val isLandscape = maxWidth > maxHeight
 
-                // Video display area
-                VideoDisplay(
-                    playerState = playerState,
+            if (isLandscape) {
+                // Landscape layout (horizontal)
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                )
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Left side: Video and Timeline
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        // Header with title
+                        PlayerHeader(title = "Compose Media Player Sample",)
 
-                Spacer(modifier = Modifier.height(16.dp))
+                        // Video display area
+                        VideoDisplay(
+                            playerState = playerState,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        )
 
-                // Video timeline and slider
-                TimelineControls(playerState = playerState)
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Primary controls: load video, play/pause, stop
-                PrimaryControls(
-                    playerState = playerState,
-                    videoFileLauncher = { videoFileLauncher.launch() },
-                    onSubtitleDialogRequest = { showSubtitleDialog = true },
-                    onMetadataDialogRequest = { showMetadataDialog = true }
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Secondary controls: volume, loop, video URL input
-                ControlsCard(
-                    playerState = playerState,
-                    videoUrl = videoUrl,
-                    onVideoUrlChange = { videoUrl = it },
-                    onOpenUrl = {
-                        if (videoUrl.isNotEmpty()) {
-                            playerState.openUri(videoUrl)
-                        }
+                        // Video timeline and slider
+                        TimelineControls(playerState = playerState)
                     }
-                )
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    // Right side: Controls
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(top = 48.dp) // Align with video content
+                    ) {
+                        // Primary controls: load video, play/pause, stop
+                        PrimaryControls(
+                            playerState = playerState,
+                            videoFileLauncher = { videoFileLauncher.launch() },
+                            onSubtitleDialogRequest = { showSubtitleDialog = true },
+                            onMetadataDialogRequest = { showMetadataDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Secondary controls: volume, loop, video URL input
+                        ControlsCard(
+                            playerState = playerState,
+                            videoUrl = videoUrl,
+                            onVideoUrlChange = { videoUrl = it },
+                            onOpenUrl = {
+                                if (videoUrl.isNotEmpty()) {
+                                    playerState.openUri(videoUrl)
+                                }
+                            }
+                        )
+                    }
+                }
+            } else {
+                // Portrait layout (vertical)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Header with title
+                    PlayerHeader(title = "Compose Media Player Sample",)
+
+                    // Video display area
+                    VideoDisplay(
+                        playerState = playerState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Video timeline and slider
+                    TimelineControls(playerState = playerState)
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Primary controls: load video, play/pause, stop
+                    PrimaryControls(
+                        playerState = playerState,
+                        videoFileLauncher = { videoFileLauncher.launch() },
+                        onSubtitleDialogRequest = { showSubtitleDialog = true },
+                        onMetadataDialogRequest = { showMetadataDialog = true }
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Secondary controls: volume, loop, video URL input
+                    ControlsCard(
+                        playerState = playerState,
+                        videoUrl = videoUrl,
+                        onVideoUrlChange = { videoUrl = it },
+                        onOpenUrl = {
+                            if (videoUrl.isNotEmpty()) {
+                                playerState.openUri(videoUrl)
+                            }
+                        }
+                    )
+                }
             }
 
             // Animated error Snackbar
