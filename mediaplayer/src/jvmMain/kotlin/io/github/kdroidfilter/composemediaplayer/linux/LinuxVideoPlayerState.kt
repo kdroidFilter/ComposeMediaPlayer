@@ -203,8 +203,29 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
 
     init {
         // GStreamer configuration
+        val audiobin = Bin("audiobin-$instanceId")
+
+        // Create a scaletempo element for pitch-corrected playback speed
+        val scaletempo = ElementFactory.make("scaletempo", "scaletempo-$instanceId")
+
+        // Create the level element for volume monitoring
         val levelElement = ElementFactory.make("level", "level-$instanceId")
-        playbin.set("audio-filter", levelElement)
+
+        // Add elements to audiobin
+        audiobin.addMany(scaletempo, levelElement)
+
+        // Link elements in sequence: scaletempo -> level
+        Element.linkMany(scaletempo, levelElement)
+
+        // Create sink and source ghost pads for the bin
+        val sinkPad = scaletempo.getStaticPad("sink")
+        val srcPad = levelElement.getStaticPad("src")
+
+        audiobin.addPad(GhostPad("sink", sinkPad))
+        audiobin.addPad(GhostPad("src", srcPad))
+
+        // Set the audiobin as the audio filter for playbin
+        playbin.set("audio-filter", audiobin)
 
         // Configuration of the AppSink for video
         // Requesting RGBA (R, G, B, A) without additional conversion.
