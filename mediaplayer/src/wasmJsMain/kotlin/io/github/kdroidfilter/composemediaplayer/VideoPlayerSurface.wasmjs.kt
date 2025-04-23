@@ -31,6 +31,16 @@ import kotlin.math.abs
 
 internal val wasmVideoLogger = Logger.withTag("WasmVideoPlayerSurface").apply { Logger.setMinSeverity(Severity.Warn) }
 
+// Cache mime type mappings for better performance
+private val EXTENSION_TO_MIME_TYPE = mapOf(
+    "mp4" to "video/mp4",
+    "webm" to "video/webm",
+    "ogg" to "video/ogg",
+    "mov" to "video/quicktime",
+    "avi" to "video/x-msvideo",
+    "mkv" to "video/x-matroska"
+)
+
 // Helper functions for common operations
 private fun HTMLVideoElement.safePlay() {
     try {
@@ -84,37 +94,64 @@ private fun HTMLVideoElement.addEventListeners(
 fun Modifier.videoRatioClip(videoRatio: Float?): Modifier = 
     drawBehind { videoRatio?.let { drawVideoRatioRect(it) } }
 
+// Optimized drawing function to reduce calculations during rendering
 private fun DrawScope.drawVideoRatioRect(ratio: Float) {
     val containerWidth = size.width
     val containerHeight = size.height
+    val containerRatio = containerWidth / containerHeight
 
-    val (rectWidth, rectHeight) = if (containerWidth / containerHeight > ratio) {
-        containerHeight * ratio to containerHeight
+    // Avoid division operation when possible
+    val (rectWidth, rectHeight) = if (containerRatio > ratio) {
+        // Container is wider than video
+        val height = containerHeight
+        val width = height * ratio
+        width to height
     } else {
-        containerWidth to containerWidth / ratio
+        // Container is taller than or equal to video
+        val width = containerWidth
+        val height = width / ratio
+        width to height
     }
 
+    // Calculate offset only once
+    val xOffset = (containerWidth - rectWidth) / 2f
+    val yOffset = (containerHeight - rectHeight) / 2f
+
+    // Use pre-calculated values
     drawRect(
         color = Color.Transparent,
         blendMode = BlendMode.Clear,
-        topLeft = Offset((containerWidth - rectWidth) / 2f, (containerHeight - rectHeight) / 2f),
+        topLeft = Offset(xOffset, yOffset),
         size = Size(rectWidth, rectHeight)
     )
 }
 
 @Composable
 private fun SubtitleOverlay(playerState: VideoPlayerState) {
-    if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
-        ComposeSubtitleLayer(
-            currentTimeMs = (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong(),
-            durationMs = playerState.durationText.toTimeMs(),
-            isPlaying = playerState.isPlaying,
-            subtitleTrack = playerState.currentSubtitleTrack,
-            subtitlesEnabled = playerState.subtitlesEnabled,
-            textStyle = playerState.subtitleTextStyle,
-            backgroundColor = playerState.subtitleBackgroundColor
-        )
+    // Early return if subtitles are disabled or no track is selected
+    if (!playerState.subtitlesEnabled || playerState.currentSubtitleTrack == null) {
+        return
     }
+
+    // Cache duration calculation to avoid repeated conversions
+    val durationMs = remember(playerState.durationText) { 
+        playerState.durationText.toTimeMs() 
+    }
+
+    // Calculate current time only once per composition
+    val currentTimeMs = remember(playerState.sliderPos, durationMs) {
+        ((playerState.sliderPos / 1000f) * durationMs).toLong()
+    }
+
+    ComposeSubtitleLayer(
+        currentTimeMs = currentTimeMs,
+        durationMs = durationMs,
+        isPlaying = playerState.isPlaying,
+        subtitleTrack = playerState.currentSubtitleTrack,
+        subtitlesEnabled = true, // We already checked this above
+        textStyle = playerState.subtitleTextStyle,
+        backgroundColor = playerState.subtitleBackgroundColor
+    )
 }
 
 
@@ -210,17 +247,13 @@ actual fun VideoPlayerSurface(
             }
         }
 
-        // Handle property updates
-        LaunchedEffect(playerState.volume) {
-            videoElement?.volume = playerState.volume.toDouble()
-        }
-
-        LaunchedEffect(playerState.loop) {
-            videoElement?.loop = playerState.loop
-        }
-
-        LaunchedEffect(playerState.playbackSpeed) {
-            videoElement?.safeSetPlaybackRate(playerState.playbackSpeed)
+        // Handle property updates - combined for better performance
+        LaunchedEffect(playerState.volume, playerState.loop, playerState.playbackSpeed) {
+            videoElement?.let { video ->
+                video.volume = playerState.volume.toDouble()
+                video.loop = playerState.loop
+                video.safeSetPlaybackRate(playerState.playbackSpeed)
+            }
         }
 
         // State for CORS mode changes
@@ -257,20 +290,27 @@ actual fun VideoPlayerSurface(
             }
         }
 
-        // Handle seeking
+        // Handle seeking - optimized to reduce job creation
         LaunchedEffect(playerState.sliderPos) {
             if (!playerState.userDragging && playerState.hasMedia) {
-                val job = scope.launch {
-                    val duration = videoElement?.duration?.toFloat() ?: 0f
+                // Cancel previous seek job if it exists
+                playerState.seekJob?.cancel()
+
+                // Create a new seek job only if needed
+                videoElement?.let { video ->
+                    val duration = video.duration.toFloat()
                     if (duration > 0f) {
                         val newTime = (playerState.sliderPos / VideoPlayerState.PERCENTAGE_MULTIPLIER) * duration
-                        if (abs((videoElement?.currentTime ?: 0.0) - newTime) > 0.5) {
-                            videoElement?.safeSetCurrentTime(newTime.toDouble())
+                        val currentTime = video.currentTime
+
+                        // Only seek if the difference is significant (> 0.5 seconds)
+                        if (abs(currentTime - newTime) > 0.5) {
+                            playerState.seekJob = scope.launch {
+                                video.safeSetCurrentTime(newTime.toDouble())
+                            }
                         }
                     }
                 }
-                playerState.seekJob?.cancel()
-                playerState.seekJob = job
             }
         }
 
@@ -358,27 +398,29 @@ private fun VideoContent(
                                 duration = (video.duration * 1000).toLong()
                                 frameRate = 30.0f // Default value
 
-                                // Try to get mimeType and title from the video source
+                                // Try to get mimeType and title from the video source - optimized
                                 val src = video.src
                                 if (src.isNotEmpty()) {
-                                    val extension = src.substringAfterLast('.', "").lowercase()
-                                    mimeType = when (extension) {
-                                        "mp4" -> "video/mp4"
-                                        "webm" -> "video/webm"
-                                        "ogg" -> "video/ogg"
-                                        "mov" -> "video/quicktime"
-                                        "avi" -> "video/x-msvideo"
-                                        "mkv" -> "video/x-matroska"
-                                        else -> null
+                                    // Optimize extension extraction
+                                    val lastDotIndex = src.lastIndexOf('.')
+                                    if (lastDotIndex > 0 && lastDotIndex < src.length - 1) {
+                                        val extension = src.substring(lastDotIndex + 1).lowercase()
+                                        // Use map for faster lookup
+                                        mimeType = EXTENSION_TO_MIME_TYPE[extension]
                                     }
 
-                                    // Extract title from filename
+                                    // Extract title from filename - optimized
                                     try {
-                                        val filename = src.substringAfterLast('/', "")
-                                            .substringAfterLast('\\', "")
-                                            .substringBeforeLast('.', "")
-                                        if (filename.isNotEmpty()) {
-                                            title = filename
+                                        val lastSlashIndex = src.lastIndexOf('/')
+                                        val lastBackslashIndex = src.lastIndexOf('\\')
+                                        val startIndex = maxOf(lastSlashIndex, lastBackslashIndex) + 1
+
+                                        if (startIndex > 0 && startIndex < src.length) {
+                                            val endIndex = if (lastDotIndex > startIndex) lastDotIndex else src.length
+                                            val filename = src.substring(startIndex, endIndex)
+                                            if (filename.isNotEmpty()) {
+                                                title = filename
+                                            }
                                         }
                                     } catch (e: Exception) {
                                         wasmVideoLogger.w { "Failed to extract title from filename: ${e.message}" }
@@ -463,7 +505,7 @@ fun setupVideoElement(
             if (!success) {
                 corsErrorDetected = true
             } else {
-                audioAnalyzer?.let { analyzer ->
+                audioAnalyzer.let { analyzer ->
                     playerState.metadata.audioChannels = analyzer.audioChannels
                     playerState.metadata.audioSampleRate = analyzer.audioSampleRate
                 }
@@ -489,38 +531,51 @@ fun setupVideoElement(
         )
     )
 
-    // Handle suspend event separately (has a condition)
-    video.addEventListener("suspend") {
-        scope.launch {
-            if (video.readyState >= 3) {
-                playerState._isLoading = false
-            }
-        }
-    }
+    // Optimize event handling by combining related events
+    // Map of events that can set loading state to false based on conditions
+    val conditionalLoadingEvents = mapOf(
+        "suspend" to { video.readyState >= 3 },
+        "loadedmetadata" to { true }
+    )
 
-    // Handle metadata and analyzer initialization
-    video.addEventListener("loadedmetadata") {
-        initAudioAnalyzer()
-        scope.launch {
-            playerState._isLoading = false
-            if (playerState.playbackSpeed != 1.0f) {
-                video.safeSetPlaybackRate(playerState.playbackSpeed)
+    // Add conditional loading event listeners
+    conditionalLoadingEvents.forEach { (event, condition) ->
+        video.addEventListener(event) {
+            // For loadedmetadata, also initialize audio analyzer
+            if (event == "loadedmetadata") {
+                initAudioAnalyzer()
             }
-            if (playerState.isPlaying) {
-                video.safePlay()
+
+            // Single coroutine launch for all events
+            scope.launch {
+                if (condition()) {
+                    playerState._isLoading = false
+                }
+
+                // Additional actions for loadedmetadata
+                if (event == "loadedmetadata") {
+                    if (playerState.playbackSpeed != 1.0f) {
+                        video.safeSetPlaybackRate(playerState.playbackSpeed)
+                    }
+                    if (playerState.isPlaying) {
+                        video.safePlay()
+                    }
+                }
             }
         }
     }
 
     // Handle play event and audio level updates
+    var audioLevelJob: Job? = null
+
     video.addEventListener("play") {
         if (enableAudioDetection && !corsErrorDetected && initializationJob?.isActive != true) {
             initAudioAnalyzer()
         }
 
-        if (enableAudioDetection) {
-            scope.launch {
-                while (true) {
+        if (enableAudioDetection && audioLevelJob?.isActive != true) {
+            audioLevelJob = scope.launch {
+                while (video.paused.not()) {
                     val (left, right) = if (!corsErrorDetected) {
                         audioAnalyzer?.getAudioLevels() ?: (0f to 0f)
                     } else {
@@ -531,6 +586,12 @@ fun setupVideoElement(
                 }
             }
         }
+    }
+
+    // Cancel audio level job when paused
+    video.addEventListener("pause") {
+        audioLevelJob?.cancel()
+        audioLevelJob = null
     }
 
     // Handle errors
