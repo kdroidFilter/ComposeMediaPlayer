@@ -107,7 +107,7 @@ private fun SubtitleOverlay(playerState: VideoPlayerState) {
 
 @Composable
 actual fun VideoPlayerSurface(
-    playerState: VideoPlayerState, 
+    playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
     overlay: @Composable () -> Unit
@@ -410,7 +410,7 @@ private fun VideoContent(
         if (playerState.isFullscreen) {
             FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(Color.Black), 
+                    modifier = Modifier.fillMaxSize().background(Color.Black),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
@@ -435,8 +435,8 @@ private fun VideoContent(
             HtmlView(
                 factory = {
                     createVideoElement(useCors)
-                }, 
-                modifier = modifier, 
+                },
+                modifier = modifier,
                 update = { video ->
                     onVideoElementChange(video)
 
@@ -797,64 +797,3 @@ private fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
     }
 }
 
-/**
- * Manages fullscreen functionality for the video player
- */
-object FullscreenManager {
-    /**
-     * Exit fullscreen if document is in fullscreen mode
-     */
-    fun exitFullscreen() {
-        if (document.fullscreenElement != null) {
-            document.exitFullscreen()
-        }
-    }
-
-    /**
-     * Apply fullscreen styles to the video element
-     * This function is kept for backward compatibility but should not be called directly.
-     * Instead, use the fullscreenStyleCallback in VideoPlayerState.
-     */
-    suspend fun applyVideoStyles() {
-        val video = document.querySelector("video") as? HTMLVideoElement
-        delay(501)
-        video?.let {
-            it.style.width = "100%"
-            it.style.height = "100%"
-            it.style.margin = "0px"
-            it.style.left = "0"
-            it.style.top = "0"
-        }
-    }
-
-    /**
-     * Request fullscreen mode
-     */
-    fun requestFullScreen() {
-        val document = document.documentElement
-        document?.requestFullscreen()
-    }
-
-    /**
-     * Toggle fullscreen mode
-     * @param isCurrentlyFullscreen Whether the player is currently in fullscreen mode
-     * @param onFullscreenChange Callback to update the fullscreen state
-     */
-    fun toggleFullscreen(isCurrentlyFullscreen: Boolean, onFullscreenChange: (Boolean) -> Unit) {
-        if (!isCurrentlyFullscreen) {
-            requestFullScreen()
-            CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
-                delay(500)
-                applyVideoStyles()
-            }
-        } else {
-            exitFullscreen()
-        }
-        onFullscreenChange(!isCurrentlyFullscreen)
-    }
-}
-
-// Backward compatibility functions
-fun exitFullscreen() = FullscreenManager.exitFullscreen()
-suspend fun applyVideoStyles() = FullscreenManager.applyVideoStyles()
-fun requestFullScreen() = FullscreenManager.requestFullScreen()

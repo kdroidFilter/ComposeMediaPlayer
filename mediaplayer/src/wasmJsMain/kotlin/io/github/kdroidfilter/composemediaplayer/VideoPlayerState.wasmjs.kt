@@ -14,6 +14,7 @@ import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import kotlinx.io.IOException
 import org.w3c.dom.url.URL
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
@@ -31,6 +32,12 @@ actual open class VideoPlayerState {
     // Coroutine scope for managing async operations
     private val playerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var lastUpdateTime = TimeSource.Monotonic.markNow()
+
+    // Throttling for control changes
+    private var lastVolumeChangeTime = TimeSource.Monotonic.markNow()
+    private var lastSpeedChangeTime = TimeSource.Monotonic.markNow()
+    private var pendingVolumeChange: Job? = null
+    private var pendingSpeedChange: Job? = null
 
     // Source URI of the current media
     private var _sourceUri by mutableStateOf<String?>(null)
@@ -72,8 +79,13 @@ actual open class VideoPlayerState {
     actual var volume: Float
         get() = _volume
         set(value) {
-            _volume = value.coerceIn(0f, 1f)
+            val newValue = value.coerceIn(0f, 1f)
+            if (_volume != newValue) {
+                _volume = newValue
+                applyVolumeChangeWithThrottle(newValue)
+            }
         }
+
     actual var sliderPos by mutableStateOf(0.0f)
     actual var userDragging by mutableStateOf(false)
     actual var loop by mutableStateOf(false)
@@ -82,7 +94,11 @@ actual open class VideoPlayerState {
     actual var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
-            _playbackSpeed = value.coerceIn(0.5f, 2.0f)
+            val newValue = value.coerceIn(0.5f, 2.0f)
+            if (_playbackSpeed != newValue) {
+                _playbackSpeed = newValue
+                applyPlaybackSpeedWithThrottle(newValue)
+            }
         }
 
     actual var isFullscreen by mutableStateOf(false)
@@ -112,6 +128,16 @@ actual open class VideoPlayerState {
     var positionRecalculationCallback: (() -> Unit)? = null
 
     /**
+     * Callback to apply volume changes to the underlying media player
+     */
+    var applyVolumeCallback: ((Float) -> Unit)? = null
+
+    /**
+     * Callback to apply playback speed changes to the underlying media player
+     */
+    var applyPlaybackSpeedCallback: ((Float) -> Unit)? = null
+
+    /**
      * Forces recalculation of the HTML view position.
      * This is useful when the layout changes and the HTML view needs to be repositioned.
      */
@@ -119,10 +145,57 @@ actual open class VideoPlayerState {
         positionRecalculationCallback?.invoke()
     }
 
+    /**
+     * Applies volume changes with throttling to prevent performance issues
+     */
+    private fun applyVolumeChangeWithThrottle(value: Float) {
+        val now = TimeSource.Monotonic.markNow()
+        val timeSinceLastChange = now - lastVolumeChangeTime
+
+        // Cancel any pending volume change
+        pendingVolumeChange?.cancel()
+
+        if (timeSinceLastChange < 100.milliseconds) {
+            // If changes are coming too rapidly, schedule them with a delay
+            pendingVolumeChange = playerScope.launch {
+                delay(100.milliseconds.minus(timeSinceLastChange).inWholeMilliseconds)
+                applyVolumeCallback?.invoke(value)
+                lastVolumeChangeTime = TimeSource.Monotonic.markNow()
+            }
+        } else {
+            // Apply immediately if we're not throttling
+            applyVolumeCallback?.invoke(value)
+            lastVolumeChangeTime = now
+        }
+    }
+
+    /**
+     * Applies playback speed changes with throttling to prevent performance issues
+     */
+    private fun applyPlaybackSpeedWithThrottle(value: Float) {
+        val now = TimeSource.Monotonic.markNow()
+        val timeSinceLastChange = now - lastSpeedChangeTime
+
+        // Cancel any pending speed change
+        pendingSpeedChange?.cancel()
+
+        if (timeSinceLastChange < 100.milliseconds) {
+            // If changes are coming too rapidly, schedule them with a delay
+            pendingSpeedChange = playerScope.launch {
+                delay(100.milliseconds.minus(timeSinceLastChange).inWholeMilliseconds)
+                applyPlaybackSpeedCallback?.invoke(value)
+                lastSpeedChangeTime = TimeSource.Monotonic.markNow()
+            }
+        } else {
+            // Apply immediately if we're not throttling
+            applyPlaybackSpeedCallback?.invoke(value)
+            lastSpeedChangeTime = now
+        }
+    }
 
     /**
      * Selects a subtitle track and enables subtitles.
-     * 
+     *
      * @param track The subtitle track to select, or null to disable subtitles
      */
     actual fun selectSubtitleTrack(track: SubtitleTrack?) {
@@ -140,7 +213,7 @@ actual open class VideoPlayerState {
 
     /**
      * Opens a media source from the given URI.
-     * 
+     *
      * @param uri The URI of the media to open
      */
     actual fun openUri(uri: String) {
@@ -171,7 +244,7 @@ actual open class VideoPlayerState {
 
     /**
      * Opens a media file.
-     * 
+     *
      * @param file The file to open
      */
     actual fun openFile(file: PlatformFile) {
@@ -218,7 +291,7 @@ actual open class VideoPlayerState {
 
     /**
      * Seeks to a specific position in the media.
-     * 
+     *
      * @param value The position to seek to, as a percentage (0-1000)
      */
     actual fun seekTo(value: Float) {
@@ -244,7 +317,7 @@ actual open class VideoPlayerState {
 
     /**
      * Sets the error state.
-     * 
+     *
      * @param error The error to set
      */
     fun setError(error: VideoPlayerError) {
@@ -253,7 +326,7 @@ actual open class VideoPlayerState {
 
     /**
      * Updates the audio level indicators.
-     * 
+     *
      * @param left The left channel audio level
      * @param right The right channel audio level
      */
@@ -264,7 +337,7 @@ actual open class VideoPlayerState {
 
     /**
      * Updates the position and duration display.
-     * 
+     *
      * @param currentTime The current playback position in seconds
      * @param duration The total duration of the media in seconds
      * @param forceUpdate If true, bypasses the rate limiting check (useful for tests)
@@ -280,8 +353,8 @@ actual open class VideoPlayerState {
             }
 
             // Check if we're very close to the end of the video
-            val isNearEnd = duration > 0f && !duration.isNaN() && !currentTime.isNaN() && 
-                            (duration - currentTime < threshold)
+            val isNearEnd = duration > 0f && !duration.isNaN() && !currentTime.isNaN() &&
+                    (duration - currentTime < threshold)
 
             // If we're near the end, use the duration as the current time
             val displayTime = if (isNearEnd) duration else currentTime
@@ -303,7 +376,7 @@ actual open class VideoPlayerState {
 
     /**
      * Callback for time update events from the media player.
-     * 
+     *
      * @param currentTime The current playback position in seconds
      * @param duration The total duration of the media in seconds
      * @param forceUpdate If true, bypasses the rate limiting check (useful for tests)
@@ -316,6 +389,8 @@ actual open class VideoPlayerState {
      * Disposes of resources used by the player.
      */
     actual fun dispose() {
+        pendingVolumeChange?.cancel()
+        pendingSpeedChange?.cancel()
         playerScope.cancel()
     }
 
@@ -326,7 +401,7 @@ actual open class VideoPlayerState {
 
 /**
  * Converts a PlatformFile to a URI string that can be used by the media player.
- * 
+ *
  * @return A URI string representing the file
  */
 fun PlatformFile.toUriString(): String {
