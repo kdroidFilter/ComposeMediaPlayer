@@ -1,14 +1,17 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -16,6 +19,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 
 @UnstableApi
@@ -26,43 +30,42 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit
 ) {
-    val context = LocalContext.current
-
-    // Handle fullscreen mode
-    val currentContext = rememberUpdatedState(context)
-    val currentPlayerState = rememberUpdatedState(playerState)
-
-    LaunchedEffect(playerState.isFullscreen) {
-        val ctx = currentContext.value
-        val state = currentPlayerState.value
-
-        // Only launch fullscreen activity if we're not already in a FullscreenPlayerActivity
-        if (state.isFullscreen && ctx !is FullscreenPlayerActivity) {
-            // Register the player state and launch fullscreen activity
-            VideoPlayerStateRegistry.registerState(state)
-            FullscreenPlayerActivity.launch(ctx, state)
-        }
-    }
-
-    // Clean up when leaving composition
-    DisposableEffect(Unit) {
-        onDispose {
-            // If we're in fullscreen mode, exit it
-            if (playerState.isFullscreen) {
-                playerState.isFullscreen = false
-                VideoPlayerStateRegistry.clearRegisteredState()
+    if (playerState.isFullscreen) {
+        // Use FullScreenLayout for fullscreen mode
+        FullScreenLayout(
+            modifier = Modifier,
+            onDismissRequest = { playerState.toggleFullscreen() }
+        ) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+                VideoPlayerContent(
+                    playerState = playerState,
+                    modifier = Modifier.fillMaxHeight(),
+                    overlay = overlay
+                )
             }
         }
+    } else {
+        // Regular non-fullscreen display
+        VideoPlayerContent(
+            playerState = playerState,
+            modifier = modifier,
+            overlay = overlay
+        )
     }
+}
 
-    // In the original activity, only show the video player when not in fullscreen mode
-    // In the FullscreenPlayerActivity, always show the video player
+@UnstableApi
+@Composable
+private fun VideoPlayerContent(
+    playerState: VideoPlayerState,
+    modifier: Modifier,
+    overlay: @Composable () -> Unit
+) {
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        val isFullscreenActivity = context is FullscreenPlayerActivity
-        if (playerState.hasMedia && (isFullscreenActivity || !playerState.isFullscreen)) {
+        if (playerState.hasMedia) {
             AndroidView(
                 modifier =
                     Modifier
@@ -78,16 +81,7 @@ actual fun VideoPlayerSurface(
                         setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
-                        // Set resize mode based on context and contentScale
-                        resizeMode = if (context is FullscreenPlayerActivity) {
-                            // In fullscreen mode, fill the screen
-                            AspectRatioFrameLayout.RESIZE_MODE_FILL
-                        } else {
-                            // In normal mode, use the provided contentScale
-                            // Note: The actual implementation will be handled by someone else as per the issue description
-                            // For now, we just use RESIZE_MODE_FIT as a default
-                            AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        }
+                        AspectRatioFrameLayout.RESIZE_MODE_FIT
 
                         // Disable native subtitle view since we're using Compose-based subtitles
                         subtitleView?.visibility = android.view.View.GONE
@@ -97,8 +91,7 @@ actual fun VideoPlayerSurface(
                     }
                 },
                 update = { playerView ->
-                    // No need to update anything here since we're only showing
-                    // the video player when not in fullscreen mode
+                    // Update is handled by the player state
                 }
             )
 
