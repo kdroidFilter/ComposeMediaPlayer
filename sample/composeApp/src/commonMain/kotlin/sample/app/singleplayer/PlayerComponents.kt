@@ -54,7 +54,6 @@ fun MetadataRow(label: String, value: String) {
 @Composable
 fun PlayerHeader(
     title: String,
-    isLoading: Boolean
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -68,9 +67,6 @@ fun PlayerHeader(
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(bottom = 16.dp)
         )
-        if (isLoading) {
-            CircularProgressIndicator()
-        }
     }
 }
 

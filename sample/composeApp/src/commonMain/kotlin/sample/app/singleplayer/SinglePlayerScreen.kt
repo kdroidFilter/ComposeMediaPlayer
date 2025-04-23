@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.BoxWithConstraints
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.getUri
@@ -81,11 +82,8 @@ fun SinglePlayerScreen() {
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
-                // Header with title and loading indicator
-                PlayerHeader(
-                    title = "Compose Media Player",
-                    isLoading = playerState.isLoading
-                )
+                // Header with title
+                PlayerHeader(title = "Compose Media Player Sample",)
 
                 // Video display area
                 VideoDisplay(
