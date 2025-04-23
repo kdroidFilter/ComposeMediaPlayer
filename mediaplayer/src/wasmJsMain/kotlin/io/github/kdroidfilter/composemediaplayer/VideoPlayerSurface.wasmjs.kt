@@ -231,9 +231,7 @@ actual fun VideoPlayerSurface(
                     video.src = sourceUri
                     video.load()
 
-                    if (playerState.playbackSpeed != 1.0f) {
-                        video.safeSetPlaybackRate(playerState.playbackSpeed)
-                    }
+                    // Don't set playback speed directly, it will be handled by the applyPlaybackSpeedCallback
 
                     if (playerState.isPlaying) video.safePlay() else video.safePause()
                 }
@@ -248,14 +246,14 @@ actual fun VideoPlayerSurface(
         }
 
         // Handle property updates - combined for better performance
-        // Store pending volume change to apply after seeking is complete
+        // Store pending changes to apply after seeking is complete
         var pendingVolumeChange by remember { mutableStateOf<Double?>(null) }
+        var pendingPlaybackSpeedChange by remember { mutableStateOf<Float?>(null) }
 
-        LaunchedEffect(playerState.loop, playerState.playbackSpeed) {
+        LaunchedEffect(playerState.loop) {
             videoElement?.let { video ->
-                // Always update these properties immediately
+                // Always update loop property immediately
                 video.loop = playerState.loop
-                video.safeSetPlaybackRate(playerState.playbackSpeed)
             }
         }
 
@@ -282,10 +280,33 @@ actual fun VideoPlayerSurface(
                 pendingVolumeChange = playerState.volume.toDouble()
             }
 
+            // Set the playback speed callback to respect seeking state
+            playerState.applyPlaybackSpeedCallback = { value ->
+                if (playerState._isLoading) {
+                    // Store the playback speed change to apply after seeking is complete
+                    pendingPlaybackSpeedChange = value
+                } else {
+                    // Apply playback speed change immediately if not seeking
+                    video.safeSetPlaybackRate(value)
+                    pendingPlaybackSpeedChange = null
+                }
+            }
+
+            // Apply current playback speed immediately if needed
+            if (!playerState._isLoading) {
+                video.safeSetPlaybackRate(playerState.playbackSpeed)
+            } else {
+                pendingPlaybackSpeedChange = playerState.playbackSpeed
+            }
+
             val seekedListener: (Event) -> Unit = {
                 pendingVolumeChange?.let { volume ->
                     video.volume = volume
                     pendingVolumeChange = null
+                }
+                pendingPlaybackSpeedChange?.let { speed ->
+                    video.safeSetPlaybackRate(speed)
+                    pendingPlaybackSpeedChange = null
                 }
             }
 
@@ -294,6 +315,7 @@ actual fun VideoPlayerSurface(
             onDispose {
                 video.removeEventListener("seeked", seekedListener)
                 playerState.applyVolumeCallback = null
+                playerState.applyPlaybackSpeedCallback = null
             }
         }
 
@@ -595,9 +617,7 @@ fun setupVideoElement(
 
                 // Additional actions for loadedmetadata
                 if (event == "loadedmetadata") {
-                    if (playerState.playbackSpeed != 1.0f) {
-                        video.safeSetPlaybackRate(playerState.playbackSpeed)
-                    }
+                    // Don't set playback speed directly, it will be handled by the applyPlaybackSpeedCallback
                     if (playerState.isPlaying) {
                         video.safePlay()
                     }
@@ -662,10 +682,9 @@ fun setupVideoElement(
     }
 
     // Set initial properties
-    // Don't set volume here, it will be handled by the applyVolumeCallback in the DisposableEffect
+    // Don't set volume or playback speed here, they will be handled by the callbacks in the DisposableEffect
     // This avoids potential race conditions with the seeking state
     video.loop = playerState.loop
-    video.safeSetPlaybackRate(playerState.playbackSpeed)
 
     // Play if needed
     if (video.src.isNotEmpty() && playerState.isPlaying) {
