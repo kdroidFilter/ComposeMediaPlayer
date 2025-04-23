@@ -342,19 +342,20 @@ fun VolumeAndPlaybackControls(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             ) {
-                Text(
-                    text = "Speed",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.width(50.dp)
+                Icon(
+                    imageVector = Icons.Default.Speed,
+                    contentDescription = "Playback Speed",
+                    modifier = Modifier.width(50.dp),
+                    tint = MaterialTheme.colorScheme.primary
                 )
                 Slider(
                     value = playerState.playbackSpeed,
                     onValueChange = { playerState.playbackSpeed = it },
                     valueRange = 0.5f..2.0f,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.width(100.dp)
                 )
                 Text(
-                    text = "${playerState.playbackSpeed}x",
+                    text = "${(playerState.playbackSpeed * 10).toInt() / 10.0}x",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.width(40.dp)
                 )
