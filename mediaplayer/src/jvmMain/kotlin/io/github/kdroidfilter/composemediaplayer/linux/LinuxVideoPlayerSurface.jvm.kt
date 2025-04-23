@@ -4,9 +4,13 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
@@ -41,17 +45,56 @@ fun LinuxVideoPlayerSurface(
     overlay: @Composable () -> Unit = {},
     isInFullscreenWindow: Boolean = false
 ) {
+
+   val canvasModifier : Modifier = when (contentScale) {
+        // Conserve le ratio, occupe au mieux la hauteur du parent
+        ContentScale.Fit ->
+            Modifier
+                .aspectRatio(playerState.aspectRatio)
+                .fillMaxHeight()
+
+        // Remplit tout l’espace et découpe ce qui dépasse
+        ContentScale.Crop ->
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer { clip = true }
+                // important pour masquer le débordement
+
+        // Comme Fit mais ne dépasse jamais la taille dispo ; centre l’image
+        ContentScale.Inside ->
+            Modifier
+                .aspectRatio(playerState.aspectRatio)
+                .wrapContentSize(Alignment.Center)
+
+        // Pas de redimensionnement : on affiche à la taille intrinsèque du bitmap
+        ContentScale.None ->
+            Modifier
+
+        // Étire l’image pour remplir tout le conteneur, sans tenir compte du ratio
+        ContentScale.FillBounds ->
+            Modifier.fillMaxSize()
+
+        // Remplit toute la hauteur, ratio conservé
+        ContentScale.FillHeight ->
+            Modifier
+                .fillMaxHeight()
+                .aspectRatio(playerState.aspectRatio)
+
+        // Remplit toute la largeur, ratio conservé
+        ContentScale.FillWidth ->
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(playerState.aspectRatio)
+
+       else -> Modifier
+   }
+
     Box(
-        modifier = modifier.onSizeChanged {
-            // If needed, add resize handling here
-        },
         contentAlignment = Alignment.Center
     ) {
         if (playerState.hasMedia) {
             Canvas(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .aspectRatio(playerState.aspectRatio)
+                modifier = canvasModifier
             ) {
                 // Draw the current frame if available
                 playerState.currentFrame?.let { frame ->
@@ -67,8 +110,8 @@ fun LinuxVideoPlayerSurface(
             // Add Compose-based subtitle layer
             // Always render the subtitle layer, but let it handle visibility internally
             // This ensures it's properly recomposed when subtitles are enabled during playback
-            val currentTimeMs = (playerState.sliderPos / 1000f * 
-                playerState.durationText.toTimeMs()).toLong()
+            val currentTimeMs = (playerState.sliderPos / 1000f *
+                    playerState.durationText.toTimeMs()).toLong()
 
             // Calculate duration in milliseconds
             val durationMs = playerState.durationText.toTimeMs()
