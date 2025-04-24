@@ -551,10 +551,24 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     continue
                 }
 
-                if (sharedFrameBuffer == null || sharedFrameBuffer!!.size < frameBufferSize) {
+                // For 4K videos, we need to be careful with memory allocation
+                // Only allocate a new buffer if absolutely necessary
+                if (sharedFrameBuffer == null) {
+                    // First allocation
+                    sharedFrameBuffer = ByteArray(frameBufferSize)
+                } else if (sharedFrameBuffer!!.size < frameBufferSize) {
+                    // Buffer is too small, release old one before allocating new one
+                    sharedFrameBuffer = null
+                    System.gc() // Hint to garbage collector
+                    delay(10) // Give GC a chance to run
                     sharedFrameBuffer = ByteArray(frameBufferSize)
                 }
-                val sharedBuffer = sharedFrameBuffer!!
+
+                // Use the shared buffer with null safety check
+                val sharedBuffer = sharedFrameBuffer ?: run {
+                    // Fallback if buffer is null (shouldn't happen)
+                    ByteArray(frameBufferSize).also { sharedFrameBuffer = it }
+                }
 
                 try {
                     val buffer = ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
@@ -778,7 +792,20 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     isLoading = true
                     videoJob?.cancelAndJoin()
                     clearFrameChannel()
-                    sharedFrameBuffer = ByteArray(frameBufferSize)
+
+                    // For 4K videos, we need to be careful with memory allocation
+                    // Only allocate a new buffer if absolutely necessary
+                    if (sharedFrameBuffer == null) {
+                        // First allocation
+                        sharedFrameBuffer = ByteArray(frameBufferSize)
+                    } else if (sharedFrameBuffer!!.size < frameBufferSize) {
+                        // Buffer is too small, release old one before allocating new one
+                        sharedFrameBuffer = null
+                        System.gc() // Hint to garbage collector
+                        delay(10) // Give GC a chance to run
+                        sharedFrameBuffer = ByteArray(frameBufferSize)
+                    }
+                    // If buffer exists and is large enough, reuse it
 
                     val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
                     var hr = player.SeekMedia(instance, targetPos)
@@ -815,16 +842,26 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     /**
      * Called when the player surface is resized
      * Temporarily pauses frame processing to avoid artifacts during resize
+     * For 4K videos, we need a longer delay to prevent memory pressure
      */
     fun onResized() {
         isResizing.set(true)
         scope.launch {
             try {
+                // Clear frame channel to stop processing frames during resize
                 clearFrameChannel()
+
+                // Release shared frame buffer to reduce memory pressure during resize
+                // This is especially important for 4K videos
+                sharedFrameBuffer = null
+
+                // Force garbage collection to free up memory
+                System.gc()
             } finally {
                 resizeJob?.cancel()
                 resizeJob = scope.launch {
-                    delay(200)
+                    // Increased delay for 4K videos (was 200ms)
+                    delay(500)
                     isResizing.set(false)
                 }
             }
@@ -908,13 +945,16 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     /**
      * Waits if the player is currently resizing
+     * Uses a longer delay for 4K videos to reduce memory pressure
      * 
      * @return True if resizing is in progress and we waited, false otherwise
      */
     private suspend fun waitIfResizing(): Boolean {
         if (isResizing.get()) {
             try {
-                delay(100)
+                // Increased delay for 4K videos (was 100ms)
+                // This helps reduce memory pressure during resizing
+                delay(200)
             } catch (e: CancellationException) {
                 throw e
             }
