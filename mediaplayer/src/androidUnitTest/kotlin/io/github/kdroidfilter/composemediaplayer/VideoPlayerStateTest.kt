@@ -207,7 +207,6 @@ class VideoPlayerStateTest {
 
         // Initially metadata fields should be null
         assertEquals(null, playerState.metadata.title)
-        assertEquals(null, playerState.metadata.artist)
         assertEquals(null, playerState.metadata.duration)
         assertEquals(null, playerState.metadata.width)
         assertEquals(null, playerState.metadata.height)

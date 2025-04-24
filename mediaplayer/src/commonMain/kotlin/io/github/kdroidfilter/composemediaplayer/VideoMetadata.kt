@@ -12,7 +12,6 @@ import androidx.compose.runtime.Stable
  * during playback or for insights in media management systems.
  *
  * @property title The title of the video, if available.
- * @property artist The artist or creator of the video, if available.
  * @property duration The length of the video in milliseconds, if known.
  * @property width The width of the video in pixels, if available.
  * @property height The height of the video in pixels, if available.
@@ -25,7 +24,6 @@ import androidx.compose.runtime.Stable
 @Stable
 data class VideoMetadata(
     var title: String? = null,
-    var artist: String? = null,
     var duration: Long? = null, // Duration in milliseconds
     var width: Int? = null,
     var height: Int? = null,
@@ -42,7 +40,6 @@ data class VideoMetadata(
      */
     fun isAllNull(): Boolean {
         return title == null &&
-               artist == null &&
                duration == null &&
                width == null &&
                height == null &&

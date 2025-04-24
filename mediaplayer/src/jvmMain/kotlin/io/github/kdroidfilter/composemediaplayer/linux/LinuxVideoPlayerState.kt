@@ -372,16 +372,6 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                         }
 
                         try {
-                            // Try to extract artist
-                            val artist = tagList.getString("artist", 0)
-                            if (artist != null) {
-                                metadata.artist = artist
-                            }
-                        } catch (_: Exception) {
-                            // Ignore errors when getting artist
-                        }
-
-                        try {
                             // Try to extract bitrate
                             val bitrate = tagList.getString("bitrate", 0)
                             if (bitrate != null) {
@@ -700,7 +690,6 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
 
             // Reset metadata for the new media
             metadata.title = null
-            metadata.artist = null
             metadata.duration = null
             metadata.width = null
             metadata.height = null

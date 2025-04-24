@@ -427,9 +427,6 @@ fun MetadataDisplay(
                 playerState.metadata.title?.let {
                     MetadataRow("Title", it)
                 }
-                playerState.metadata.artist?.let {
-                    MetadataRow("Artist", it)
-                }
                 playerState.metadata.width?.let { width ->
                     playerState.metadata.height?.let { height ->
                         MetadataRow("Resolution", "$width × $height")

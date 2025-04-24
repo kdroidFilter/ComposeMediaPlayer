@@ -481,9 +481,8 @@ actual open class VideoPlayerState {
     private fun extractMediaItemMetadata(mediaItem: MediaItem?) {
         try {
             mediaItem?.mediaMetadata?.let { metadata ->
-                // Extract title and artist if available
+                // Extract title if available
                 metadata.title?.toString()?.let { _metadata.title = it }
-                metadata.artist?.toString()?.let { _metadata.artist = it }
             }
         } catch (e: Exception) {
             androidVideoLogger.e { "Error extracting media item metadata: ${e.message}" }

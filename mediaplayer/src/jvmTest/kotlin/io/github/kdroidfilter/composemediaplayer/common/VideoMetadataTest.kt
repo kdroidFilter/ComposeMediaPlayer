@@ -21,7 +21,6 @@ class VideoMetadataTest {
         // Verify the metadata is initialized with null values
         assertNotNull(metadata)
         assertNull(metadata.title)
-        assertNull(metadata.artist)
         assertNull(metadata.duration)
         assertNull(metadata.width)
         assertNull(metadata.height)
@@ -39,7 +38,6 @@ class VideoMetadataTest {
     fun testCreateVideoMetadataWithValues() {
         val metadata = VideoMetadata(
             title = "Test Title",
-            artist = "Test Artist",
             duration = 120000L,
             width = 1920,
             height = 1080,
@@ -52,7 +50,6 @@ class VideoMetadataTest {
 
         // Verify the metadata properties
         assertEquals("Test Title", metadata.title)
-        assertEquals("Test Artist", metadata.artist)
         assertEquals(120000L, metadata.duration)
         assertEquals(1920, metadata.width)
         assertEquals(1080, metadata.height)
@@ -72,7 +69,6 @@ class VideoMetadataTest {
 
         // Set metadata properties
         metadata.title = "Test Title"
-        metadata.artist = "Test Artist"
         metadata.duration = 120000L
         metadata.width = 1920
         metadata.height = 1080
@@ -84,7 +80,6 @@ class VideoMetadataTest {
 
         // Verify the metadata properties
         assertEquals("Test Title", metadata.title)
-        assertEquals("Test Artist", metadata.artist)
         assertEquals(120000L, metadata.duration)
         assertEquals(1920, metadata.width)
         assertEquals(1080, metadata.height)
@@ -102,7 +97,6 @@ class VideoMetadataTest {
     fun testMetadataCopy() {
         val metadata = VideoMetadata(
             title = "Original Title",
-            artist = "Original Artist",
             duration = 60000L
         )
 
@@ -114,12 +108,10 @@ class VideoMetadataTest {
 
         // Verify the original metadata is unchanged
         assertEquals("Original Title", metadata.title)
-        assertEquals("Original Artist", metadata.artist)
         assertEquals(60000L, metadata.duration)
 
         // Verify the copy has the expected properties
         assertEquals("New Title", copy.title)
-        assertEquals("Original Artist", copy.artist)
         assertEquals(90000L, copy.duration)
     }
 }
