@@ -45,7 +45,8 @@ fun LinuxVideoPlayerSurface(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        if (playerState.hasMedia) {
+        // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
+        if (playerState.hasMedia && (!playerState.isFullscreen || isInFullscreenWindow)) {
             Canvas(
                 modifier = contentScale.toCanvasModifier(
                     aspectRatio = playerState.aspectRatio,

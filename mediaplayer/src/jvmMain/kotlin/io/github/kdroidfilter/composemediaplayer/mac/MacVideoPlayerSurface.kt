@@ -40,7 +40,8 @@ fun MacVideoPlayerSurface(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        if (playerState.hasMedia) {
+        // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
+        if (playerState.hasMedia && (!playerState.isFullscreen || isInFullscreenWindow)) {
             // Force recomposition when currentFrameState changes
             val currentFrame by remember(playerState) { playerState.currentFrameState }
 

@@ -49,9 +49,7 @@ private fun FullscreenVideoPlayerWindow(
     }
 
     // Create a window state for fullscreen
-    val windowState = rememberWindowState(
-        placement = if (Platform.isWindows()) WindowPlacement.Fullscreen else WindowPlacement.Maximized,
-    )
+    val windowState = rememberWindowState(placement = WindowPlacement.Maximized)
 
     var isVisible by mutableStateOf(true)
 
