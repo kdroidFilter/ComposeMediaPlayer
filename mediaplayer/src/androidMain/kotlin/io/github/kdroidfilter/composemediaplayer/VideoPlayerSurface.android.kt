@@ -101,7 +101,15 @@ private fun VideoPlayerContent(
                     }
                 },
                 update = { playerView ->
-                    // Update is handled by the player state
+                    // Update the resize mode when contentScale changes
+                    playerView.resizeMode = when (contentScale) {
+                        ContentScale.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        ContentScale.FillBounds -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                        ContentScale.Fit, ContentScale.Inside -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        ContentScale.FillWidth -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
+                        ContentScale.FillHeight -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
+                        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
                 }
             )
 
