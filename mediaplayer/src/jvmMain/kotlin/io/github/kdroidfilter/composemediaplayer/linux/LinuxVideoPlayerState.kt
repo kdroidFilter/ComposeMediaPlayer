@@ -72,6 +72,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
 
     private var bufferingPercent by mutableStateOf(100)
     private var isUserPaused by mutableStateOf(false)
+    private var hasReceivedFirstFrame by mutableStateOf(false)
 
     private var _sliderPos by mutableStateOf(0f)
     override var sliderPos: Float
@@ -585,6 +586,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             bufferingPercent < 100 -> true
             _isSeeking -> true
             isUserPaused -> false
+            _hasMedia && !hasReceivedFirstFrame -> true
             else -> false
         }
     }
@@ -686,6 +688,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         clearError()
         _isLoading = true
         _hasMedia = false
+        hasReceivedFirstFrame = false
         try {
             val uriObj = if (uri.startsWith("http://") || uri.startsWith("https://")) {
                 URI(uri)
@@ -755,6 +758,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         bufferingPercent = 100
         _hasMedia = false
         _isSeeking = false
+        hasReceivedFirstFrame = false
     }
 
     override fun seekTo(value: Float) {
@@ -845,6 +849,10 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             // Update on the AWT thread
             EventQueue.invokeLater {
                 _currentFrame = imageBitmap
+                if (!hasReceivedFirstFrame) {
+                    hasReceivedFirstFrame = true
+                    updateLoadingState()
+                }
             }
 
             buffer.unmap()
