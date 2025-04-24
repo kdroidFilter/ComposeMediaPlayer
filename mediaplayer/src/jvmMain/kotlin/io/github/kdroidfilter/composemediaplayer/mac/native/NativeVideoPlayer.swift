@@ -126,6 +126,29 @@ class SharedVideoPlayer {
             }
         }
 
+        // Try to get bitrate from the asset directly
+        if let urlAsset = asset as? AVURLAsset {
+            // Try to get file size
+            do {
+                let fileAttributes = try FileManager.default.attributesOfItem(atPath: urlAsset.url.path)
+                if let fileSize = fileAttributes[.size] as? NSNumber {
+                    let fileSizeInBytes = fileSize.int64Value
+
+                    // Get duration in seconds
+                    let durationInSeconds = CMTimeGetSeconds(asset.duration)
+
+                    if durationInSeconds > 0 {
+                        // Calculate bitrate: (fileSize * 8) / durationInSeconds
+                        let calculatedBitrate = Int64(Double(fileSizeInBytes * 8) / durationInSeconds)
+                        videoBitrate = calculatedBitrate
+                        print("Calculated bitrate from file size: \(calculatedBitrate) bits/s")
+                    }
+                }
+            } catch {
+                print("Error getting file attributes: \(error.localizedDescription)")
+            }
+        }
+
         // Extract format information
         if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
             Task {
@@ -136,7 +159,20 @@ class SharedVideoPlayer {
 
                     // Extract video bitrate and format
                     if let videoTrack = videoTracks.first {
-                        // Get estimated data rate (bitrate)
+                        // Try to get estimated data rate directly from the track
+                        if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+                            do {
+                                let estimatedDataRate = try await videoTrack.load(.estimatedDataRate)
+                                if estimatedDataRate > 0 {
+                                    videoBitrate = Int64(estimatedDataRate)
+                                    print("Got bitrate from estimatedDataRate: \(videoBitrate) bits/s")
+                                }
+                            } catch {
+                                print("Error getting estimatedDataRate: \(error.localizedDescription)")
+                            }
+                        }
+
+                        // Get estimated data rate (bitrate) from format description
                         let formatDescriptions = try await videoTrack.load(.formatDescriptions)
                         if let formatDescription = formatDescriptions.first {
                             let extensions = CMFormatDescriptionGetExtensions(formatDescription) as Dictionary?
@@ -144,6 +180,7 @@ class SharedVideoPlayer {
                                let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
                                let avgBitrate = bitrate["avg-bitrate"] as? Int64 {
                                 videoBitrate = avgBitrate
+                                print("Got bitrate from format description: \(videoBitrate) bits/s")
                             }
 
                             // Get MIME type
@@ -186,6 +223,13 @@ class SharedVideoPlayer {
             // Fallback for older OS versions
             // Extract video bitrate and format
             if let videoTrack = asset.tracks(withMediaType: .video).first {
+                // Try to get estimated data rate directly from the track
+                let estimatedDataRate = videoTrack.estimatedDataRate
+                if estimatedDataRate > 0 {
+                    videoBitrate = Int64(estimatedDataRate)
+                    print("Got bitrate from estimatedDataRate (legacy): \(videoBitrate) bits/s")
+                }
+
                 if let formatDescriptions = videoTrack.formatDescriptions as? [CMFormatDescription],
                    let formatDescription = formatDescriptions.first {
                     let extensions = CMFormatDescriptionGetExtensions(formatDescription) as Dictionary?
@@ -193,6 +237,7 @@ class SharedVideoPlayer {
                        let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
                        let avgBitrate = bitrate["avg-bitrate"] as? Int64 {
                         videoBitrate = avgBitrate
+                        print("Got bitrate from format description (legacy): \(videoBitrate) bits/s")
                     }
 
                     // Get MIME type
