@@ -48,6 +48,9 @@ class SharedVideoPlayer {
     private var leftAudioLevel: Float = 0.0
     private var rightAudioLevel: Float = 0.0
 
+    // Playback speed control (1.0 is normal speed)
+    private var playbackSpeed: Float = 1.0
+
     init() {
         // Detect screen refresh rate
         detectScreenRefreshRate()
@@ -554,6 +557,17 @@ class SharedVideoPlayer {
         return volume
     }
 
+    /// Sets the playback speed (0.5 to 2.0, where 1.0 is normal speed)
+    func setPlaybackSpeed(speed: Float) {
+        playbackSpeed = max(0.5, min(2.0, speed))  // Clamp between 0.5 and 2.0
+        player?.rate = playbackSpeed
+    }
+
+    /// Gets the current playback speed (0.5 to 2.0, where 1.0 is normal speed)
+    func getPlaybackSpeed() -> Float {
+        return playbackSpeed
+    }
+
     /// Returns a pointer to the shared frame buffer. The caller should not free this pointer.
     func getLatestFramePointer() -> UnsafeMutablePointer<UInt32>? {
         return frameBuffer
@@ -779,4 +793,20 @@ public func getRightAudioLevel(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getRightAudioLevel()
+}
+
+@_cdecl("setPlaybackSpeed")
+public func setPlaybackSpeed(_ context: UnsafeMutableRawPointer?, _ speed: Float) {
+    guard let context = context else { return }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    DispatchQueue.main.async {
+        player.setPlaybackSpeed(speed: speed)
+    }
+}
+
+@_cdecl("getPlaybackSpeed")
+public func getPlaybackSpeed(_ context: UnsafeMutableRawPointer?) -> Float {
+    guard let context = context else { return 1.0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.getPlaybackSpeed()
 }

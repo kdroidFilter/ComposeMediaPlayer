@@ -124,11 +124,14 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     override var playbackSpeed: Float
         get() = _playbackSpeedState.value
         set(value) {
-            _playbackSpeedState.value = value.coerceIn(0.5f, 2.0f)
-            // Note: Playback speed control is not directly supported in the current
-            // Mac implementation. This property is added for API compatibility
-            // but does not affect playback speed.
-            macLogger.w { "Playback speed control is not supported in the Mac implementation" }
+            val newValue = value.coerceIn(0.5f, 2.0f)
+            if (_playbackSpeedState.value != newValue) {
+                _playbackSpeedState.value = newValue
+                // Launch a coroutine to apply the playback speed if the native player is available.
+                ioScope.launch {
+                    applyPlaybackSpeed()
+                }
+            }
         }
 
     private val updateInterval: Long
@@ -177,6 +180,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                 mainMutex.withLock { playerPtr = ptr }
                 macLogger.d { "Native player created successfully" }
                 applyVolume()
+                applyPlaybackSpeed()
             } else {
                 macLogger.e { "Error: Failed to create native player" }
                 withContext(Dispatchers.Main) {
@@ -313,6 +317,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             if (ptr != null) {
                 mainMutex.withLock { playerPtr = ptr }
                 applyVolume()
+                applyPlaybackSpeed()
             } else {
                 throw IllegalStateException("Failed to create native player")
             }
@@ -880,6 +885,24 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     macLogger.e { "Error applying volume: ${e.message}" }
+                }
+            }
+        }
+    }
+
+    /**
+     * Applies the current playback speed setting to the native player. If no player
+     * is available, the speed is simply stored in _playbackSpeedState and will be
+     * applied when the player is initialized.
+     */
+    private suspend fun applyPlaybackSpeed() {
+        mainMutex.withLock {
+            playerPtr?.let { ptr ->
+                try {
+                    SharedVideoPlayer.INSTANCE.setPlaybackSpeed(ptr, _playbackSpeedState.value)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    macLogger.e { "Error applying playback speed: ${e.message}" }
                 }
             }
         }
