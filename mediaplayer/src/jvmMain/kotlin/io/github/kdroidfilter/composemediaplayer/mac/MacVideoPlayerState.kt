@@ -388,12 +388,24 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                 _aspectRatio.value
             }
 
+            // Get additional metadata
+            val title = SharedVideoPlayer.INSTANCE.getVideoTitle(ptr)
+            val bitrate = SharedVideoPlayer.INSTANCE.getVideoBitrate(ptr)
+            val mimeType = SharedVideoPlayer.INSTANCE.getVideoMimeType(ptr)
+            val audioChannels = SharedVideoPlayer.INSTANCE.getAudioChannels(ptr)
+            val audioSampleRate = SharedVideoPlayer.INSTANCE.getAudioSampleRate(ptr)
+
             withContext(Dispatchers.Main) {
                 // Update metadata
                 metadata.duration = duration
                 metadata.width = width
                 metadata.height = height
                 metadata.frameRate = frameRate
+                metadata.title = title
+                metadata.bitrate = bitrate
+                metadata.mimeType = mimeType
+                metadata.audioChannels = audioChannels
+                metadata.audioSampleRate = audioSampleRate
 
                 // Met à jour l’aspect ratio seulement si width/height valides
                 _aspectRatio.value = newAspectRatio

@@ -51,6 +51,13 @@ class SharedVideoPlayer {
     // Playback speed control (1.0 is normal speed)
     private var playbackSpeed: Float = 1.0
 
+    // Metadata properties
+    private var videoTitle: String? = nil
+    private var videoBitrate: Int64 = 0
+    private var videoMimeType: String? = nil
+    private var audioChannels: Int = 0
+    private var audioSampleRate: Int = 0
+
     init() {
         // Detect screen refresh rate
         detectScreenRefreshRate()
@@ -100,6 +107,127 @@ class SharedVideoPlayer {
                 screenRefreshRate = 60.0
             }
         #endif
+    }
+
+    /// Extracts metadata from the asset
+    private func extractMetadata(from asset: AVAsset) {
+        // Reset metadata values
+        videoTitle = nil
+        videoBitrate = 0
+        videoMimeType = nil
+        audioChannels = 0
+        audioSampleRate = 0
+
+        // Extract title from metadata
+        if let commonMetadata = asset.commonMetadata as? [AVMetadataItem] {
+            if let titleItem = AVMetadataItem.metadataItems(from: commonMetadata, filteredByIdentifier: .commonIdentifierTitle).first,
+               let title = titleItem.value as? String {
+                videoTitle = title
+            }
+        }
+
+        // Extract format information
+        if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+            Task {
+                do {
+                    // Load tracks asynchronously
+                    let videoTracks = try await asset.loadTracks(withMediaType: .video)
+                    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+
+                    // Extract video bitrate and format
+                    if let videoTrack = videoTracks.first {
+                        // Get estimated data rate (bitrate)
+                        let formatDescriptions = try await videoTrack.load(.formatDescriptions)
+                        if let formatDescription = formatDescriptions.first {
+                            let extensions = CMFormatDescriptionGetExtensions(formatDescription) as Dictionary?
+                            if let dict = extensions,
+                               let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
+                               let avgBitrate = bitrate["avg-bitrate"] as? Int64 {
+                                videoBitrate = avgBitrate
+                            }
+
+                            // Get MIME type
+                            let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
+                            let mediaType = CMFormatDescriptionGetMediaType(formatDescription)
+
+                            if mediaType == kCMMediaType_Video {
+                                switch mediaSubType {
+                                case kCMVideoCodecType_H264:
+                                    videoMimeType = "video/h264"
+                                case kCMVideoCodecType_HEVC:
+                                    videoMimeType = "video/hevc"
+                                case kCMVideoCodecType_MPEG4Video:
+                                    videoMimeType = "video/mp4v-es"
+                                case kCMVideoCodecType_MPEG2Video:
+                                    videoMimeType = "video/mpeg2"
+                                default:
+                                    videoMimeType = "video/mp4"
+                                }
+                            }
+                        }
+                    }
+
+                    // Extract audio channels and sample rate
+                    if let audioTrack = audioTracks.first {
+                        let formatDescriptions = try await audioTrack.load(.formatDescriptions)
+                        if let formatDescription = formatDescriptions.first  {
+                            let basicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+                            if let basicDesc = basicDescription {
+                                audioChannels = Int(basicDesc.pointee.mChannelsPerFrame)
+                                audioSampleRate = Int(basicDesc.pointee.mSampleRate)
+                            }
+                        }
+                    }
+                } catch {
+                    print("Error extracting metadata: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            // Fallback for older OS versions
+            // Extract video bitrate and format
+            if let videoTrack = asset.tracks(withMediaType: .video).first {
+                if let formatDescriptions = videoTrack.formatDescriptions as? [CMFormatDescription],
+                   let formatDescription = formatDescriptions.first {
+                    let extensions = CMFormatDescriptionGetExtensions(formatDescription) as Dictionary?
+                    if let dict = extensions,
+                       let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
+                       let avgBitrate = bitrate["avg-bitrate"] as? Int64 {
+                        videoBitrate = avgBitrate
+                    }
+
+                    // Get MIME type
+                    let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
+                    let mediaType = CMFormatDescriptionGetMediaType(formatDescription)
+
+                    if mediaType == kCMMediaType_Video {
+                        switch mediaSubType {
+                        case kCMVideoCodecType_H264:
+                            videoMimeType = "video/h264"
+                        case kCMVideoCodecType_HEVC:
+                            videoMimeType = "video/hevc"
+                        case kCMVideoCodecType_MPEG4Video:
+                            videoMimeType = "video/mp4v-es"
+                        case kCMVideoCodecType_MPEG2Video:
+                            videoMimeType = "video/mpeg2"
+                        default:
+                            videoMimeType = "video/mp4"
+                        }
+                    }
+                }
+            }
+
+            // Extract audio channels and sample rate
+            if let audioTrack = asset.tracks(withMediaType: .audio).first {
+                if let formatDescriptions = audioTrack.formatDescriptions as? [CMAudioFormatDescription],
+                   let formatDescription = formatDescriptions.first {
+                    let basicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+                    if let basicDesc = basicDescription {
+                        audioChannels = Int(basicDesc.pointee.mChannelsPerFrame)
+                        audioSampleRate = Int(basicDesc.pointee.mSampleRate)
+                    }
+                }
+            }
+        }
     }
 
     /// Detects the video's native frame rate from its asset
@@ -170,6 +298,9 @@ class SharedVideoPlayer {
         }()
 
         let asset = AVURLAsset(url: url)
+
+        // Extract metadata from the asset
+        extractMetadata(from: asset)
 
         // Detect video frame rate
         detectVideoFrameRate(from: asset)
@@ -588,6 +719,21 @@ class SharedVideoPlayer {
     /// Returns the current capture frame rate (minimum of video and screen rates)
     func getCaptureFrameRate() -> Float { return captureFrameRate }
 
+    /// Returns the video title if available
+    func getVideoTitle() -> String? { return videoTitle }
+
+    /// Returns the video bitrate in bits per second
+    func getVideoBitrate() -> Int64 { return videoBitrate }
+
+    /// Returns the video MIME type if available
+    func getVideoMimeType() -> String? { return videoMimeType }
+
+    /// Returns the number of audio channels
+    func getAudioChannels() -> Int { return audioChannels }
+
+    /// Returns the audio sample rate in Hz
+    func getAudioSampleRate() -> Int { return audioSampleRate }
+
     /// Returns the duration of the video in seconds.
     func getDuration() -> Double {
         guard let item = player?.currentItem else { return 0 }
@@ -809,4 +955,47 @@ public func getPlaybackSpeed(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 1.0 }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getPlaybackSpeed()
+}
+
+@_cdecl("getVideoTitle")
+public func getVideoTitle(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    if let title = player.getVideoTitle() {
+        let cString = strdup(title)
+        return UnsafePointer<CChar>(cString)
+    }
+    return nil
+}
+
+@_cdecl("getVideoBitrate")
+public func getVideoBitrate(_ context: UnsafeMutableRawPointer?) -> Int64 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.getVideoBitrate()
+}
+
+@_cdecl("getVideoMimeType")
+public func getVideoMimeType(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    if let mimeType = player.getVideoMimeType() {
+        let cString = strdup(mimeType)
+        return UnsafePointer<CChar>(cString)
+    }
+    return nil
+}
+
+@_cdecl("getAudioChannels")
+public func getAudioChannels(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return Int32(player.getAudioChannels())
+}
+
+@_cdecl("getAudioSampleRate")
+public func getAudioSampleRate(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return Int32(player.getAudioSampleRate())
 }

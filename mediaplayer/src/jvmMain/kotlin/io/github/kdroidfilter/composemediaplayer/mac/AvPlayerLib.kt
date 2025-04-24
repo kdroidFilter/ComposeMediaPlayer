@@ -30,6 +30,13 @@ internal interface SharedVideoPlayer : Library {
     fun setPlaybackSpeed(context: Pointer?, speed: Float)
     fun getPlaybackSpeed(context: Pointer?): Float
 
+    // Metadata retrieval functions
+    fun getVideoTitle(context: Pointer?): String?
+    fun getVideoBitrate(context: Pointer?): Long
+    fun getVideoMimeType(context: Pointer?): String?
+    fun getAudioChannels(context: Pointer?): Int
+    fun getAudioSampleRate(context: Pointer?): Int
+
     companion object {
         val INSTANCE: SharedVideoPlayer =
             Native.load("NativeVideoPlayer", SharedVideoPlayer::class.java)
