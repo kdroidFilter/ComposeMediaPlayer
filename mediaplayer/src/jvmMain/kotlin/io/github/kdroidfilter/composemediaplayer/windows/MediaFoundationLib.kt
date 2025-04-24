@@ -52,4 +52,6 @@ internal interface MediaFoundationLib : StdCallLibrary {
     fun SetAudioVolume(pInstance: Pointer, volume: Float): Int
     fun GetAudioVolume(pInstance: Pointer, volume: FloatByReference): Int
     fun GetAudioLevels(pInstance: Pointer, pLeftLevel: FloatByReference, pRightLevel: FloatByReference): Int
+    fun SetPlaybackSpeed(pInstance: Pointer, speed: Float): Int
+    fun GetPlaybackSpeed(pInstance: Pointer, pSpeed: FloatByReference): Int
 }
