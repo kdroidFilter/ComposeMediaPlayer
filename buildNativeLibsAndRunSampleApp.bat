@@ -22,4 +22,3 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo Execution completed successfully.
-pause
