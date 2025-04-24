@@ -1,6 +1,3 @@
-[submodule "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/windows/native"]
-	path = mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/windows/native
-	url = https://github.com/kdroidFilter/Compose-Media-Player-WinLib
 [submodule "winlib"]
 	path = winlib
 	url = https://github.com/kdroidFilter/Compose-Media-Player-WinLib
