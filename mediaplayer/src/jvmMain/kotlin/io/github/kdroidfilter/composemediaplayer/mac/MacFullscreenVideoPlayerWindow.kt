@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.common.openFullscreenWindow
 
 /**
@@ -14,7 +15,8 @@ import io.github.kdroidfilter.composemediaplayer.common.openFullscreenWindow
 @Composable
 fun openFullscreenWindow(
     playerState: MacVideoPlayerState,
-    overlay: @Composable () -> Unit = {}
+    overlay: @Composable () -> Unit = {},
+    contentScale: ContentScale = ContentScale.Fit
 ) {
     openFullscreenWindow(
         playerState = playerState,
@@ -22,6 +24,7 @@ fun openFullscreenWindow(
             MacVideoPlayerSurface(
                 playerState = state as MacVideoPlayerState,
                 modifier = modifier,
+                contentScale = contentScale,
                 overlay = overlay,
                 isInFullscreenWindow = isInFullscreenWindow
             )
