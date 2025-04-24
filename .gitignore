@@ -18,4 +18,12 @@ Pods/
 /winlib/cmake-build-arm64
 /winlib/cmake-build-x64
 /winlib/.idea
+/mediaplayer/src/jvmMain/resources/darwin-x86-64/NativeVideoPlayer.abi.json
+/mediaplayer/src/jvmMain/resources/darwin-x86-64/NativeVideoPlayer.swiftdoc
+/mediaplayer/src/jvmMain/resources/darwin-x86-64/NativeVideoPlayer.swiftmodule
+/mediaplayer/src/jvmMain/resources/darwin-x86-64/NativeVideoPlayer.swiftsourceinfo
+/mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.abi.json
+/mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.swiftdoc
+/mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.swiftmodule
+/mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.swiftsourceinfo
 *.log
