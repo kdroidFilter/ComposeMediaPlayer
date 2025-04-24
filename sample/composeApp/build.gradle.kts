@@ -100,3 +100,44 @@ compose.desktop {
         }
     }
 }
+
+val buildMacArm: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacArm") {
+    onlyIf { System.getProperty("os.name").startsWith("Mac") }
+    workingDir(rootDir)
+    commandLine("swiftc", "-emit-library", "-emit-module", "-module-name", "NativeVideoPlayer", 
+                "-target", "arm64-apple-macosx14.0", 
+                "-o", "mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib", 
+                "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift", 
+                "-O", "-whole-module-optimization")
+
+    inputs.file("mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift")
+    outputs.file("mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib")
+}
+
+val buildMacX64: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacX64") {
+    onlyIf { System.getProperty("os.name").startsWith("Mac") }
+    workingDir(rootDir)
+    commandLine("swiftc", "-emit-library", "-emit-module", "-module-name", "NativeVideoPlayer", 
+                "-target", "x86_64-apple-macosx14.0", 
+                "-o", "mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib", 
+                "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift", 
+                "-O", "-whole-module-optimization")
+
+    inputs.file("mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift")
+    outputs.file("mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib")
+}
+
+val buildWin: TaskProvider<Exec> = tasks.register<Exec>("buildNativeWin") {
+    onlyIf { System.getProperty("os.name").startsWith("Windows") }
+    workingDir(rootDir.resolve("winlib"))
+    commandLine("cmd", "/c", "build.bat")
+}
+
+// tâche d’agrégation
+tasks.register("buildNativeLibraries") {
+    dependsOn(buildMacArm, buildMacX64, buildWin)
+}
+
+tasks.register("buildNativeLibsAndRunSampleApp") {
+    dependsOn("buildNativeLibraries", ":sample:composeApp:run")
+}
