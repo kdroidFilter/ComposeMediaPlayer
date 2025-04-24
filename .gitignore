@@ -18,3 +18,4 @@ Pods/
 /winlib/cmake-build-arm64
 /winlib/cmake-build-x64
 /winlib/.idea
+*.log
