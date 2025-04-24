@@ -96,6 +96,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var _isPlaying by mutableStateOf(false)
     override val isPlaying get() = _isPlaying
 
+    /** Whether the user has intentionally paused the video */
+    private var userPaused = false
+
     /** Video player instance handle */
     private var videoPlayerInstance: Pointer? = null
 
@@ -407,6 +410,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _duration = 0.0
                     _metadata = VideoMetadata()
                     _hasMedia = false
+                    userPaused = false
 
                     // Check if the file or URL is valid
                     if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
@@ -535,6 +539,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             if (player.IsEOF(instance)) {
                 if (loop) {
                     try {
+                        userPaused = false  // Reset userPaused when looping
                         seekTo(0f)
                         play()
                     } catch (e: Exception) {
@@ -733,6 +738,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             operation = "play",
             precondition = true
         ) {
+            userPaused = false
             setPlaybackState(true, "Error while starting playback")
             if (_hasMedia && (videoJob == null || videoJob?.isActive == false)) {
                 videoJob = scope.launch {
@@ -767,6 +773,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             operation = "pause",
             precondition = _isPlaying
         ) {
+            userPaused = true
             setPlaybackState(false, "Error while pausing playback")
         }
     }
@@ -790,6 +797,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             isLoading = false
             errorMessage = null
             _error = null
+            userPaused = false
             videoPlayerInstance?.let { instance ->
                 player.CloseMedia(instance)
             }
@@ -805,6 +813,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             if (instance != null) {
                 try {
                     isLoading = true
+                    // If the video was playing before seeking, we should reset userPaused
+                    if (_isPlaying) {
+                        userPaused = false
+                    }
                     videoJob?.cancelAndJoin()
                     clearFrameChannel()
 
@@ -934,6 +946,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     /**
      * Waits for the playback state to become active
      * If playback doesn't start within 5 seconds, attempts to restart it
+     * unless the user has intentionally paused the video
      */
     private suspend fun waitForPlaybackState() {
         if (!_isPlaying) {
@@ -941,12 +954,16 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 withTimeoutOrNull(5000) {
                     snapshotFlow { _isPlaying }.filter { it }.first()
                 } ?: run {
-                    if (_hasMedia && videoPlayerInstance != null) {
+                    // Only attempt to restart playback if the user hasn't intentionally paused
+                    if (_hasMedia && videoPlayerInstance != null && !userPaused) {
                         setPlaybackState(true, "Error while restarting playback after timeout")
                         delay(100)
                         if (!_isPlaying) {
                             yield()
                         }
+                    } else {
+                        // If user paused, just yield to allow other coroutines to run
+                        yield()
                     }
                 }
             } catch (e: CancellationException) {
