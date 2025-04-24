@@ -222,6 +222,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             withContext(Dispatchers.Main) {
                 isLoading = true
                 error = null  // Clear any previous errors
+                playbackSpeed = 1.0f
             }
 
             // Ensure heavy operations are performed in the background
