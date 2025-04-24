@@ -189,7 +189,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         else 16f / 9f
 
     // Metadata and UI state
-    override val metadata = VideoMetadata()
+    private var _metadata by mutableStateOf(VideoMetadata())
+    override val metadata: VideoMetadata get() = _metadata
     override var subtitlesEnabled = false
     override var currentSubtitleTrack: SubtitleTrack? = null
     override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
@@ -404,6 +405,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _currentTime = 0.0
                     _progress = 0f
                     _duration = 0.0
+                    _metadata = VideoMetadata()
                     _hasMedia = false
 
                     // Check if the file or URL is valid
@@ -446,6 +448,19 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         return@withLock
                     }
                     _duration = durationRef.value / 10000000.0
+
+                    // Retrieve metadata using the native function
+                    val retrievedMetadata = MediaFoundationLib.getVideoMetadata(instance)
+                    if (retrievedMetadata != null) {
+                        _metadata = retrievedMetadata
+                    } else {
+                        // If metadata retrieval failed, create a basic metadata object with what we know
+                        _metadata = VideoMetadata(
+                            width = videoWidth,
+                            height = videoHeight,
+                            duration = (_duration * 1000).toLong() // Convert to milliseconds
+                        )
+                    }
 
                     // Set _hasMedia to true only if everything succeeded
                     _hasMedia = true
