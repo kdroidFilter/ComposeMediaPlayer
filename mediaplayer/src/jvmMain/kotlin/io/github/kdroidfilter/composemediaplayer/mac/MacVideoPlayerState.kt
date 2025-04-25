@@ -404,8 +404,8 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                 metadata.title = title
                 metadata.bitrate = bitrate
                 metadata.mimeType = mimeType
-                metadata.audioChannels = audioChannels
-                metadata.audioSampleRate = audioSampleRate
+                metadata.audioChannels = if (audioChannels == 0) null else audioChannels
+                metadata.audioSampleRate = if (audioSampleRate == 0) null else audioSampleRate
 
                 // Met à jour l’aspect ratio seulement si width/height valides
                 _aspectRatio.value = newAspectRatio

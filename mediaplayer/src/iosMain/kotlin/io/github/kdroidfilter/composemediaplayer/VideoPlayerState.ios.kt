@@ -12,6 +12,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
@@ -19,7 +20,8 @@ import platform.AVFoundation.*
 import platform.CoreGraphics.CGFloat
 import platform.CoreMedia.CMTimeGetSeconds
 import platform.CoreMedia.CMTimeMakeWithSeconds
-import platform.Foundation.*
+import platform.Foundation.NSNotificationCenter
+import platform.Foundation.NSURL
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 
@@ -193,6 +195,9 @@ actual open class VideoPlayerState {
         removeObservers()
         player?.pause()
 
+        // Reset playback speed to 1.0f when opening a new video
+        _playbackSpeed = 1.0f
+
         // Set loading state to true at the beginning of loading a new video
         _isLoading = true
 
@@ -231,7 +236,7 @@ actual open class VideoPlayerState {
                     // Get bitrate
                     val trackBitrate = track.estimatedDataRate
                     if (trackBitrate > 0) {
-                        _metadata.bitrate = (trackBitrate * 1000).toLong()
+                        _metadata.bitrate = trackBitrate.toLong()
                     }
 
                     // Get resolution from naturalSize
@@ -250,8 +255,10 @@ actual open class VideoPlayerState {
             // Process audio tracks
             val audioTracks = asset.tracksWithMediaType(AVMediaTypeAudio)
             if (audioTracks.isNotEmpty()) {
-                // Update audio channels count based on number of audio tracks
-                _metadata.audioChannels = audioTracks.size
+                // Set audio channels to 2 (stereo) as a more accurate default
+                // Most audio content is stereo, and we can't easily get the actual channel count
+                // from AVAssetTrack in Kotlin/Native
+                _metadata.audioChannels = 2 // Default to stereo instead of using track count
 
                 // Try to get sample rate (simplified approach)
                 _metadata.audioSampleRate = 44100 // Default to common value
@@ -422,7 +429,10 @@ actual open class VideoPlayerState {
 
     actual fun openFile(file: PlatformFile) {
         Logger.d { "openFile called with file: $file" }
-        openUri(file.toString())
+        // Use the getUri extension function to get a proper file URL
+        val fileUrl = file.getUri()
+        Logger.d { "Opening file with URL: $fileUrl" }
+        openUri(fileUrl)
     }
 
     actual val metadata: VideoMetadata
