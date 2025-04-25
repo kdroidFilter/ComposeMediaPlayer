@@ -195,6 +195,9 @@ actual open class VideoPlayerState {
         removeObservers()
         player?.pause()
 
+        // Reset playback speed to 1.0f when opening a new video
+        _playbackSpeed = 1.0f
+
         // Set loading state to true at the beginning of loading a new video
         _isLoading = true
 
