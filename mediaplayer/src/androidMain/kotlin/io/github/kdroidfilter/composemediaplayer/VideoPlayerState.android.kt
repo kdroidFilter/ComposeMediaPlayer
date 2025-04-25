@@ -360,6 +360,7 @@ actual open class VideoPlayerState {
             player.clearMediaItems()
             try {
                 _error = null
+                resetStates(keepMedia = true)
                 player.setMediaItem(mediaItem)
 
                 // Extract metadata from the MediaItem before preparing the player
@@ -499,6 +500,8 @@ actual open class VideoPlayerState {
         _isLoading = false
         _error = null
         _aspectRatio = 16f / 9f  // Reset aspect ratio to default
+        _playbackSpeed = 1.0f    // Reset playback speed to default
+        exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
         if (!keepMedia) {
             _hasMedia = false
         }
