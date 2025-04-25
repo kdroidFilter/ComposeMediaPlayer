@@ -376,7 +376,8 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                             val bitrate = tagList.getString("bitrate", 0)
                             if (bitrate != null) {
                                 try {
-                                    metadata.bitrate = bitrate.toLong()
+                                    // Convert from kbps to bps by multiplying by 1000
+                                    metadata.bitrate = bitrate.toLong() * 1000
                                 } catch (_: NumberFormatException) {
                                     // Ignore if the string can't be converted to a long
                                 }
@@ -679,6 +680,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         _isLoading = true
         _hasMedia = false
         hasReceivedFirstFrame = false
+        playbackSpeed = 1.0f
         try {
             val uriObj = if (uri.startsWith("http://") || uri.startsWith("https://")) {
                 URI(uri)

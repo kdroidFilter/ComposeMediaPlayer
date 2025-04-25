@@ -346,6 +346,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      */
     override fun openUri(uri: String) {
         lastUri = uri
+        playbackSpeed = 1.0f
 
         if (!isInitialized || videoPlayerInstance == null) {
             // Instead of immediately returning an error, wait for initialization to complete
