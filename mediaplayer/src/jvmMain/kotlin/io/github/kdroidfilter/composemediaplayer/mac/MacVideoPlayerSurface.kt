@@ -83,6 +83,6 @@ fun MacVideoPlayerSurface(
     }
 
     if (playerState.isFullscreen && !isInFullscreenWindow) {
-        openFullscreenWindow(playerState, overlay = overlay)
+        openFullscreenWindow(playerState, overlay = overlay, contentScale = contentScale)
     }
 }

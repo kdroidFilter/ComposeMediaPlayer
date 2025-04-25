@@ -14,8 +14,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.UIKitView
 import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.cinterop.ExperimentalForeignApi
+import platform.AVFoundation.AVLayerVideoGravityResizeAspect
+import platform.AVFoundation.AVLayerVideoGravityResizeAspectFill
+import platform.AVFoundation.AVLayerVideoGravityResize
 import platform.AVKit.AVPlayerViewController
 import platform.UIKit.*
 
@@ -67,9 +71,13 @@ fun VideoPlayerSurfaceImpl(
             contentAlignment = Alignment.Center
         ) {
 
-            // Note: ContentScale parameter is not used here as the actual implementation will be handled by someone else as per the issue description
+            // Use the contentScale parameter to adjust the view's size and scaling behavior
             UIKitView(
-            modifier = Modifier.fillMaxHeight().aspectRatio(playerState.videoAspectRatio.toFloat()),
+            modifier = contentScale.toCanvasModifier(
+                playerState.videoAspectRatio.toFloat(),
+                playerState.metadata.width,
+                playerState.metadata.height
+            ),
                 factory = {
                     UIView().apply {
                         backgroundColor = UIColor.blackColor
@@ -86,12 +94,40 @@ fun VideoPlayerSurfaceImpl(
                                 avPlayerViewController.view.bottomAnchor.constraintEqualToAnchor(this.bottomAnchor)
                             )
                         )
-                        Logger.d { "View configurated" }
+
+                        // Set the videoGravity based on the ContentScale
+                        // Map ContentScale to AVLayerVideoGravity
+                        val videoGravity = when (contentScale) {
+                            ContentScale.Crop,
+                            ContentScale.FillHeight -> AVLayerVideoGravityResizeAspectFill
+                            ContentScale.FillWidth   -> AVLayerVideoGravityResizeAspectFill
+                            ContentScale.FillBounds  -> AVLayerVideoGravityResize
+                            ContentScale.Fit,
+                            ContentScale.Inside      -> AVLayerVideoGravityResizeAspect
+                            else                     -> AVLayerVideoGravityResizeAspect
+                        }
+
+                        // Set the videoGravity directly on the AVPlayerViewController
+                        avPlayerViewController.videoGravity = videoGravity
+
+                        Logger.d { "View configured with contentScale: $contentScale, videoGravity: $videoGravity" }
                     }
                 },
                 update = { containerView ->
                     // Hide or show the view depending on the presence of media
                     containerView.hidden = !playerState.hasMedia
+
+                    // Update the videoGravity when contentScale changes
+                    val videoGravity = when (contentScale) {
+                        ContentScale.Crop,
+                        ContentScale.FillHeight -> AVLayerVideoGravityResizeAspectFill   // ⬅️ changement
+                        ContentScale.FillWidth   -> AVLayerVideoGravityResizeAspectFill   // (même logique)
+                        ContentScale.FillBounds  -> AVLayerVideoGravityResize             // pas d’aspect-ratio
+                        ContentScale.Fit,
+                        ContentScale.Inside      -> AVLayerVideoGravityResizeAspect
+                        else                     -> AVLayerVideoGravityResizeAspect
+                    }
+                    avPlayerViewController.videoGravity = videoGravity
 
                     containerView.setNeedsLayout()
                     containerView.layoutIfNeeded()

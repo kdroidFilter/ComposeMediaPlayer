@@ -125,9 +125,6 @@ val buildMacArm: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacArm") 
         "-o", "mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib",
         "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift",
         "-O", "-whole-module-optimization")
-
-    inputs.file("mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift")
-    outputs.file("mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib")
 }
 
 val buildMacX64: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacX64") {
@@ -138,9 +135,6 @@ val buildMacX64: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacX64") 
         "-o", "mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib",
         "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift",
         "-O", "-whole-module-optimization")
-
-    inputs.file("mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift")
-    outputs.file("mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib")
 }
 
 val buildWin: TaskProvider<Exec> = tasks.register<Exec>("buildNativeWin") {

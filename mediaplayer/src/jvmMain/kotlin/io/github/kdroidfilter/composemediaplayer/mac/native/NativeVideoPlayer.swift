@@ -2,13 +2,7 @@ import AVFoundation
 import CoreGraphics
 import CoreVideo
 import Foundation
-
-#if canImport(UIKit)
-    import UIKit
-#endif
-#if os(macOS)
-    import AppKit
-#endif
+import AppKit
 
 /// Class that manages video playback and frame capture into an optimized shared buffer.
 /// Frame capture rate adapts to the lower of screen refresh rate and video frame rate.
@@ -16,8 +10,8 @@ class SharedVideoPlayer {
     private var player: AVPlayer?
     private var videoOutput: AVPlayerItemVideoOutput?
 
-    // CADisplayLink for capturing frames at adaptive rate
-    private var displayLink: CADisplayLink?
+    // Timer for capturing frames at adaptive rate
+    private var displayLink: Timer?
 
     // Track the video's native frame rate
     private var videoFrameRate: Float = 0.0
@@ -48,6 +42,16 @@ class SharedVideoPlayer {
     private var leftAudioLevel: Float = 0.0
     private var rightAudioLevel: Float = 0.0
 
+    // Playback speed control (1.0 is normal speed)
+    private var playbackSpeed: Float = 1.0
+
+    // Metadata properties
+    private var videoTitle: String? = nil
+    private var videoBitrate: Int64 = 0
+    private var videoMimeType: String? = nil
+    private var audioChannels: Int = 0
+    private var audioSampleRate: Int = 0
+
     init() {
         // Detect screen refresh rate
         detectScreenRefreshRate()
@@ -55,48 +59,202 @@ class SharedVideoPlayer {
 
     /// Detects the current screen refresh rate
     private func detectScreenRefreshRate() {
-        #if canImport(UIKit) && !os(tvOS)
-            if #available(iOS 10.3, *) {
-                screenRefreshRate = Float(UIScreen.main.maximumFramesPerSecond)
+        if let mainScreen = NSScreen.main {
+            // Use CoreVideo DisplayLink to get refresh rate on macOS
+            var displayID: CGDirectDisplayID = CGMainDisplayID()
+            if let screenNumber = mainScreen.deviceDescription[
+                NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+            {
+                displayID = CGDirectDisplayID(screenNumber.uint32Value)
+            }
+
+            var displayLink: CVDisplayLink?
+            let error = CVDisplayLinkCreateWithCGDisplay(displayID, &displayLink)
+
+            if error == kCVReturnSuccess, let link = displayLink {
+                let period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link)
+                let timeValue = period.timeValue
+                let timeScale = period.timeScale
+
+                if timeValue > 0 && timeScale > 0 {
+                    // Convert to Hz (frames per second)
+                    let refreshRate = Double(timeScale) / Double(timeValue)
+                    screenRefreshRate = Float(refreshRate)
+                }
+                // No need to release the link as Core Foundation objects are automatically memory managed
             } else {
-                // Default to 60 fps for older iOS versions
+                // Fallback if we can't get the refresh rate
                 screenRefreshRate = 60.0
             }
-        #elseif os(macOS)
-        #elseif os(macOS)
-            if let mainScreen = NSScreen.main {
-                // Use CoreVideo DisplayLink to get refresh rate on macOS
-                var displayID: CGDirectDisplayID = CGMainDisplayID()
-                if let screenNumber = mainScreen.deviceDescription[
-                    NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-                {
-                    displayID = CGDirectDisplayID(screenNumber.uint32Value)
+        } else {
+            screenRefreshRate = 60.0
+        }
+    }
+
+    /// Extracts metadata from the asset
+    private func extractMetadata(from asset: AVAsset) {
+        // Reset metadata values
+        videoTitle = nil
+        videoBitrate = 0
+        videoMimeType = nil
+        audioChannels = 0
+        audioSampleRate = 0
+
+        // Extract title from metadata
+        if let commonMetadata = asset.commonMetadata as? [AVMetadataItem] {
+            if let titleItem = AVMetadataItem.metadataItems(from: commonMetadata, filteredByIdentifier: .commonIdentifierTitle).first,
+               let title = titleItem.value as? String {
+                videoTitle = title
+            }
+        }
+
+        // Try to get bitrate from the asset directly
+        if let urlAsset = asset as? AVURLAsset {
+            // Try to get file size
+            do {
+                let fileAttributes = try FileManager.default.attributesOfItem(atPath: urlAsset.url.path)
+                if let fileSize = fileAttributes[.size] as? NSNumber {
+                    let fileSizeInBytes = fileSize.int64Value
+
+                    // Get duration in seconds
+                    let durationInSeconds = CMTimeGetSeconds(asset.duration)
+
+                    if durationInSeconds > 0 {
+                        // Calculate bitrate: (fileSize * 8) / durationInSeconds
+                        let calculatedBitrate = Int64(Double(fileSizeInBytes * 8) / durationInSeconds)
+                        videoBitrate = calculatedBitrate
+                        print("Calculated bitrate from file size: \(calculatedBitrate) bits/s")
+                    }
                 }
+            } catch {
+                print("Error getting file attributes: \(error.localizedDescription)")
+            }
+        }
 
-                var displayLink: CVDisplayLink?
-                let error = CVDisplayLinkCreateWithCGDisplay(displayID, &displayLink)
+        // Extract format information
+        if #available(macOS 13.0, *) {
+            Task {
+                do {
+                    // Load tracks asynchronously
+                    let videoTracks = try await asset.loadTracks(withMediaType: .video)
+                    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
 
-                if error == kCVReturnSuccess, let link = displayLink {
-                    let actualRefreshRate = Double(
-                        CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link))
-                    if actualRefreshRate > 0 {
-                        let timeScale = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link)
-                            .timeScale
-                        if timeScale > 0 {
-                            // Convert to Hz (frames per second)
-                            let refreshRate = Double(timeScale) / actualRefreshRate
-                            screenRefreshRate = Float(refreshRate)
+                    // Extract video bitrate and format
+                    if let videoTrack = videoTracks.first {
+                        // Try to get estimated data rate directly from the track
+                        if #available(macOS 13.0, *) {
+                            do {
+                                let estimatedDataRate = try await videoTrack.load(.estimatedDataRate)
+                                if estimatedDataRate > 0 {
+                                    videoBitrate = Int64(estimatedDataRate)
+                                    print("Got bitrate from estimatedDataRate: \(videoBitrate) bits/s")
+                                }
+                            } catch {
+                                print("Error getting estimatedDataRate: \(error.localizedDescription)")
+                            }
+                        }
+
+                        // Get estimated data rate (bitrate) from format description
+                        let formatDescriptions = try await videoTrack.load(.formatDescriptions)
+                        if let formatDescription = formatDescriptions.first {
+                            let extensions = CMFormatDescriptionGetExtensions(formatDescription) as Dictionary?
+                            if let dict = extensions,
+                               let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
+                               let avgBitrate = bitrate["avg-bitrate"] as? Int64 {
+                                videoBitrate = avgBitrate
+                                print("Got bitrate from format description: \(videoBitrate) bits/s")
+                            }
+
+                            // Get MIME type
+                            let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
+                            let mediaType = CMFormatDescriptionGetMediaType(formatDescription)
+
+                            if mediaType == kCMMediaType_Video {
+                                switch mediaSubType {
+                                case kCMVideoCodecType_H264:
+                                    videoMimeType = "video/h264"
+                                case kCMVideoCodecType_HEVC:
+                                    videoMimeType = "video/hevc"
+                                case kCMVideoCodecType_MPEG4Video:
+                                    videoMimeType = "video/mp4v-es"
+                                case kCMVideoCodecType_MPEG2Video:
+                                    videoMimeType = "video/mpeg2"
+                                default:
+                                    videoMimeType = "video/mp4"
+                                }
+                            }
                         }
                     }
-                    CVDisplayLinkRelease(link)
-                } else {
-                    // Fallback if we can't get the refresh rate
-                    screenRefreshRate = 60.0
+
+                    // Extract audio channels and sample rate
+                    if let audioTrack = audioTracks.first {
+                        let formatDescriptions = try await audioTrack.load(.formatDescriptions)
+                        if let formatDescription = formatDescriptions.first  {
+                            let basicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+                            if let basicDesc = basicDescription {
+                                audioChannels = Int(basicDesc.pointee.mChannelsPerFrame)
+                                audioSampleRate = Int(basicDesc.pointee.mSampleRate)
+                            }
+                        }
+                    }
+                } catch {
+                    print("Error extracting metadata: \(error.localizedDescription)")
                 }
-            } else {
-                screenRefreshRate = 60.0
             }
-        #endif
+        } else {
+            // Fallback for older OS versions
+            // Extract video bitrate and format
+            if let videoTrack = asset.tracks(withMediaType: .video).first {
+                // Try to get estimated data rate directly from the track
+                let estimatedDataRate = videoTrack.estimatedDataRate
+                if estimatedDataRate > 0 {
+                    videoBitrate = Int64(estimatedDataRate)
+                    print("Got bitrate from estimatedDataRate (legacy): \(videoBitrate) bits/s")
+                }
+
+                if let formatDescriptions = videoTrack.formatDescriptions as? [CMFormatDescription],
+                   let formatDescription = formatDescriptions.first {
+                    let extensions = CMFormatDescriptionGetExtensions(formatDescription) as Dictionary?
+                    if let dict = extensions,
+                       let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
+                       let avgBitrate = bitrate["avg-bitrate"] as? Int64 {
+                        videoBitrate = avgBitrate
+                        print("Got bitrate from format description (legacy): \(videoBitrate) bits/s")
+                    }
+
+                    // Get MIME type
+                    let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
+                    let mediaType = CMFormatDescriptionGetMediaType(formatDescription)
+
+                    if mediaType == kCMMediaType_Video {
+                        switch mediaSubType {
+                        case kCMVideoCodecType_H264:
+                            videoMimeType = "video/h264"
+                        case kCMVideoCodecType_HEVC:
+                            videoMimeType = "video/hevc"
+                        case kCMVideoCodecType_MPEG4Video:
+                            videoMimeType = "video/mp4v-es"
+                        case kCMVideoCodecType_MPEG2Video:
+                            videoMimeType = "video/mpeg2"
+                        default:
+                            videoMimeType = "video/mp4"
+                        }
+                    }
+                }
+            }
+
+            // Extract audio channels and sample rate
+            if let audioTrack = asset.tracks(withMediaType: .audio).first {
+                if let formatDescriptions = audioTrack.formatDescriptions as? [CMAudioFormatDescription],
+                   let formatDescription = formatDescriptions.first {
+                    let basicDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+                    if let basicDesc = basicDescription {
+                        audioChannels = Int(basicDesc.pointee.mChannelsPerFrame)
+                        audioSampleRate = Int(basicDesc.pointee.mSampleRate)
+                    }
+                }
+            }
+        }
     }
 
     /// Detects the video's native frame rate from its asset
@@ -110,7 +268,7 @@ class SharedVideoPlayer {
             }
 
             // Replace deprecated nominalFrameRate property
-            if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+            if #available(macOS 13.0, *) {
                 Task {
                     do {
                         let frameRate = try await videoTrack.load(.nominalFrameRate)
@@ -168,6 +326,9 @@ class SharedVideoPlayer {
 
         let asset = AVURLAsset(url: url)
 
+        // Extract metadata from the asset
+        extractMetadata(from: asset)
+
         // Detect video frame rate
         detectVideoFrameRate(from: asset)
 
@@ -180,7 +341,7 @@ class SharedVideoPlayer {
                 return
             }
 
-            if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+            if #available(macOS 13.0, *) {
                 Task {
                     do {
                         // Use the modern API to load naturalSize and preferredTransform
@@ -280,37 +441,18 @@ class SharedVideoPlayer {
         }
     }
 
-    /// Configures the CADisplayLink with the appropriate frame rate
+    /// Configures the timer with the appropriate frame rate
     private func configureDisplayLink() {
         stopDisplayLink()  // Ensure previous link is invalidated
 
-        #if canImport(UIKit)
-            displayLink = CADisplayLink(target: self, selector: #selector(captureFrame))
-
-            if #available(iOS 15.0, tvOS 15.0, *) {
-                // Modern API - set preferred frame rate directly
-                displayLink?.preferredFrameRateRange = CAFrameRateRange(
-                    minimum: captureFrameRate,
-                    maximum: captureFrameRate,
-                    preferred: captureFrameRate
-                )
-            } else {
-                // Legacy API - use frame interval
-                let frameInterval = Int(round(screenRefreshRate / captureFrameRate))
-                displayLink?.preferredFramesPerSecond = Int(screenRefreshRate) / frameInterval
-            }
-
-            displayLink?.add(to: .main, forMode: .common)
-        #elseif os(macOS)
-            // For macOS, use a timer with the appropriate interval
-            let interval = 1.0 / Double(captureFrameRate)
-            Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-                self?.captureFrame()
-            }
-        #endif
+        // For macOS, use a timer with the appropriate interval
+        let interval = 1.0 / Double(captureFrameRate)
+        Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.captureFrame()
+        }
     }
 
-    /// Stops the CADisplayLink or timer
+    /// Stops the timer
     private func stopDisplayLink() {
         displayLink?.invalidate()
         displayLink = nil
@@ -554,6 +696,17 @@ class SharedVideoPlayer {
         return volume
     }
 
+    /// Sets the playback speed (0.5 to 2.0, where 1.0 is normal speed)
+    func setPlaybackSpeed(speed: Float) {
+        playbackSpeed = max(0.5, min(2.0, speed))  // Clamp between 0.5 and 2.0
+        player?.rate = playbackSpeed
+    }
+
+    /// Gets the current playback speed (0.5 to 2.0, where 1.0 is normal speed)
+    func getPlaybackSpeed() -> Float {
+        return playbackSpeed
+    }
+
     /// Returns a pointer to the shared frame buffer. The caller should not free this pointer.
     func getLatestFramePointer() -> UnsafeMutablePointer<UInt32>? {
         return frameBuffer
@@ -574,11 +727,26 @@ class SharedVideoPlayer {
     /// Returns the current capture frame rate (minimum of video and screen rates)
     func getCaptureFrameRate() -> Float { return captureFrameRate }
 
+    /// Returns the video title if available
+    func getVideoTitle() -> String? { return videoTitle }
+
+    /// Returns the video bitrate in bits per second
+    func getVideoBitrate() -> Int64 { return videoBitrate }
+
+    /// Returns the video MIME type if available
+    func getVideoMimeType() -> String? { return videoMimeType }
+
+    /// Returns the number of audio channels
+    func getAudioChannels() -> Int { return audioChannels }
+
+    /// Returns the audio sample rate in Hz
+    func getAudioSampleRate() -> Int { return audioSampleRate }
+
     /// Returns the duration of the video in seconds.
     func getDuration() -> Double {
         guard let item = player?.currentItem else { return 0 }
 
-        if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+        if #available(macOS 13.0, *) {
             // Use the modern API with async/await
             Task {
                 do {
@@ -779,4 +947,63 @@ public func getRightAudioLevel(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getRightAudioLevel()
+}
+
+@_cdecl("setPlaybackSpeed")
+public func setPlaybackSpeed(_ context: UnsafeMutableRawPointer?, _ speed: Float) {
+    guard let context = context else { return }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    DispatchQueue.main.async {
+        player.setPlaybackSpeed(speed: speed)
+    }
+}
+
+@_cdecl("getPlaybackSpeed")
+public func getPlaybackSpeed(_ context: UnsafeMutableRawPointer?) -> Float {
+    guard let context = context else { return 1.0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.getPlaybackSpeed()
+}
+
+@_cdecl("getVideoTitle")
+public func getVideoTitle(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    if let title = player.getVideoTitle() {
+        let cString = strdup(title)
+        return UnsafePointer<CChar>(cString)
+    }
+    return nil
+}
+
+@_cdecl("getVideoBitrate")
+public func getVideoBitrate(_ context: UnsafeMutableRawPointer?) -> Int64 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.getVideoBitrate()
+}
+
+@_cdecl("getVideoMimeType")
+public func getVideoMimeType(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
+    guard let context = context else { return nil }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    if let mimeType = player.getVideoMimeType() {
+        let cString = strdup(mimeType)
+        return UnsafePointer<CChar>(cString)
+    }
+    return nil
+}
+
+@_cdecl("getAudioChannels")
+public func getAudioChannels(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return Int32(player.getAudioChannels())
+}
+
+@_cdecl("getAudioSampleRate")
+public func getAudioSampleRate(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return Int32(player.getAudioSampleRate())
 }
