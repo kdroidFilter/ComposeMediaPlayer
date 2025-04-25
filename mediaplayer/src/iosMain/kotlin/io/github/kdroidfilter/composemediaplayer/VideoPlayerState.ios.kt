@@ -233,7 +233,7 @@ actual open class VideoPlayerState {
                     // Get bitrate
                     val trackBitrate = track.estimatedDataRate
                     if (trackBitrate > 0) {
-                        _metadata.bitrate = (trackBitrate * 1000).toLong()
+                        _metadata.bitrate = trackBitrate.toLong()
                     }
 
                     // Get resolution from naturalSize
