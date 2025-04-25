@@ -552,7 +552,6 @@ private fun VideoContent(
                                 this.width = width
                                 this.height = height
                                 duration = (video.duration * 1000).toLong()
-                                frameRate = 30.0f // Default value
 
                                 // Try to get mimeType and title from the video source - optimized
                                 val src = video.src
@@ -580,16 +579,6 @@ private fun VideoContent(
                                         }
                                     } catch (e: Exception) {
                                         wasmVideoLogger.w { "Failed to extract title from filename: ${e.message}" }
-                                    }
-                                }
-
-                                // Estimate bitrate based on dimensions
-                                if (width > 0 && height > 0) {
-                                    bitrate = when {
-                                        width >= 3840 -> 20000000L // 4K
-                                        width >= 1920 -> 8000000L  // 1080p
-                                        width >= 1280 -> 5000000L  // 720p
-                                        else -> 2000000L           // SD
                                     }
                                 }
                             }
