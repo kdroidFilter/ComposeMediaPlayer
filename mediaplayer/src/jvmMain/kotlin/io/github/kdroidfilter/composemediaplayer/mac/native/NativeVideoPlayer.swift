@@ -2,13 +2,7 @@ import AVFoundation
 import CoreGraphics
 import CoreVideo
 import Foundation
-
-#if canImport(UIKit)
-    import UIKit
-#endif
-#if os(macOS)
-    import AppKit
-#endif
+import AppKit
 
 /// Class that manages video playback and frame capture into an optimized shared buffer.
 /// Frame capture rate adapts to the lower of screen refresh rate and video frame rate.
@@ -16,8 +10,8 @@ class SharedVideoPlayer {
     private var player: AVPlayer?
     private var videoOutput: AVPlayerItemVideoOutput?
 
-    // CADisplayLink for capturing frames at adaptive rate
-    private var displayLink: CADisplayLink?
+    // Timer for capturing frames at adaptive rate
+    private var displayLink: Timer?
 
     // Track the video's native frame rate
     private var videoFrameRate: Float = 0.0
@@ -65,48 +59,36 @@ class SharedVideoPlayer {
 
     /// Detects the current screen refresh rate
     private func detectScreenRefreshRate() {
-        #if canImport(UIKit) && !os(tvOS)
-            if #available(iOS 10.3, *) {
-                screenRefreshRate = Float(UIScreen.main.maximumFramesPerSecond)
+        if let mainScreen = NSScreen.main {
+            // Use CoreVideo DisplayLink to get refresh rate on macOS
+            var displayID: CGDirectDisplayID = CGMainDisplayID()
+            if let screenNumber = mainScreen.deviceDescription[
+                NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+            {
+                displayID = CGDirectDisplayID(screenNumber.uint32Value)
+            }
+
+            var displayLink: CVDisplayLink?
+            let error = CVDisplayLinkCreateWithCGDisplay(displayID, &displayLink)
+
+            if error == kCVReturnSuccess, let link = displayLink {
+                let period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link)
+                let timeValue = period.timeValue
+                let timeScale = period.timeScale
+
+                if timeValue > 0 && timeScale > 0 {
+                    // Convert to Hz (frames per second)
+                    let refreshRate = Double(timeScale) / Double(timeValue)
+                    screenRefreshRate = Float(refreshRate)
+                }
+                // No need to release the link as Core Foundation objects are automatically memory managed
             } else {
-                // Default to 60 fps for older iOS versions
+                // Fallback if we can't get the refresh rate
                 screenRefreshRate = 60.0
             }
-        #elseif os(macOS)
-        #elseif os(macOS)
-            if let mainScreen = NSScreen.main {
-                // Use CoreVideo DisplayLink to get refresh rate on macOS
-                var displayID: CGDirectDisplayID = CGMainDisplayID()
-                if let screenNumber = mainScreen.deviceDescription[
-                    NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-                {
-                    displayID = CGDirectDisplayID(screenNumber.uint32Value)
-                }
-
-                var displayLink: CVDisplayLink?
-                let error = CVDisplayLinkCreateWithCGDisplay(displayID, &displayLink)
-
-                if error == kCVReturnSuccess, let link = displayLink {
-                    let actualRefreshRate = Double(
-                        CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link))
-                    if actualRefreshRate > 0 {
-                        let timeScale = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(link)
-                            .timeScale
-                        if timeScale > 0 {
-                            // Convert to Hz (frames per second)
-                            let refreshRate = Double(timeScale) / actualRefreshRate
-                            screenRefreshRate = Float(refreshRate)
-                        }
-                    }
-                    CVDisplayLinkRelease(link)
-                } else {
-                    // Fallback if we can't get the refresh rate
-                    screenRefreshRate = 60.0
-                }
-            } else {
-                screenRefreshRate = 60.0
-            }
-        #endif
+        } else {
+            screenRefreshRate = 60.0
+        }
     }
 
     /// Extracts metadata from the asset
@@ -150,7 +132,7 @@ class SharedVideoPlayer {
         }
 
         // Extract format information
-        if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+        if #available(macOS 13.0, *) {
             Task {
                 do {
                     // Load tracks asynchronously
@@ -160,7 +142,7 @@ class SharedVideoPlayer {
                     // Extract video bitrate and format
                     if let videoTrack = videoTracks.first {
                         // Try to get estimated data rate directly from the track
-                        if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+                        if #available(macOS 13.0, *) {
                             do {
                                 let estimatedDataRate = try await videoTrack.load(.estimatedDataRate)
                                 if estimatedDataRate > 0 {
@@ -286,7 +268,7 @@ class SharedVideoPlayer {
             }
 
             // Replace deprecated nominalFrameRate property
-            if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+            if #available(macOS 13.0, *) {
                 Task {
                     do {
                         let frameRate = try await videoTrack.load(.nominalFrameRate)
@@ -359,7 +341,7 @@ class SharedVideoPlayer {
                 return
             }
 
-            if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+            if #available(macOS 13.0, *) {
                 Task {
                     do {
                         // Use the modern API to load naturalSize and preferredTransform
@@ -459,37 +441,18 @@ class SharedVideoPlayer {
         }
     }
 
-    /// Configures the CADisplayLink with the appropriate frame rate
+    /// Configures the timer with the appropriate frame rate
     private func configureDisplayLink() {
         stopDisplayLink()  // Ensure previous link is invalidated
 
-        #if canImport(UIKit)
-            displayLink = CADisplayLink(target: self, selector: #selector(captureFrame))
-
-            if #available(iOS 15.0, tvOS 15.0, *) {
-                // Modern API - set preferred frame rate directly
-                displayLink?.preferredFrameRateRange = CAFrameRateRange(
-                    minimum: captureFrameRate,
-                    maximum: captureFrameRate,
-                    preferred: captureFrameRate
-                )
-            } else {
-                // Legacy API - use frame interval
-                let frameInterval = Int(round(screenRefreshRate / captureFrameRate))
-                displayLink?.preferredFramesPerSecond = Int(screenRefreshRate) / frameInterval
-            }
-
-            displayLink?.add(to: .main, forMode: .common)
-        #elseif os(macOS)
-            // For macOS, use a timer with the appropriate interval
-            let interval = 1.0 / Double(captureFrameRate)
-            Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-                self?.captureFrame()
-            }
-        #endif
+        // For macOS, use a timer with the appropriate interval
+        let interval = 1.0 / Double(captureFrameRate)
+        Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.captureFrame()
+        }
     }
 
-    /// Stops the CADisplayLink or timer
+    /// Stops the timer
     private func stopDisplayLink() {
         displayLink?.invalidate()
         displayLink = nil
@@ -783,7 +746,7 @@ class SharedVideoPlayer {
     func getDuration() -> Double {
         guard let item = player?.currentItem else { return 0 }
 
-        if #available(macOS 13.0, iOS 16.0, tvOS 16.0, *) {
+        if #available(macOS 13.0, *) {
             // Use the modern API with async/await
             Task {
                 do {
