@@ -819,7 +819,8 @@ public func openUri(_ context: UnsafeMutableRawPointer?, _ uri: UnsafePointer<CC
         return
     }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
-    DispatchQueue.main.async {
+    // Use a background queue for heavy operations to avoid blocking the main thread
+    DispatchQueue.global(qos: .userInitiated).async {
         player.openUri(swiftUri)
     }
 }
