@@ -2,19 +2,14 @@ package io.github.kdroidfilter.composemediaplayer.subtitle
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.Color
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -59,7 +54,29 @@ fun ComposeSubtitleLayer(
                 withContext(Dispatchers.Default) {
                     // Load and parse the subtitle file
                     val content = loadSubtitleContent(subtitleTrack.src)
-                    WebVttParser.parse(content)
+
+                    // Determine the subtitle format based on file extension and content
+                    val isSrtByExtension = subtitleTrack.src.endsWith(".srt", ignoreCase = true)
+
+                    // Check content for SRT format (typically starts with a number followed by timing)
+                    val isSrtByContent = content.trim().let { 
+                        val lines = it.lines()
+                        lines.size >= 2 && 
+                        lines[0].trim().toIntOrNull() != null && 
+                        lines[1].contains("-->") && 
+                        lines[1].contains(",") // SRT uses comma for milliseconds
+                    }
+
+                    // Check content for WebVTT format (starts with WEBVTT)
+                    val isVttByContent = content.trim().startsWith("WEBVTT")
+
+                    // Use the appropriate parser based on format detection
+                    if (isSrtByExtension || (isSrtByContent && !isVttByContent)) {
+                        SrtParser.parse(content)
+                    } else {
+                        // Default to WebVTT parser for other formats
+                        WebVttParser.parse(content)
+                    }
                 }
             } catch (e: Exception) {
                 // If there's an error loading or parsing the subtitle file,

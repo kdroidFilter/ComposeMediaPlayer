@@ -372,14 +372,25 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                         }
 
                         try {
-                            // Try to extract bitrate
-                            val bitrate = tagList.getString("bitrate", 0)
-                            if (bitrate != null) {
+                            // Try to extract video bitrate first
+                            val videoBitrate = tagList.getString("video-bitrate", 0)
+                            if (videoBitrate != null) {
                                 try {
-                                    // Convert from kbps to bps by multiplying by 1000
-                                    metadata.bitrate = bitrate.toLong() * 1000
+                                    // The bitrate is already in bps, no need to convert
+                                    metadata.bitrate = videoBitrate.toLong()
                                 } catch (_: NumberFormatException) {
                                     // Ignore if the string can't be converted to a long
+                                }
+                            } else {
+                                // Fallback to generic bitrate if video-specific one is not available
+                                val bitrate = tagList.getString("bitrate", 0)
+                                if (bitrate != null) {
+                                    try {
+                                        // The bitrate is already in bps, no need to convert
+                                        metadata.bitrate = bitrate.toLong()
+                                    } catch (_: NumberFormatException) {
+                                        // Ignore if the string can't be converted to a long
+                                    }
                                 }
                             }
                         } catch (_: Exception) {

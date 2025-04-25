@@ -42,7 +42,7 @@ fun SinglePlayerScreen() {
 
         // Launcher for selecting a local subtitle file (VTT format)
         val subtitleFileLauncher = rememberFilePickerLauncher(
-            type = FileKitType.File("vtt"),
+            type = FileKitType.File("vtt", "srt"),
             title = "Select a subtitle file"
         ) { file ->
             file?.let {
