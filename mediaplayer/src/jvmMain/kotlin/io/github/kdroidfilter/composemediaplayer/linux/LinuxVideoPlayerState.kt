@@ -679,6 +679,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         _isLoading = true
         _hasMedia = false
         hasReceivedFirstFrame = false
+        playbackSpeed = 1.0f
         try {
             val uriObj = if (uri.startsWith("http://") || uri.startsWith("https://")) {
                 URI(uri)
