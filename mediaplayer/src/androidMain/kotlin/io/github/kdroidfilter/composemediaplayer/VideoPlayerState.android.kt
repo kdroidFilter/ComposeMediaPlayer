@@ -501,6 +501,7 @@ actual open class VideoPlayerState {
         _error = null
         _aspectRatio = 16f / 9f  // Reset aspect ratio to default
         _playbackSpeed = 1.0f    // Reset playback speed to default
+        _metadata = VideoMetadata()  // Reset metadata to a new empty instance
         exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
         if (!keepMedia) {
             _hasMedia = false
