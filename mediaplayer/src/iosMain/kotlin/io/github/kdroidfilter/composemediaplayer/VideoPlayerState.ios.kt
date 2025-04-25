@@ -252,8 +252,10 @@ actual open class VideoPlayerState {
             // Process audio tracks
             val audioTracks = asset.tracksWithMediaType(AVMediaTypeAudio)
             if (audioTracks.isNotEmpty()) {
-                // Update audio channels count based on number of audio tracks
-                _metadata.audioChannels = audioTracks.size
+                // Set audio channels to 2 (stereo) as a more accurate default
+                // Most audio content is stereo, and we can't easily get the actual channel count
+                // from AVAssetTrack in Kotlin/Native
+                _metadata.audioChannels = 2 // Default to stereo instead of using track count
 
                 // Try to get sample rate (simplified approach)
                 _metadata.audioSampleRate = 44100 // Default to common value
