@@ -78,7 +78,8 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
 
         // Extract audio properties
         _audioSampleRate = ctx.sampleRate
-        _audioChannels = ctx.destination.maxChannelCount.coerceAtMost(2) // Most common is 2 (stereo)
+        _audioChannels = source.channelCount
+
 
         wasmAudioLogger.d { "Web Audio successfully initialized and capturing audio. Sample rate: $_audioSampleRate Hz, Channels: $_audioChannels" }
         return true

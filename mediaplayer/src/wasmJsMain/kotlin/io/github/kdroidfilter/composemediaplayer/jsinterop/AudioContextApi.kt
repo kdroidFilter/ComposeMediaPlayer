@@ -15,6 +15,7 @@ external class AudioContext : JsAny {
     val destination: AudioDestinationNode
     val state: String
     val sampleRate: Int
+
     fun createMediaElementSource(mediaElement: HTMLMediaElement): MediaElementAudioSourceNode
     fun createChannelSplitter(numberOfOutputs: Int = definedExternally): ChannelSplitterNode
     fun createAnalyser(): AnalyserNode
@@ -40,7 +41,10 @@ external class AudioDestinationNode : AudioNode {
 /**
  * Audio source based on a media element (audio or video)
  */
-external class MediaElementAudioSourceNode : AudioNode
+external class MediaElementAudioSourceNode : AudioNode {
+    /** Number of channels actually présentes dans la piste audio. */
+    val channelCount: Int
+}
 
 /**
  * Allows channel separation
@@ -90,3 +94,4 @@ external class AnalyserNode : AudioNode {
     fun getFloatFrequencyData(array: Float32Array)
     fun getFloatTimeDomainData(array: Float32Array)
 }
+
