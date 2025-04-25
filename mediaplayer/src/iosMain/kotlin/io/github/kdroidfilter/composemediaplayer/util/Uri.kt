@@ -4,5 +4,10 @@ import io.github.vinceglb.filekit.PlatformFile
 import io.github.vinceglb.filekit.path
 
 actual fun PlatformFile.getUri(): String {
-    return this.path.toString()
+    val filePath = this.path.toString()
+    return if (filePath.startsWith("file://")) {
+        filePath
+    } else {
+        "file://$filePath"
+    }
 }

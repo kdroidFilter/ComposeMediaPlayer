@@ -9,5 +9,9 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+    <key>NSFileAccessUsageDescription</key>
+    <string>This app needs access to files to play local videos</string>
+    <key>UIFileSharingEnabled</key>
+    <true/>
 </dict>
 </plist>
