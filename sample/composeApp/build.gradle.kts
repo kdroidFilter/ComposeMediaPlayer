@@ -101,3 +101,21 @@ compose.desktop {
     }
 }
 
+// Task to run the iOS app
+tasks.register<Exec>("runIos") {
+    group = "run"
+    description = "Run the iOS app in a simulator"
+
+    // Set the working directory to the iosApp directory
+    workingDir = file("${project.rootDir}/sample/iosApp")
+
+    // Command to execute the run_ios.sh script
+    commandLine("bash", "./run_ios.sh")
+
+    // Make the task depend on building the iOS framework
+    dependsOn(tasks.named("linkDebugFrameworkIosSimulatorArm64"))
+
+    doFirst {
+        println("Running iOS app in simulator...")
+    }
+}

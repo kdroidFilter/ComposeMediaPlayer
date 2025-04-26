@@ -10,11 +10,35 @@ set -euo pipefail
 ### — Parameters —
 SCHEME="iosApp"                                   # Scheme name
 CONFIG="Debug"
-# Use the first available iPhone simulator if no UDID is specified
-UDID=${1:-$(xcrun simctl list devices available | grep "iPhone" | head -1 | sed -E 's/.*\(([A-Z0-9-]+)\).*/\1/')}
-# If no iPhone is found, use any available simulator
-if [[ -z "$UDID" ]]; then
-  UDID=$(xcrun simctl list devices available | grep -E '\([A-Z0-9-]+\)' | head -1 | sed -E 's/.*\(([A-Z0-9-]+)\).*/\1/')
+# If UDID is provided, use it; otherwise find the latest iOS version and use an iPhone from that version
+if [[ -n "${1:-}" ]]; then
+  UDID="$1"
+else
+  # Get the list of available devices
+  DEVICES_LIST=$(xcrun simctl list devices available)
+
+  # Find the latest iOS version by extracting all iOS version numbers and sorting them
+  LATEST_IOS_VERSION=$(echo "$DEVICES_LIST" | grep -E -e "-- iOS [0-9]+\.[0-9]+ --" | 
+                       sed -E 's/.*-- iOS ([0-9]+\.[0-9]+) --.*/\1/' | 
+                       sort -t. -k1,1n -k2,2n | 
+                       tail -1)
+
+  echo "🔍 Latest iOS version found: $LATEST_IOS_VERSION"
+
+  # Find the first iPhone in the latest iOS version section
+  UDID=$(echo "$DEVICES_LIST" | 
+         awk -v version="-- iOS $LATEST_IOS_VERSION --" 'BEGIN {found=0} 
+              $0 ~ version {found=1; next} 
+              /-- iOS/ {found=0} 
+              found && /iPhone/ {print; exit}' | 
+         sed -E 's/.*\(([A-Z0-9-]+)\).*/\1/' | 
+         head -1)
+
+  # If no iPhone is found in the latest iOS version, fall back to any simulator
+  if [[ -z "$UDID" ]]; then
+    echo "⚠️ No iPhone found for iOS $LATEST_IOS_VERSION, falling back to any available simulator"
+    UDID=$(echo "$DEVICES_LIST" | grep -E '\([A-Z0-9-]+\)' | head -1 | sed -E 's/.*\(([A-Z0-9-]+)\).*/\1/')
+  fi
 fi
 
 # Check if a simulator was found
