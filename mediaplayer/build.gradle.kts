@@ -16,7 +16,10 @@ plugins {
 group = "io.github.kdroidfilter.composemediaplayer"
 
 val ref = System.getenv("GITHUB_REF") ?: ""
-val version = if (ref.startsWith("refs/tags/")) ref.removePrefix("refs/tags/") else "dev"
+val version = if (ref.startsWith("refs/tags/")) {
+    val tag = ref.removePrefix("refs/tags/")
+    if (tag.startsWith("v")) tag.substring(1) else tag
+} else "dev"
 
 
 tasks.withType<DokkaTask>().configureEach {
