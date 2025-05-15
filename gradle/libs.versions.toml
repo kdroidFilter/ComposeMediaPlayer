@@ -45,5 +45,5 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 android-application = { id = "com.android.application", version.ref = "agp" }
-vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.31.0"}
+vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.32.0"}
 dokka = { id = "org.jetbrains.dokka" , version = "2.0.0"}
