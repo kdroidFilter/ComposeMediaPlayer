@@ -3,6 +3,7 @@
 import com.vanniktech.maven.publish.SonatypeHost
 import org.jetbrains.dokka.gradle.DokkaTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -11,6 +12,7 @@ plugins {
     alias(libs.plugins.compose)
     alias(libs.plugins.vannitktech.maven.publish)
     alias(libs.plugins.dokka)
+    alias(libs.plugins.kotlinCocoapods)
 }
 
 group = "io.github.kdroidfilter.composemediaplayer"
@@ -39,6 +41,24 @@ kotlin {
     iosX64()
     iosArm64()
     iosSimulatorArm64()
+
+
+    cocoapods {
+        version = version.toString()
+        summary = "A multiplatform video player library for Compose applications"
+        homepage = "https://github.com/kdroidFilter/Compose-Media-Player"
+        name = "ComposeMediaPlayer"
+
+        framework {
+            baseName = "ComposeMediaPlayer"
+            isStatic = false
+            transitiveExport = false // This is default.
+        }
+
+        // Maps custom Xcode configuration to NativeBuildType
+        xcodeConfigurationToNativeBuildType["CUSTOM_DEBUG"] = NativeBuildType.DEBUG
+        xcodeConfigurationToNativeBuildType["CUSTOM_RELEASE"] = NativeBuildType.RELEASE
+    }
 
     sourceSets {
         commonMain.dependencies {
