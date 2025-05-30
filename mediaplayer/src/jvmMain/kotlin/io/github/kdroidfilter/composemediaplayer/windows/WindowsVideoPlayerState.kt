@@ -55,7 +55,7 @@ internal val windowsLogger = Logger.withTag("WindowsVideoPlayerState")
  */
 class WindowsVideoPlayerState : PlatformVideoPlayerState {
     companion object {
-        private val mediaFoundationInitialized = AtomicBoolean(false)
+        private val isMfBootstrapped = AtomicBoolean(false)
 
         /** Map to store volume settings for each player instance */
         private val instanceVolumes = ConcurrentHashMap<Pointer, Float>()
@@ -64,8 +64,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
          * Initialize Media Foundation only once for all instances.
          * This is called automatically when the class is loaded.
          */
-        private fun initializeMediaFoundation() {
-            if (!mediaFoundationInitialized.getAndSet(true)) {
+        private fun ensureMfInitialized() {
+            if (!isMfBootstrapped.getAndSet(true)) {
                 val hr = MediaFoundationLib.INSTANCE.InitMediaFoundation()
                 if (hr < 0) {
                     windowsLogger.e { "Media Foundation initialization failed (hr=0x${hr.toString(16)})" }
@@ -75,7 +75,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
         init {
             // Initialize Media Foundation when class is loaded
-            initializeMediaFoundation()
+            ensureMfInitialized()
         }
     }
 
@@ -84,12 +84,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     /** Coroutine scope for all async operations */
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-
-    /** Whether the player has been initialized */
-    private var isInitialized by mutableStateOf(false)
-
-    private val initReady = CompletableDeferred<Unit>()
-
 
     /** Whether media has been loaded */
     private var _hasMedia by mutableStateOf(false)
@@ -104,6 +98,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     /** Video player instance handle */
     private var videoPlayerInstance: Pointer? = null
+
+    /** Deferred completed when initialization is ready */
+    private val initReady = CompletableDeferred<Unit>()
 
     /** Current volume level (0.0 to 1.0) */
     private var _volume by mutableStateOf(1f)
@@ -249,9 +246,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var lastUri: String? = null
 
     init {
+        // Kick off native initialization immediately
         scope.launch {
             try {
-                // Media Foundation is already initialized in companion object
                 val instance = MediaFoundationLib.createInstance()
                 if (instance == null) {
                     setError("Failed to create video player instance")
@@ -259,9 +256,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
                 videoPlayerInstance = instance
 
-                // Set initial volume for this instance
+                // Store default volume so that later instances inherit it
                 instanceVolumes[instance] = _volume
-                isInitialized = true
                 initReady.complete(Unit)
             } catch (e: Exception) {
                 initReady.completeExceptionally(e)
@@ -304,7 +300,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 windowsLogger.e { "Error during dispose: ${e.message}" }
             } finally {
                 // Mark player as uninitialized
-                isInitialized = false
                 _hasMedia = false
                 scope.cancel()  // Cancel the scope to clean up any remaining jobs
             }
@@ -342,7 +337,6 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-
     /**
      * Opens a media file or URL for playback
      *
@@ -354,10 +348,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
         scope.launch {
             try {
-                // si l'init est déjà terminée, initReady est complété : await() reprend aussitôt
+                // Wait for initialization to complete with a timeout
                 withTimeout(10_000) { initReady.await() }
 
-                // ici l'instance native est garantie non-nulle
+                // Here the native instance is guaranteed to be non-null
                 openUriInternal(uri)
             } catch (_: TimeoutCancellationException) {
                 setError("Player initialization timed out after 10 s.")
@@ -707,12 +701,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * If no media is loaded but a previous URI exists, it will try to open and play it
      */
     override fun play() {
-        if (!isInitialized || videoPlayerInstance == null || !_hasMedia) {
+        if (!readyForPlayback()) {
             lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
                 scope.launch {
                     openUri(uri)
                     delay(100)
-                    if (isInitialized && videoPlayerInstance != null) {
+                    if (readyForPlayback()) {
                         executeMediaOperation(
                             operation = "play after init",
                             precondition = true
@@ -984,6 +978,15 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             return true
         }
         return false
+    }
+
+    /**
+     * Checks if the player is ready for playback
+     * 
+     * @return True if the player is initialized and has media loaded, false otherwise
+     */
+    private fun readyForPlayback(): Boolean {
+        return initReady.isCompleted && videoPlayerInstance != null && _hasMedia
     }
 
     /**
