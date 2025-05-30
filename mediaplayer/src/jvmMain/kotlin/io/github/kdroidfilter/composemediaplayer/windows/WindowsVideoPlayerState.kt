@@ -88,6 +88,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     /** Whether the player has been initialized */
     private var isInitialized by mutableStateOf(false)
 
+    private val initReady = CompletableDeferred<Unit>()
+
+
     /** Whether media has been loaded */
     private var _hasMedia by mutableStateOf(false)
     override val hasMedia get() = _hasMedia
@@ -258,9 +261,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                 // Set initial volume for this instance
                 instanceVolumes[instance] = _volume
-
                 isInitialized = true
+                initReady.complete(Unit)
             } catch (e: Exception) {
+                initReady.completeExceptionally(e)
                 setError("Exception during initialization: ${e.message}")
             }
         }
@@ -348,33 +352,19 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         lastUri = uri
         playbackSpeed = 1.0f
 
-        if (!isInitialized || videoPlayerInstance == null) {
-            // Instead of immediately returning an error, wait for initialization to complete
-            scope.launch {
-                try {
-                    // Wait for initialization to complete with a timeout
-                    var timeoutCounter = 0
-                    while ((!isInitialized || videoPlayerInstance == null) && timeoutCounter < 10) {
-                        delay(100)
-                        timeoutCounter++
-                    }
+        scope.launch {
+            try {
+                // si l'init est déjà terminée, initReady est complété : await() reprend aussitôt
+                withTimeout(10_000) { initReady.await() }
 
-                    // Check if initialization completed successfully
-                    if (!isInitialized || videoPlayerInstance == null) {
-                        setError("Player initialization timed out.")
-                        return@launch
-                    }
-
-                    // Now that the player is initialized, open the URI
-                    openUriInternal(uri)
-                } catch (e: Exception) {
-                    setError("Error waiting for player initialization: ${e.message}")
-                }
+                // ici l'instance native est garantie non-nulle
+                openUriInternal(uri)
+            } catch (_: TimeoutCancellationException) {
+                setError("Player initialization timed out after 10 s.")
+            } catch (e: Exception) {
+                setError("Error while waiting for initialization: ${e.message}")
             }
-            return
         }
-
-        openUriInternal(uri)
     }
 
     /**
