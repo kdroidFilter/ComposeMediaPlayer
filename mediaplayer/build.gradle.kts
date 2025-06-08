@@ -92,7 +92,7 @@ kotlin {
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.gst1.java.core)
-            implementation(libs.jna)
+            implementation(libs.jna.jpms)
             implementation(libs.jna.platform)
             implementation(libs.slf4j.simple)
         }
