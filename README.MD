@@ -39,6 +39,7 @@
   - [Basic Example](#-basic-example)
 - [License](#-license)
 - [Roadmap](#-roadmap)
+- [Applications Using This Library](#-applications-using-this-library)
 
 ## 🚀 Live Demo
 
@@ -494,3 +495,9 @@ Compose Media Player is licensed under the MIT License. See [LICENSE](LICENSE) f
 
 - **Audio Player**: Introduce a standalone audio player for handling audio-only content.
 - **Player with Separate Audio and Video Streams**: Add functionality to support different audio and video streams for advanced playback scenarios.
+
+## 🚀 Applications Using This Library
+
+- [Pixelix](https://github.com/ghostbyte-dev/pixelix) - A multimedia application using Compose Media Player
+
+If you're using this library in your project, please let us know and we'll add it to this list!
