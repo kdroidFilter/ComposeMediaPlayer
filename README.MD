@@ -2,6 +2,8 @@
 
 <img src="/assets/banner.jpg" style="border-radius: 10px;"/>
 
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.kdroidfilter/composemediaplayer.svg)](https://search.maven.org/artifact/io.github.kdroidfilter/composemediaplayer)
+
 **Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations. The library leverages:
 
 - **GStreamer** for Linux
@@ -9,6 +11,34 @@
 - **AVPlayer** for macOS and iOS
 - **Media3** for Android
 - **HTML5 Player** for WASMJS
+
+## Table of Contents
+- [Live Demo](#-live-demo)
+- [Features](#-features)
+- [Supported Video Formats](#-supported-video-formats)
+- [Installation](#-installation)
+- [Getting Started](#-getting-started)
+  - [Initialization](#initialization)
+  - [Displaying the Video Surface](#displaying-the-video-surface)
+    - [Content Scaling](#content-scaling)
+    - [Custom Overlay UI](#custom-overlay-ui)
+  - [Video Playback via URL or Local Files](#video-playback-via-url-or-local-files)
+  - [Full Controls](#full-controls)
+  - [Progress Indicators](#progress-indicators)
+  - [Display Left and Right Volume Levels](#display-left-and-right-volume-levels)
+  - [Error Handling](#error-handling)
+  - [Loading Indicator](#loading-indicator)
+  - [Using Subtitles](#using-subtitles)
+    - [Supported Formats](#-supported-formats)
+    - [Adding Subtitles from URL or Local File](#-adding-subtitles-from-url-or-local-file)
+    - [Customizing Subtitle Appearance](#-customizing-subtitle-appearance)
+    - [Disabling Subtitles](#-disabling-subtitles)
+  - [Fullscreen Mode](#️-fullscreen-mode)
+- [Metadata Support](#-metadata-support)
+  - [Example Usage](#example-usage)
+  - [Basic Example](#-basic-example)
+- [License](#-license)
+- [Roadmap](#-roadmap)
 
 ## 🚀 Live Demo
 
@@ -44,7 +74,7 @@ To add Compose Media Player to your project, include the following dependency in
 
 ```kotlin
 dependencies {
-    implementation("io.github.kdroidfilter:composemediaplayer:0.7.1")
+    implementation("io.github.kdroidfilter:composemediaplayer:<version>")
 }
 ```
 
