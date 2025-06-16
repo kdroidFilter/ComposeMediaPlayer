@@ -498,6 +498,6 @@ Compose Media Player is licensed under the MIT License. See [LICENSE](LICENSE) f
 
 ## 🚀 Applications Using This Library
 
-- [Pixelix](https://github.com/ghostbyte-dev/pixelix) - A multimedia application using Compose Media Player
+- [Pixelix](https://github.com/ghostbyte-dev/pixelix) - Pixelfed client for Android and iOS
 
 If you're using this library in your project, please let us know and we'll add it to this list!
