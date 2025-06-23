@@ -512,4 +512,4 @@ If you're using this library in your project, please let us know and we'll add i
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=kdroidfilter/ComposeMediaPlayer&type=Date)](https://star-history.com/#kdroidfilter/ComposeMediaPlayer&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=kdroidfilter/ComposeMediaPlayer&type=Date)](https://www.star-history.com/#kdroidfilter/ComposeMediaPlayer&Date)
