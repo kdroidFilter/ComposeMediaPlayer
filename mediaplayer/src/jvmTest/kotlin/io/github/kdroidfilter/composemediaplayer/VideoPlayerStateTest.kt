@@ -7,6 +7,7 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFalse
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
+import com.sun.jna.Platform
 import org.freedesktop.gstreamer.ElementFactory
 import org.freedesktop.gstreamer.Gst
 import org.freedesktop.gstreamer.Version
@@ -19,8 +20,15 @@ class VideoPlayerStateTest {
     /**
      * Checks if GStreamer is available and the playbin element can be created.
      * This is used to skip tests when GStreamer is not properly installed or configured.
+     * GStreamer is only checked on Linux platforms.
      */
     private fun isGStreamerAvailable(): Boolean {
+        // Only check for GStreamer on Linux platforms
+        if (!Platform.isLinux()) {
+            println("Skipping GStreamer check: Not on Linux platform")
+            return false
+        }
+
         try {
             // Try to initialize GStreamer if it's not already initialized
             if (!Gst.isInitialized()) {
