@@ -20,14 +20,12 @@ internal fun formatTime(value: Number, isNanoseconds: Boolean = false): String {
         value.toDouble()
     }
 
-    // Create an Instant starting from epoch 0 plus the given duration in seconds
-    val instant: Instant = Instant.fromEpochSeconds(0) + totalSeconds.seconds
-    val dateTime = instant.toLocalDateTime(TimeZone.UTC)
-
-    // Extract hours, minutes, and seconds
-    val hours = dateTime.hour
-    val minutes = dateTime.minute
-    val seconds = dateTime.second
+    // Calculate hours, minutes, and seconds directly from total seconds
+    // This handles large time values correctly without date-time wrapping
+    val totalSecondsInt = totalSeconds.toLong()
+    val hours = totalSecondsInt / 3600
+    val minutes = (totalSecondsInt % 3600) / 60
+    val seconds = totalSecondsInt % 60
 
     // Build the final string
     return if (hours > 0) {
