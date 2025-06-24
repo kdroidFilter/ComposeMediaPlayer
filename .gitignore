@@ -27,3 +27,4 @@ Pods/
 /mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.swiftmodule
 /mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.swiftsourceinfo
 *.log
+/sample/composeApp/debug/
