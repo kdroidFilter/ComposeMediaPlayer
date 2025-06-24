@@ -35,9 +35,10 @@ actual open class VideoPlayerState {
     actual var volume: Float
         get() = _volume.value
         set(value) {
-            _volume.value = value
+            val clampedValue = value.coerceIn(0f, 1f)
+            _volume.value = clampedValue
             if (_isPlaying) {
-                player?.volume = value
+                player?.volume = clampedValue
             }
         }
 
