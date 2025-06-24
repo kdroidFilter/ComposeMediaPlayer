@@ -93,10 +93,10 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     private var lastUri: String? = null
 
     // Non-blocking text properties
-    private val _positionText = mutableStateOf("")
+    private val _positionText = mutableStateOf("00:00")
     override val positionText: String get() = _positionText.value
 
-    private val _durationText = mutableStateOf("")
+    private val _durationText = mutableStateOf("00:00")
     override val durationText: String get() = _durationText.value
 
     // Non-blocking aspect ratio property
@@ -336,9 +336,8 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             val file = java.io.File(filePath)
             if (!file.exists()) {
                 macLogger.e { "File does not exist: $filePath" }
-                withContext(Dispatchers.Main) {
-                    error = VideoPlayerError.SourceError("File not found: $filePath")
-                }
+                // Set error synchronously to ensure it's available immediately for tests
+                error = VideoPlayerError.SourceError("File not found: $filePath")
                 return false
             }
         }
