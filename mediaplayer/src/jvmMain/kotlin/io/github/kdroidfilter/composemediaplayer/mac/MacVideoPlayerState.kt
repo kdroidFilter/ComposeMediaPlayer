@@ -330,6 +330,19 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         macLogger.d { "openMediaUri() - Opening URI: $uri" }
         val ptr = mainMutex.withLock { playerPtr } ?: return false
 
+        // Check if file exists (for local files)
+        if (uri.startsWith("file://") || !uri.contains("://")) {
+            val filePath = uri.replace("file://", "")
+            val file = java.io.File(filePath)
+            if (!file.exists()) {
+                macLogger.e { "File does not exist: $filePath" }
+                withContext(Dispatchers.Main) {
+                    error = VideoPlayerError.SourceError("File not found: $filePath")
+                }
+                return false
+            }
+        }
+
         return try {
             // Open video asynchronously
             SharedVideoPlayer.INSTANCE.openUri(ptr, uri)
@@ -344,6 +357,9 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             true
         } catch (e: Exception) {
             macLogger.e { "Failed to open URI: ${e.message}" }
+            withContext(Dispatchers.Main) {
+                error = VideoPlayerError.SourceError("Error opening media: ${e.message}")
+            }
             false
         }
     }
@@ -844,8 +860,8 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             hasMedia = false
             isPlaying = false
             isLoading = false
-            _positionText.value = ""
-            _durationText.value = ""
+            _positionText.value = "00:00"
+            _durationText.value = "00:00"
             _aspectRatio.value = 16f / 9f
             error = null
         }
@@ -952,10 +968,12 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
      * Toggles the fullscreen state of the video player
      */
     override fun toggleFullscreen() {
+        // Update the state immediately for test synchronization
+        isFullscreen = !isFullscreen
+
+        // Launch any additional background work if needed
         ioScope.launch {
-            withContext(Dispatchers.Main) {
-                isFullscreen = !isFullscreen
-            }
+            // Any additional work related to fullscreen toggle can go here
         }
     }
 }
