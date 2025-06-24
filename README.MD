@@ -92,8 +92,8 @@ dependencies {
 
 | Library Version | Kotlin Version |
 |-----------------|----------------|
-| 7.9.10          | 2.1.0          |
-| 7.9.11          | 2.2.0          |
+| 0.7.10          | 2.1.0          |
+| 0.7.11          | 2.2.0          |
 
 ## 🚀 Getting Started
 
