@@ -24,6 +24,7 @@
 - [Features](#-features)
 - [Supported Video Formats](#-supported-video-formats)
 - [Installation](#-installation)
+- [Compatibility Table](#-compatibility-table)
 - [Getting Started](#-getting-started)
   - [Initialization](#initialization)
   - [Displaying the Video Surface](#displaying-the-video-surface)
@@ -86,6 +87,13 @@ dependencies {
     implementation("io.github.kdroidfilter:composemediaplayer:<version>")
 }
 ```
+
+## 📊 Compatibility Table
+
+| Library Version | Kotlin Version |
+|-----------------|----------------|
+| 7.9.10          | 2.1.0          |
+| 7.9.11          | 2.2.0          |
 
 ## 🚀 Getting Started
 

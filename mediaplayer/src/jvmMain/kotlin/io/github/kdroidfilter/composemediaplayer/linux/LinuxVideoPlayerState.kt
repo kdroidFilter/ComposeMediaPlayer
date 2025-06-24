@@ -180,11 +180,11 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     override val rightLevel: Float
         get() = _rightLevel
 
-    private var _positionText by mutableStateOf("0:00")
+    private var _positionText by mutableStateOf("00:00")
     override val positionText: String
         get() = _positionText
 
-    private var _durationText by mutableStateOf("0:00")
+    private var _durationText by mutableStateOf("00:00")
     override val durationText: String
         get() = _durationText
 
@@ -793,9 +793,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
      * Toggles the fullscreen state of the video player
      */
     override fun toggleFullscreen() {
-        EventQueue.invokeLater {
-            _isFullscreen = !_isFullscreen
-        }
+        _isFullscreen = !_isFullscreen
     }
 
     // ---- Processing of a video sample ----
