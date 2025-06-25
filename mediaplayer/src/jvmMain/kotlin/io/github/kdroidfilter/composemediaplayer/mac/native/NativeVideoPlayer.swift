@@ -688,7 +688,22 @@ class SharedVideoPlayer {
     /// Sets the volume level (0.0 to 1.0)
     func setVolume(level: Float) {
         volume = max(0.0, min(1.0, level))  // Clamp between 0.0 and 1.0
-        player?.volume = volume
+
+        // Manage the multi-channel case (>2 channels)
+        if let playerItem = player?.currentItem, audioChannels > 2 {
+            // Apply volume via an AudioMix if we have more than 2 channels
+            if let audioTrack = playerItem.asset.tracks(withMediaType: .audio).first {
+                let parameters = AVMutableAudioMixInputParameters(track: audioTrack)
+                parameters.setVolume(volume, at: CMTime.zero)
+
+                let audioMix = AVMutableAudioMix()
+                audioMix.inputParameters = [parameters]
+                playerItem.audioMix = audioMix
+            }
+        } else {
+            // For stereo and mono channels, use the standard method
+            player?.volume = volume
+        }
     }
 
     /// Gets the current volume level (0.0 to 1.0)
