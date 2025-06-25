@@ -93,10 +93,10 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     private var lastUri: String? = null
 
     // Non-blocking text properties
-    private val _positionText = mutableStateOf("")
+    private val _positionText = mutableStateOf("00:00")
     override val positionText: String get() = _positionText.value
 
-    private val _durationText = mutableStateOf("")
+    private val _durationText = mutableStateOf("00:00")
     override val durationText: String get() = _durationText.value
 
     // Non-blocking aspect ratio property
@@ -217,11 +217,23 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
 
         lastUri = uri
 
+        // Check if this is a local file that doesn't exist
+        // This handles both URIs with file:// scheme and simple filenames without a scheme
+        if (uri.startsWith("file://") || !uri.contains("://") || !uri.matches("^[a-zA-Z]+://.*".toRegex())) {
+            val filePath = uri.replace("file://", "")
+            val file = java.io.File(filePath)
+            if (!file.exists()) {
+                macLogger.e { "File does not exist: $filePath" }
+                setPlayerError(VideoPlayerError.SourceError("File not found: $filePath"))
+                return
+            }
+        }
+
         // Update UI state first
         ioScope.launch {
             withContext(Dispatchers.Main) {
                 isLoading = true
-                error = null  // Clear any previous errors
+                error = null  // Clear any previous errors only if we got this far
                 playbackSpeed = 1.0f
             }
 
@@ -267,6 +279,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                     }
                 } else {
                     macLogger.e { "Failed to open URI" }
+                    // Use withContext directly since we're already in a suspend function
                     withContext(Dispatchers.Main) {
                         isLoading = false
                         error = VideoPlayerError.SourceError("Failed to open media source")
@@ -330,6 +343,19 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         macLogger.d { "openMediaUri() - Opening URI: $uri" }
         val ptr = mainMutex.withLock { playerPtr } ?: return false
 
+        // Check if file exists (for local files)
+        // This handles both URIs with file:// scheme and simple filenames without a scheme
+        if (uri.startsWith("file://") || !uri.contains("://") || !uri.matches("^[a-zA-Z]+://.*".toRegex())) {
+            val filePath = uri.replace("file://", "")
+            val file = java.io.File(filePath)
+            if (!file.exists()) {
+                macLogger.e { "File does not exist: $filePath" }
+                // Use setPlayerError to ensure the error is set synchronously
+                setPlayerError(VideoPlayerError.SourceError("File not found: $filePath"))
+                return false
+            }
+        }
+
         return try {
             // Open video asynchronously
             SharedVideoPlayer.INSTANCE.openUri(ptr, uri)
@@ -344,6 +370,8 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             true
         } catch (e: Exception) {
             macLogger.e { "Failed to open URI: ${e.message}" }
+            // Use setPlayerError to ensure the error is set synchronously
+            setPlayerError(VideoPlayerError.SourceError("Error opening media: ${e.message}"))
             false
         }
     }
@@ -844,21 +872,40 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             hasMedia = false
             isPlaying = false
             isLoading = false
-            _positionText.value = ""
-            _durationText.value = ""
+            _positionText.value = "00:00"
+            _durationText.value = "00:00"
             _aspectRatio.value = 16f / 9f
             error = null
         }
         _currentFrameState.value = null
     }
 
+    /** 
+     * Sets an error in a consistent way, ensuring it's always set on the main thread.
+     * For synchronous calls, this will block until the error is set.
+     */
+    private fun setPlayerError(error: VideoPlayerError) {
+        macLogger.e { "setPlayerError() - Setting error: $error" }
+
+        // For properties that need to be updated on the main thread,
+        // use runBlocking to ensure the update happens immediately
+        runBlocking {
+            withContext(Dispatchers.Main) {
+                isLoading = false
+                this@MacVideoPlayerState.error = error
+            }
+        }
+    }
+
     /** Handles errors by updating the state and logging the error. */
     private suspend fun handleError(e: Exception) {
+        macLogger.e { "handleError() - Player error: ${e.message}" }
+
+        // Since this is called from a suspend function, we can use withContext directly
         withContext(Dispatchers.Main) {
             isLoading = false
             error = VideoPlayerError.SourceError("Error: ${e.message}")
         }
-        macLogger.e { "handleError() - Player error: ${e.message}" }
     }
 
     /** Retrieves the current playback time from the native player. */
@@ -941,7 +988,11 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     }
 
     override fun clearError() {
-        ioScope.launch {
+        macLogger.d { "clearError() - Clearing error" }
+
+        // Use runBlocking to ensure the error is cleared immediately
+        // This is important for tests that expect the error to be cleared synchronously
+        runBlocking {
             withContext(Dispatchers.Main) {
                 error = null
             }
@@ -952,10 +1003,12 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
      * Toggles the fullscreen state of the video player
      */
     override fun toggleFullscreen() {
+        // Update the state immediately for test synchronization
+        isFullscreen = !isFullscreen
+
+        // Launch any additional background work if needed
         ioScope.launch {
-            withContext(Dispatchers.Main) {
-                isFullscreen = !isFullscreen
-            }
+            // Any additional work related to fullscreen toggle can go here
         }
     }
 }
