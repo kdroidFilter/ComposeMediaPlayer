@@ -92,7 +92,7 @@ dependencies {
 
 | Library Version | Kotlin Version |
 |-----------------|----------------|
-| 0.7.10          | 2.1.0          |
+| 0.7.10          | 2.1.21         |
 | 0.7.11          | 2.2.0          |
 
 ## 🚀 Getting Started
