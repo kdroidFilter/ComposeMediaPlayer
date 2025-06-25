@@ -44,7 +44,43 @@ actual open class VideoPlayerState {
 
     actual var sliderPos: Float by mutableStateOf(0f) // value between 0 and 1000
     actual var userDragging: Boolean = false
-    actual var loop: Boolean = false
+    private var _loop by mutableStateOf(false)
+        actual var loop: Boolean
+            get() = _loop
+            set(value) {
+                _loop = value
+                Logger.d { "Loop setting changed to: $value" }
+
+                // If we have an active player, update its loop behavior
+                player?.let { player ->
+                    // In iOS, we need to recreate the end observer with the new loop setting
+                    // First, remove the existing observer
+                    endObserver?.let {
+                        NSNotificationCenter.defaultCenter.removeObserver(it)
+                        endObserver = null
+                    }
+
+                    // Then create a new observer with the updated loop setting
+                    endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+                        name = AVPlayerItemDidPlayToEndTimeNotification,
+                        `object` = player.currentItem,
+                        queue = null
+                    ) { _ ->
+                        if (userInitiatedPause) return@addObserverForName
+                        if (_duration > 0 && (_duration - _currentTime) > 0.1) {
+                            return@addObserverForName
+                        }
+                        if (_loop) {
+                            player.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
+                            player.rate = _playbackSpeed
+                            player.play()
+                        } else {
+                            player.pause()
+                            _isPlaying = false
+                        }
+                    }
+                }
+            }
 
     // Playback speed control
     private var _playbackSpeed by mutableStateOf(1.0f)
@@ -297,6 +333,8 @@ actual open class VideoPlayerState {
                     actionAtItemEnd = AVPlayerActionAtItemEndNone
                 }
 
+                // Set up the end observer with the current loop setting
+                // This will be updated whenever the loop property changes
                 endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
                     name = AVPlayerItemDidPlayToEndTimeNotification,
                     `object` = player?.currentItem,
@@ -306,7 +344,7 @@ actual open class VideoPlayerState {
                     if (_duration > 0 && (_duration - _currentTime) > 0.1) {
                         return@addObserverForName
                     }
-                    if (loop) {
+                    if (_loop) {
                         player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
                         player?.rate = _playbackSpeed
                         player?.play()
