@@ -45,42 +45,42 @@ actual open class VideoPlayerState {
     actual var sliderPos: Float by mutableStateOf(0f) // value between 0 and 1000
     actual var userDragging: Boolean = false
     private var _loop by mutableStateOf(false)
-        actual var loop: Boolean
-            get() = _loop
-            set(value) {
-                _loop = value
-                Logger.d { "Loop setting changed to: $value" }
+    actual var loop: Boolean
+        get() = _loop
+        set(value) {
+            _loop = value
+            Logger.d { "Loop setting changed to: $value" }
 
-                // If we have an active player, update its loop behavior
-                player?.let { player ->
-                    // In iOS, we need to recreate the end observer with the new loop setting
-                    // First, remove the existing observer
-                    endObserver?.let {
-                        NSNotificationCenter.defaultCenter.removeObserver(it)
-                        endObserver = null
+            // If we have an active player, update its loop behavior
+            player?.let { player ->
+                // In iOS, we need to recreate the end observer with the new loop setting
+                // First, remove the existing observer
+                endObserver?.let {
+                    NSNotificationCenter.defaultCenter.removeObserver(it)
+                    endObserver = null
+                }
+
+                // Then create a new observer with the updated loop setting
+                endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+                    name = AVPlayerItemDidPlayToEndTimeNotification,
+                    `object` = player.currentItem,
+                    queue = null
+                ) { _ ->
+                    if (userInitiatedPause) return@addObserverForName
+                    if (_duration > 0 && (_duration - _currentTime) > 0.1) {
+                        return@addObserverForName
                     }
-
-                    // Then create a new observer with the updated loop setting
-                    endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
-                        name = AVPlayerItemDidPlayToEndTimeNotification,
-                        `object` = player.currentItem,
-                        queue = null
-                    ) { _ ->
-                        if (userInitiatedPause) return@addObserverForName
-                        if (_duration > 0 && (_duration - _currentTime) > 0.1) {
-                            return@addObserverForName
-                        }
-                        if (_loop) {
-                            player.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
-                            player.rate = _playbackSpeed
-                            player.play()
-                        } else {
-                            player.pause()
-                            _isPlaying = false
-                        }
+                    if (_loop) {
+                        player.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
+                        player.rate = _playbackSpeed
+                        player.play()
+                    } else {
+                        player.pause()
+                        _isPlaying = false
                     }
                 }
             }
+        }
 
     // Playback speed control
     private var _playbackSpeed by mutableStateOf(1.0f)
@@ -125,6 +125,9 @@ actual open class VideoPlayerState {
     // Periodic observer for position updates (≈60 fps)
     private var timeObserverToken: Any? = null
 
+    // Keep track of which player instance added the time observer
+    private var timeObserverPlayer: AVPlayer? = null
+
     // End-of-playback notification observer
     private var endObserver: Any? = null
 
@@ -155,58 +158,72 @@ actual open class VideoPlayerState {
 
     private fun startPositionUpdates() {
         stopPositionUpdates()
-        val interval = CMTimeMakeWithSeconds(1.0 / 60.0, 600) // approx. 60 fps
-        timeObserverToken = player?.addPeriodicTimeObserverForInterval(
-            interval = interval,
-            queue = dispatch_get_main_queue(),
-            usingBlock = { time ->
-                val currentSeconds = CMTimeGetSeconds(time)
-                val durationSeconds = player?.currentItem?.duration?.let { CMTimeGetSeconds(it) } ?: 0.0
-                _currentTime = currentSeconds
-                _duration = durationSeconds
 
-                // Update duration in metadata
-                if (durationSeconds > 0 && !durationSeconds.isNaN()) {
-                    _metadata.duration = (durationSeconds * 1000).toLong()
-                }
+        // Only add observer if we have a valid player
+        player?.let { currentPlayer ->
+            val interval = CMTimeMakeWithSeconds(1.0 / 60.0, 600) // approx. 60 fps
+            timeObserverToken = currentPlayer.addPeriodicTimeObserverForInterval(
+                interval = interval,
+                queue = dispatch_get_main_queue(),
+                usingBlock = { time ->
+                    val currentSeconds = CMTimeGetSeconds(time)
+                    val durationSeconds = currentPlayer.currentItem?.duration?.let { CMTimeGetSeconds(it) } ?: 0.0
+                    _currentTime = currentSeconds
+                    _duration = durationSeconds
 
-                if (!userDragging && durationSeconds > 0 && !currentSeconds.isNaN() && !durationSeconds.isNaN()) {
-                    sliderPos = ((currentSeconds / durationSeconds) * 1000).toFloat()
-                }
-                _positionText = if (currentSeconds.isNaN()) "00:00" else formatTime(currentSeconds.toFloat())
-                _durationText = if (durationSeconds.isNaN()) "00:00" else formatTime(durationSeconds.toFloat())
+                    // Update duration in metadata
+                    if (durationSeconds > 0 && !durationSeconds.isNaN()) {
+                        _metadata.duration = (durationSeconds * 1000).toLong()
+                    }
 
-                player?.currentItem?.presentationSize?.useContents {
-                    // Only update if dimensions are valid (greater than 0)
-                    if (width > 0 && height > 0) {
-                        // Try to use real aspect ratio if available, fallback to 16:9
-                        val realAspect = width / height
-                        _videoAspectRatio = realAspect
+                    if (!userDragging && durationSeconds > 0 && !currentSeconds.isNaN() && !durationSeconds.isNaN()) {
+                        sliderPos = ((currentSeconds / durationSeconds) * 1000).toFloat()
+                    }
+                    _positionText = if (currentSeconds.isNaN()) "00:00" else formatTime(currentSeconds.toFloat())
+                    _durationText = if (durationSeconds.isNaN()) "00:00" else formatTime(durationSeconds.toFloat())
 
-                        // Update width and height in metadata if they're not already set or if they're zero
-                        if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
-                            _metadata.width = width.toInt()
-                            _metadata.height = height.toInt()
-                            Logger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
+                    currentPlayer.currentItem?.presentationSize?.useContents {
+                        // Only update if dimensions are valid (greater than 0)
+                        if (width > 0 && height > 0) {
+                            // Try to use real aspect ratio if available, fallback to 16:9
+                            val realAspect = width / height
+                            _videoAspectRatio = realAspect
+
+                            // Update width and height in metadata if they're not already set or if they're zero
+                            if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
+                                _metadata.width = width.toInt()
+                                _metadata.height = height.toInt()
+                                Logger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
+                            }
                         }
                     }
-                }
 
-                player?.currentItem?.let { item ->
-                    val isBufferEmpty = item.playbackBufferEmpty
-                    val isLikelyToKeepUp = item.playbackLikelyToKeepUp
-                    _isLoading = isBufferEmpty || !isLikelyToKeepUp
-                } ?: run {
-                    _isLoading = false
+                    currentPlayer.currentItem?.let { item ->
+                        val isBufferEmpty = item.playbackBufferEmpty
+                        val isLikelyToKeepUp = item.playbackLikelyToKeepUp
+                        _isLoading = isBufferEmpty || !isLikelyToKeepUp
+                    } ?: run {
+                        _isLoading = false
+                    }
                 }
-            }
-        )
+            )
+
+            // Store which player instance added this observer
+            timeObserverPlayer = currentPlayer
+        }
     }
 
     private fun stopPositionUpdates() {
+        // Only remove observer if we have both token and the same player instance
         timeObserverToken?.let { token ->
-            player?.removeTimeObserver(token)
+            timeObserverPlayer?.let { observerPlayer ->
+                // Check if the current player is the same instance that added the observer
+                if (player === observerPlayer) {
+                    observerPlayer.removeTimeObserver(token)
+                }
+            }
             timeObserverToken = null
+            timeObserverPlayer = null
         }
     }
 
@@ -223,8 +240,20 @@ actual open class VideoPlayerState {
     }
 
     /**
+     * Clean up all resources associated with the current player
+     */
+    private fun cleanupCurrentPlayer() {
+        stopPositionUpdates()
+        removeObservers()
+        player?.pause()
+        player?.replaceCurrentItemWithPlayerItem(null)
+        player = null
+        timeObserverPlayer = null
+    }
+
+    /**
      * Opens a media source from the given URI.
-     * 
+     *
      * IMPORTANT: iOS AVPlayer has a tendency to auto-play when certain properties are set.
      * To ensure proper behavior with InitialPlayerState.PAUSE, we need to:
      * 1. Explicitly call pause() on the player
@@ -242,9 +271,8 @@ actual open class VideoPlayerState {
             return
         }
 
-        stopPositionUpdates()
-        removeObservers()
-        player?.pause()
+        // Clean up the current player completely before creating a new one
+        cleanupCurrentPlayer()
 
         // Reset playback speed to 1.0f when opening a new video
         _playbackSpeed = 1.0f
@@ -335,6 +363,9 @@ actual open class VideoPlayerState {
 
             // Update UI on the main thread
             dispatch_async(dispatch_get_main_queue()) {
+                // Clean up any existing player before creating the new one
+                cleanupCurrentPlayer()
+
                 // Update metadata
                 if (widthTemp != null && heightTemp != null) {
                     _metadata.width = widthTemp
@@ -347,7 +378,7 @@ actual open class VideoPlayerState {
                     volume = this@VideoPlayerState.volume
                     // Don't set rate here, as it can cause auto-play
                     actionAtItemEnd = AVPlayerActionAtItemEndNone
-                    
+
                     // Configure AVPlayer to prevent automatic pausing during configuration changes
                     // like rotation or entering fullscreen mode
                     automaticallyWaitsToMinimizeStalling = false
@@ -375,7 +406,7 @@ actual open class VideoPlayerState {
                 }
 
                 startPositionUpdates()
-                
+
                 // Control initial playback state based on the parameter
                 if (initializeplayerState == InitialPlayerState.PLAY) {
                     // For PLAY state, explicitly call play() which will set the rate
@@ -406,10 +437,10 @@ actual open class VideoPlayerState {
         _isLoading = true
         player?.volume = volume
         player?.rate = _playbackSpeed
-        
+
         // Ensure the player won't pause during configuration changes like rotation
         player?.automaticallyWaitsToMinimizeStalling = false
-        
+
         player?.play()
         _isPlaying = true
         _hasMedia = true
@@ -494,10 +525,7 @@ actual open class VideoPlayerState {
 
     actual fun dispose() {
         Logger.d { "dispose called" }
-        stopPositionUpdates()
-        removeObservers()
-        player?.pause()
-        player = null
+        cleanupCurrentPlayer()
         _hasMedia = false
         _isPlaying = false
 
@@ -546,7 +574,7 @@ actual open class VideoPlayerState {
     /**
      * Selects a subtitle track for display.
      * If track is null, disables subtitles.
-     * 
+     *
      * @param track The subtitle track to select, or null to disable subtitles
      */
     actual fun selectSubtitleTrack(track: SubtitleTrack?) {
