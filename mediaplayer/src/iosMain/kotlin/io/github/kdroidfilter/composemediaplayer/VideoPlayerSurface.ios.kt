@@ -49,6 +49,8 @@ fun VideoPlayerSurfaceImpl(
     val avPlayerViewController = remember {
         AVPlayerViewController().apply {
             showsPlaybackControls = false
+            // Disable notification center controls (Now Playing)
+            updatesNowPlayingInfoCenter = false
         }
     }
 
