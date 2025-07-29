@@ -2,18 +2,14 @@ package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -31,11 +27,34 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit
 ) {
-    if (playerState.isFullscreen) {
+    // Use rememberSaveable to preserve fullscreen state across configuration changes
+    var isFullscreen by rememberSaveable { 
+        mutableStateOf(playerState.isFullscreen) 
+    }
+    
+    // Keep the playerState.isFullscreen in sync with our saved state
+    LaunchedEffect(isFullscreen) {
+        if (playerState.isFullscreen != isFullscreen) {
+            playerState.isFullscreen = isFullscreen
+        }
+    }
+    
+    // Listen for changes from playerState.isFullscreen
+    LaunchedEffect(playerState.isFullscreen) {
+        if (isFullscreen != playerState.isFullscreen) {
+            isFullscreen = playerState.isFullscreen
+        }
+    }
+    
+    if (isFullscreen) {
         // Use FullScreenLayout for fullscreen mode
         FullScreenLayout(
             modifier = Modifier,
-            onDismissRequest = { playerState.toggleFullscreen() }
+            onDismissRequest = { 
+                isFullscreen = false
+                // Call playerState.toggleFullscreen() to ensure proper cleanup
+                playerState.toggleFullscreen()
+            }
         ) {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
                 VideoPlayerContent(
@@ -110,6 +129,10 @@ private fun VideoPlayerContent(
                         ContentScale.FillHeight -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
                         else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
+                },
+                onReset = { playerView ->
+                    // Clean up resources when the view is recycled in a LazyList
+                    playerView.player = null
                 }
             )
 
