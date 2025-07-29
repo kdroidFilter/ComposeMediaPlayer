@@ -723,7 +723,9 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
                 // Initialize player but don't start playback
                 _hasMedia = true
                 _isPlaying = false
+                isUserPaused = true
                 updateVideoMetadata()
+                updateLoadingState()
             }
         } catch (e: Exception) {
             _error = VideoPlayerError.SourceError("Unable to open URI: ${e.message}")
@@ -773,6 +775,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         _hasMedia = false
         _isSeeking = false
         hasReceivedFirstFrame = false
+        _currentFrame = null
     }
 
     override fun seekTo(value: Float) {
