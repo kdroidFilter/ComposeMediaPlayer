@@ -1,6 +1,9 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -41,6 +44,10 @@ actual open class VideoPlayerState {
     private var updateJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val audioProcessor = AudioLevelProcessor()
+    
+    // Screen lock detection
+    private var screenLockReceiver: BroadcastReceiver? = null
+    private var wasPlayingBeforeScreenLock: Boolean = false
 
     private var _hasMedia by mutableStateOf(false)
     actual val hasMedia: Boolean get() = _hasMedia
@@ -206,6 +213,69 @@ actual open class VideoPlayerState {
             _rightLevel = right
         }
         initializePlayer()
+        registerScreenLockReceiver()
+    }
+    
+    /**
+     * Registers a BroadcastReceiver to listen for screen on/off events
+     */
+    private fun registerScreenLockReceiver() {
+        // Unregister any existing receiver first
+        unregisterScreenLockReceiver()
+        
+        // Create a new receiver
+        screenLockReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    Intent.ACTION_SCREEN_OFF -> {
+                        Logger.d { "Screen turned off (locked)" }
+                        // Store current playing state
+                        wasPlayingBeforeScreenLock = _isPlaying
+                        
+                        // Pause playback when screen is locked
+                        if (_isPlaying) {
+                            Logger.d { "Pausing playback due to screen lock" }
+                            exoPlayer?.pause()
+                            // Note: We don't need to update _isPlaying here because
+                            // the onIsPlayingChanged listener will handle that
+                        }
+                    }
+                    Intent.ACTION_SCREEN_ON -> {
+                        Logger.d { "Screen turned on (unlocked)" }
+                        // Resume playback if it was playing before screen lock
+                        if (wasPlayingBeforeScreenLock) {
+                            Logger.d { "Resuming playback after screen unlock" }
+                            exoPlayer?.play()
+                            // Note: We don't need to update _isPlaying here because
+                            // the onIsPlayingChanged listener will handle that
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Register the receiver
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        context.registerReceiver(screenLockReceiver, filter)
+        Logger.d { "Screen lock receiver registered" }
+    }
+    
+    /**
+     * Unregisters the screen lock BroadcastReceiver
+     */
+    private fun unregisterScreenLockReceiver() {
+        screenLockReceiver?.let {
+            try {
+                context.unregisterReceiver(it)
+                Logger.d { "Screen lock receiver unregistered" }
+            } catch (e: Exception) {
+                Logger.e { "Error unregistering screen lock receiver: ${e.message}" }
+            }
+            screenLockReceiver = null
+        }
     }
 
     private fun initializePlayer() {
@@ -534,6 +604,8 @@ actual open class VideoPlayerState {
             player.release()
         }
         exoPlayer = null
+        // Unregister the screen lock receiver to prevent memory leaks
+        unregisterScreenLockReceiver()
         resetStates()
     }
 }
