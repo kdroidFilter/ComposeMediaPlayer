@@ -102,6 +102,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     /** Deferred completed when initialization is ready */
     private val initReady = CompletableDeferred<Unit>()
 
+    /** Flag to track if the player is being disposed */
+    private val isDisposing = AtomicBoolean(false)
+
     /** Current volume level (0.0 to 1.0) */
     private var _volume by mutableStateOf(1f)
 
@@ -267,43 +270,100 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     override fun dispose() {
-        scope.launch {
+        if (isDisposing.getAndSet(true)) {
+            return // Already disposing
+        }
+
+        // Cancel the scope immediately to stop all coroutines
+        scope.cancel()
+
+        // Use runBlocking to ensure resources are cleaned up synchronously
+        runBlocking {
             try {
+                // Cancel all jobs with immediate effect
+                videoJob?.cancel()
+                audioLevelsJob?.cancel()
+                resizeJob?.cancel()
+
+                // Wait a bit for coroutines to cancel
+                delay(50)
+
                 mediaOperationMutex.withLock {
                     // Stop playing if active
                     _isPlaying = false
                     val instance = videoPlayerInstance
                     if (instance != null) {
-                        // Stop playback before releasing resources
-                        val hr = player.SetPlaybackState(instance, false, true)
-                        if (hr < 0) {
-                            windowsLogger.e { "Error stopping playback (hr=0x${hr.toString(16)})" }
+                        try {
+                            // Stop playback before releasing resources
+                            val hr = player.SetPlaybackState(instance, false, true)
+                            if (hr < 0) {
+                                windowsLogger.e { "Error stopping playback (hr=0x${hr.toString(16)})" }
+                            }
+                        } catch (e: Exception) {
+                            windowsLogger.e { "Exception stopping playback: ${e.message}" }
                         }
 
-                        // Cancel all media jobs
-                        videoJob?.cancelAndJoin()
-                        audioLevelsJob?.cancel()
-
                         // Close the media
-                        player.CloseMedia(instance)
+                        try {
+                            player.CloseMedia(instance)
+                        } catch (e: Exception) {
+                            windowsLogger.e { "Exception closing media: ${e.message}" }
+                        }
 
                         // Remove volume setting for this instance
                         instanceVolumes.remove(instance)
 
                         // Destroy the player instance
-                        MediaFoundationLib.destroyInstance(instance)
+                        try {
+                            MediaFoundationLib.destroyInstance(instance)
+                        } catch (e: Exception) {
+                            windowsLogger.e { "Exception destroying instance: ${e.message}" }
+                        }
+
                         videoPlayerInstance = null
                     }
-                    releaseAllResources()  // Ensure all other resources are cleared
+
+                    // Clear all resources
+                    clearAllResourcesSync()
                 }
             } catch (e: Exception) {
                 windowsLogger.e { "Error during dispose: ${e.message}" }
             } finally {
                 // Mark player as uninitialized
                 _hasMedia = false
-                scope.cancel()  // Cancel the scope to clean up any remaining jobs
+                lastUri = null
             }
         }
+    }
+
+    private fun clearAllResourcesSync() {
+        // Clear the frame channel synchronously
+        while (frameChannel.tryReceive().isSuccess) {
+            // Drain the channel
+        }
+
+        // Free bitmaps and frame buffers
+        bitmapLock.write {
+            _currentFrame?.close()
+            _currentFrame = null
+            currentFrameState.value = null
+            frameBitmapRecycler?.close()
+            frameBitmapRecycler = null
+        }
+
+        // Clear any shared buffer allocated for frames
+        sharedFrameBuffer = null
+        frameBufferSize = 0
+
+        // Reset all state
+        _currentTime = 0.0
+        _duration = 0.0
+        _progress = 0f
+        _metadata = VideoMetadata()
+        userPaused = false
+        isLoading = false
+        errorMessage = null
+        _error = null
     }
 
     private fun releaseAllResources() {
@@ -343,6 +403,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * @param uri The path to the media file or URL to open
      */
     override fun openUri(uri: String) {
+        if (isDisposing.get()) {
+            windowsLogger.w { "Ignoring openUri call - player is being disposed" }
+            return
+        }
+
         lastUri = uri
         playbackSpeed = 1.0f
 
@@ -368,6 +433,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      */
     private fun openUriInternal(uri: String) {
         scope.launch {
+            if (isDisposing.get()) {
+                return@launch
+            }
+
             mediaOperationMutex.withLock {
                 try {
                     isLoading = true
@@ -460,17 +529,20 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         windowsLogger.e { "Failed to seek to beginning (hr=0x${hrSeek.toString(16)})" }
                     }
 
-                    // Start video processing
-                    videoJob = scope.launch {
-                        launch { produceFrames() }
-                        launch { consumeFrames() }
-                    }
+                    // Only start jobs if not disposing
+                    if (!isDisposing.get()) {
+                        // Start video processing
+                        videoJob = scope.launch {
+                            launch { produceFrames() }
+                            launch { consumeFrames() }
+                        }
 
-                    // Start a task to update audio levels
-                    audioLevelsJob = scope.launch {
-                        while (isActive && _hasMedia) {
-                            updateAudioLevels()
-                            delay(50)
+                        // Start a task to update audio levels
+                        audioLevelsJob = scope.launch {
+                            while (isActive && _hasMedia && !isDisposing.get()) {
+                                updateAudioLevels()
+                                delay(50)
+                            }
                         }
                     }
 
@@ -488,7 +560,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
 
                     delay(100)
-                    play()
+                    if (!isDisposing.get()) {
+                        play()
+                    }
 
                 } catch (e: Exception) {
                     setError("Error while opening media: ${e.message}")
@@ -504,6 +578,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * Updates the audio level meters
      */
     private suspend fun updateAudioLevels() {
+        if (isDisposing.get()) return
+
         mediaOperationMutex.withLock {
             videoPlayerInstance?.let { instance ->
                 val leftRef = FloatByReference()
@@ -518,7 +594,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     private suspend fun produceFrames() {
-        while (scope.isActive && _hasMedia) {
+        while (scope.isActive && _hasMedia && !isDisposing.get()) {
             val instance = videoPlayerInstance ?: break
 
             if (player.IsEOF(instance)) {
@@ -622,7 +698,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
-                if (scope.isActive && _hasMedia) {
+                if (scope.isActive && _hasMedia && !isDisposing.get()) {
                     setError("Error while reading a frame: ${e.message}")
                 }
                 delay(100)
@@ -635,7 +711,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         var frameReceived = false
         var loadingTimeout = 0
 
-        while (scope.isActive && _hasMedia) {
+        while (scope.isActive && _hasMedia && !isDisposing.get()) {
             try {
                 waitForPlaybackState()
             } catch (e: CancellationException) {
@@ -688,7 +764,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
-                if (scope.isActive && _hasMedia) {
+                if (scope.isActive && _hasMedia && !isDisposing.get()) {
                     setError("Error while processing a frame: ${e.message}")
                 }
                 delay(100)
@@ -701,6 +777,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * If no media is loaded but a previous URI exists, it will try to open and play it
      */
     override fun play() {
+        if (isDisposing.get()) return
+
         if (!readyForPlayback()) {
             lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
                 scope.launch {
@@ -754,6 +832,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * Pauses playback if currently playing
      */
     override fun pause() {
+        if (isDisposing.get()) return
+
         executeMediaOperation(
             operation = "pause",
             precondition = _isPlaying
@@ -768,6 +848,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * This will close the media file but keep the player instance
      */
     override fun stop() {
+        if (isDisposing.get()) return
+
         executeMediaOperation(
             operation = "stop"
         ) {
@@ -790,6 +872,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     override fun seekTo(value: Float) {
+        if (isDisposing.get()) return
+
         executeMediaOperation(
             operation = "seek",
             precondition = _hasMedia && videoPlayerInstance != null
@@ -836,9 +920,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                     }
 
-                    videoJob = scope.launch {
-                        launch { produceFrames() }
-                        launch { consumeFrames() }
+                    if (!isDisposing.get()) {
+                        videoJob = scope.launch {
+                            launch { produceFrames() }
+                            launch { consumeFrames() }
+                        }
                     }
 
                     delay(8)
@@ -857,6 +943,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * For 4K videos, we need a longer delay to prevent memory pressure
      */
     fun onResized() {
+        if (isDisposing.get()) return
+
         isResizing.set(true)
         scope.launch {
             try {
@@ -894,7 +982,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     /**
      * Creates an ImageInfo object for the current video dimensions
-     * 
+     *
      * @return ImageInfo configured for the current video frame
      */
     private fun createVideoImageInfo() =
@@ -902,7 +990,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     /**
      * Sets the playback state (playing or paused)
-     * 
+     *
      * @param playing True to start playback, false to pause
      * @param errorMessage Error message to display if the operation fails
      * @param bStop True to stop playback completely, false to pause
@@ -940,7 +1028,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     snapshotFlow { _isPlaying }.filter { it }.first()
                 } ?: run {
                     // Only attempt to restart playback if the user hasn't intentionally paused
-                    if (_hasMedia && videoPlayerInstance != null && !userPaused) {
+                    if (_hasMedia && videoPlayerInstance != null && !userPaused && !isDisposing.get()) {
                         setPlaybackState(true, "Error while restarting playback after timeout")
                         delay(100)
                         if (!_isPlaying) {
@@ -963,7 +1051,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     /**
      * Waits if the player is currently resizing
      * Uses a longer delay for 4K videos to reduce memory pressure
-     * 
+     *
      * @return True if resizing is in progress and we waited, false otherwise
      */
     private suspend fun waitIfResizing(): Boolean {
@@ -982,11 +1070,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
     /**
      * Checks if the player is ready for playback
-     * 
+     *
      * @return True if the player is initialized and has media loaded, false otherwise
      */
     private fun readyForPlayback(): Boolean {
-        return initReady.isCompleted && videoPlayerInstance != null && _hasMedia
+        return initReady.isCompleted && videoPlayerInstance != null && _hasMedia && !isDisposing.get()
     }
 
     /**
@@ -1001,12 +1089,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         precondition: Boolean = true,
         block: suspend () -> Unit
     ) {
-        if (!precondition) return
+        if (!precondition || isDisposing.get()) return
 
         scope.launch {
             mediaOperationMutex.withLock {
                 try {
-                    block()
+                    if (!isDisposing.get()) {
+                        block()
+                    }
                 } catch (e: Exception) {
                     setError("Error during $operation: ${e.message}")
                 }
