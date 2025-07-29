@@ -58,7 +58,7 @@ interface PlatformVideoPlayerState {
     fun selectSubtitleTrack(track: SubtitleTrack?)
     fun disableSubtitles()
 
-    fun openUri(uri: String)
+    fun openUri(uri: String, initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY)
     fun play()
     fun pause()
     fun stop()

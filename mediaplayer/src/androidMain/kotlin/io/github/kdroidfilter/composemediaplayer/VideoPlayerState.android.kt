@@ -326,13 +326,16 @@ actual open class VideoPlayerState {
      * Open a video URI.
      * We're not using ExoPlayer's native subtitle rendering anymore,
      * so we don't need to add subtitle configurations to the MediaItem.
+     *
+     * @param uri The URI of the media to open
+     * @param initializeplayerState Controls whether playback starts automatically (PLAY) or remains paused (PAUSE)
      */
-    actual fun openUri(uri: String) {
+    actual fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
         val mediaItemBuilder = MediaItem.Builder().setUri(uri)
         // We're not using ExoPlayer's native subtitle rendering anymore
         // Instead, we're using Compose-based subtitles
         val mediaItem = mediaItemBuilder.build()
-        openFromMediaItem(mediaItem)
+        openFromMediaItem(mediaItem, initializeplayerState)
     }
 
     /**
@@ -340,8 +343,11 @@ actual open class VideoPlayerState {
      * Converts the file into a URI.
      * We're not using ExoPlayer's native subtitle rendering anymore,
      * so we don't need to add subtitle configurations to the MediaItem.
+     *
+     * @param file The file to open
+     * @param initializeplayerState Controls whether playback starts automatically (PLAY) or remains paused (PAUSE)
      */
-    actual fun openFile(file: PlatformFile) {
+    actual fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
         val mediaItemBuilder = MediaItem.Builder()
         val androidFile = file.androidFile
         val videoUri: Uri = when (androidFile) {
@@ -352,10 +358,10 @@ actual open class VideoPlayerState {
         // We're not using ExoPlayer's native subtitle rendering anymore
         // Instead, we're using Compose-based subtitles
         val mediaItem = mediaItemBuilder.build()
-        openFromMediaItem(mediaItem)
+        openFromMediaItem(mediaItem, initializeplayerState)
     }
 
-    private fun openFromMediaItem(mediaItem: MediaItem) {
+    private fun openFromMediaItem(mediaItem: MediaItem, initializeplayerState: InitialPlayerState) {
         exoPlayer?.let { player ->
             player.stop()
             player.clearMediaItems()
@@ -370,8 +376,15 @@ actual open class VideoPlayerState {
                 player.prepare()
                 player.volume = volume
                 player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
-                player.play()
-                _hasMedia = true // Set to true when media is loaded
+
+                // Control initial playback state based on the parameter
+                if (initializeplayerState == InitialPlayerState.PLAY) {
+                    player.play()
+                } else {
+                    // Initialize player but don't start playback
+                    _isPlaying = false
+                    _hasMedia = true
+                }
             } catch (e: Exception) {
                 androidVideoLogger.d { "Error opening media: ${e.message}" }
                 _isPlaying = false
@@ -438,7 +451,7 @@ actual open class VideoPlayerState {
                 for (i in 0 until group.length) {
                     val trackFormat = group.getTrackFormat(i)
 
-                    when (group.getType()) {
+                    when (group.type) {
                         C.TRACK_TYPE_VIDEO -> {
                             // Video format metadata
                             if (trackFormat.frameRate > 0) {

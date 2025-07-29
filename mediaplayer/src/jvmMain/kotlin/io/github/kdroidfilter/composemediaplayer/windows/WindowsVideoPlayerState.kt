@@ -20,6 +20,7 @@ import com.sun.jna.ptr.FloatByReference
 import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.LongByReference
 import com.sun.jna.ptr.PointerByReference
+import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -402,8 +403,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * Opens a media file or URL for playback
      *
      * @param uri The path to the media file or URL to open
+     * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    override fun openUri(uri: String) {
+    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
         if (isDisposing.get()) {
             windowsLogger.w { "Ignoring openUri call - player is being disposed" }
             return
@@ -418,7 +420,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 withTimeout(10_000) { initReady.await() }
 
                 // Here the native instance is guaranteed to be non-null
-                openUriInternal(uri)
+                openUriInternal(uri, initializeplayerState)
             } catch (_: TimeoutCancellationException) {
                 setError("Player initialization timed out after 10 s.")
             } catch (e: Exception) {
@@ -431,8 +433,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * Internal implementation of openUri that assumes the player is initialized
      *
      * @param uri The path to the media file or URL to open
+     * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    private fun openUriInternal(uri: String) {
+    private fun openUriInternal(uri: String, initializeplayerState: InitialPlayerState) {
         scope.launch {
             if (isDisposing.get()) {
                 return@launch
@@ -562,7 +565,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                     delay(100)
                     if (!isDisposing.get()) {
-                        play()
+                        // Control initial playback state based on the parameter
+                        if (initializeplayerState == InitialPlayerState.PLAY) {
+                            play()
+                        } else {
+                            // Initialize player but don't start playback
+                            _isPlaying = false
+                            _hasMedia = true
+                        }
                     }
 
                 } catch (e: Exception) {

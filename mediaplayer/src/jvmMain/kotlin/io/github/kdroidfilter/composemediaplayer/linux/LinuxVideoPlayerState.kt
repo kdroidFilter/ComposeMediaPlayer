@@ -11,6 +11,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -688,7 +689,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     }
 
     // ---- Controls ----
-    override fun openUri(uri: String) {
+    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
         stop()
         clearError()
         _isLoading = true
@@ -715,7 +716,15 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             metadata.audioChannels = null
             metadata.audioSampleRate = null
 
-            play()
+            // Control initial playback state based on the parameter
+            if (initializeplayerState == InitialPlayerState.PLAY) {
+                play()
+            } else {
+                // Initialize player but don't start playback
+                _hasMedia = true
+                _isPlaying = false
+                updateVideoMetadata()
+            }
         } catch (e: Exception) {
             _error = VideoPlayerError.SourceError("Unable to open URI: ${e.message}")
             _isLoading = false

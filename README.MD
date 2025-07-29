@@ -59,6 +59,7 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 - **Multiplatform Support**: Works seamlessly on Android, macOS, Windows, Linux and Compose Web (Wasm).
 - **File and URL Support**: Play videos from local files or directly from URLs.
 - **Media Controls**: Includes play, pause, loop toggle, volume control, playback speed, loop playback and timeline slider.
+- **Initial Playback Control**: Choose whether videos automatically play or remain paused after opening.
 - **Custom Video Player UI**: Fully customizable using Compose Multiplatform, with support for custom overlays that display even in fullscreen mode.
 - **Audio Levels**: Displays left and right audio levels in real time.
 - **Fullscreen Mode**: Toggle between windowed and fullscreen playback modes.
@@ -199,15 +200,28 @@ VideoPlayerSurface(
 You can play a video by providing a direct URL:
 
 ```kotlin
+// Open a video and automatically start playing (default behavior)
 playerState.openUri("http://example.com/video.mp4")
+
+// Open a video but keep it paused initially
+playerState.openUri("http://example.com/video.mp4", InitialPlayerState.PAUSE)
 ```
 
 To play a local video file you can use [PlatformFile](https://filekit.mintlify.app/core/platform-file) from [FileKit](https://github.com/vinceglb/FileKit).
 
 ```kotlin
 val file = FileKit.openFilePicker(type = FileKitType.Video)
-file?.let { playerState.openFile(file) }
+
+// Open a file and automatically start playing (default behavior)
+file?.let { playerState.openFile(it) }
+
+// Open a file but keep it paused initially
+file?.let { playerState.openFile(it, InitialPlayerState.PAUSE) }
 ```
+
+The `initializeplayerState` parameter controls whether the video automatically starts playing after opening:
+- `InitialPlayerState.PLAY` (default): The video will automatically start playing after opening
+- `InitialPlayerState.PAUSE`: The video will be loaded but remain paused until you call `play()`
 
 Check the [sample project](sample/composeApp/src/commonMain/kotlin/sample/app/App.kt) for a complete example.
 
@@ -424,7 +438,9 @@ You can access video metadata through the `metadata` property of the player stat
 
 ```kotlin
 // Access metadata after loading a video
-playerState.openUri("http://example.com/video.mp4")
+playerState.openUri("http://example.com/video.mp4") // Auto-plays by default
+// Or load without auto-playing:
+// playerState.openUri("http://example.com/video.mp4", InitialPlayerState.PAUSE)
 
 // Display metadata information
 val metadata = playerState.metadata
@@ -479,14 +495,28 @@ fun App() {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Open Video URL
-            Button(
-                onClick = {
-                    val url = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-                    playerState.openUri(url)
-                }
+            // Open Video URL buttons
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Open Video")
+                Button(
+                    onClick = {
+                        val url = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                        playerState.openUri(url) // Default: auto-play
+                    }
+                ) {
+                    Text("Play Video")
+                }
+                
+                Button(
+                    onClick = {
+                        val url = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                        playerState.openUri(url, InitialPlayerState.PAUSE) // Open paused
+                    }
+                ) {
+                    Text("Load Video Paused")
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
