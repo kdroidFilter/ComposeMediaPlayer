@@ -97,7 +97,7 @@ internal interface MediaFoundationLib : StdCallLibrary {
     fun InitMediaFoundation(): Int
     fun CreateVideoPlayerInstance(ppInstance: PointerByReference): Int
     fun DestroyVideoPlayerInstance(pInstance: Pointer)
-    fun OpenMedia(pInstance: Pointer, url: WString): Int
+    fun OpenMedia(pInstance: Pointer, url: WString, startPlayback: Boolean = true): Int
     fun ReadVideoFrame(pInstance: Pointer, pData: PointerByReference, pDataSize: IntByReference): Int
     fun UnlockVideoFrame(pInstance: Pointer): Int
     fun CloseMedia(pInstance: Pointer)

@@ -366,6 +366,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         isLoading = false
         errorMessage = null
         _error = null
+        
+        // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
+        initialFrameRead.set(false)
     }
 
     private fun releaseAllResources() {
@@ -390,6 +393,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         // Clear any shared buffer allocated for frames
         sharedFrameBuffer = null
         frameBufferSize = 0  // Reset frame buffer size
+        
+        // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
+        initialFrameRead.set(false)
     }
 
     private fun clearFrameChannel() {
@@ -469,6 +475,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     _metadata = VideoMetadata()
                     _hasMedia = false
                     userPaused = false
+                    
+                    // Reset initialFrameRead flag to ensure we read an initial frame for the new video
+                    initialFrameRead.set(false)
 
                     // Check if the file or URL is valid
                     if (!uri.startsWith("http", ignoreCase = true) && !File(uri).exists()) {
@@ -476,8 +485,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         return@withLock
                     }
 
-                    // Open the media
-                    val hrOpen = player.OpenMedia(instance, WString(uri))
+                    // Open the media with appropriate initial playback state
+                    // Pass startPlayback=false to the native library when InitialPlayerState.PAUSE is specified
+                    // This prevents the native library from starting to read the video immediately
+                    // and fixes the issue where the video would start playing even when paused on Windows
+                    val startPlayback = initializeplayerState == InitialPlayerState.PLAY
+                    val hrOpen = player.OpenMedia(instance, WString(uri), startPlayback)
                     if (hrOpen < 0) {
                         setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                         return@withLock
@@ -565,13 +578,25 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
                     delay(100)
                     if (!isDisposing.get()) {
-                        // Control initial playback state based on the parameter
-                        if (initializeplayerState == InitialPlayerState.PLAY) {
-                            play()
-                        } else {
-                            // Initialize player but don't start playback
-                            _isPlaying = false
-                            _hasMedia = true
+                        // Set the Kotlin state to match the native player state
+                        _isPlaying = initializeplayerState == InitialPlayerState.PLAY
+                        _hasMedia = true
+                        
+                        // If we're in PAUSE state, make sure userPaused is set to true
+                        // This is critical for correct behavior when InitialPlayerState.PAUSE is specified
+                        // The waitForPlaybackState method has logic that tries to
+                        // restart playback if it's not playing and userPaused is false
+                        // By setting userPaused to true, we prevent this automatic restart behavior
+                        // when the user explicitly wants to start in a paused state
+                        if (initializeplayerState == InitialPlayerState.PAUSE) {
+                            userPaused = true
+                            // Reset initialFrameRead flag to ensure we read one frame for display
+                            initialFrameRead.set(false)
+                            
+                            // Explicitly set isLoading to false when in PAUSE state
+                            // This ensures the UI doesn't show loading state indefinitely
+                            // when the player is initialized with PAUSE state
+                            isLoading = false
                         }
                     }
 
@@ -612,6 +637,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 if (loop) {
                     try {
                         userPaused = false  // Reset userPaused when looping
+                        initialFrameRead.set(false)  // Reset initialFrameRead flag
                         seekTo(0f)
                         play()
                     } catch (e: Exception) {
@@ -624,7 +650,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             }
 
             try {
-                waitForPlaybackState()
+                // Wait for playback state, allowing initial frame when paused
+                // If the return value is false, we should wait and not process frames
+                if (!waitForPlaybackState(allowInitialFrame = true)) {
+                    delay(100)  // Add a small delay to prevent busy waiting
+                    continue
+                }
             } catch (e: CancellationException) {
                 break
             }
@@ -724,7 +755,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
         while (scope.isActive && _hasMedia && !isDisposing.get()) {
             try {
-                waitForPlaybackState()
+                // Wait for playback state, allowing initial frame when paused
+                // If the return value is false, we should wait and not process frames
+                if (!waitForPlaybackState(allowInitialFrame = true)) {
+                    delay(100)  // Add a small delay to prevent busy waiting
+                    continue
+                }
             } catch (e: CancellationException) {
                 break
             }
@@ -813,6 +849,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             precondition = true
         ) {
             userPaused = false
+            // Reset initialFrameRead flag when switching to play state
+            // This ensures that if we pause again, we'll read a new initial frame
+            initialFrameRead.set(false)
+            
             setPlaybackState(true, "Error while starting playback")
             if (_hasMedia && (videoJob == null || videoJob?.isActive == false)) {
                 videoJob = scope.launch {
@@ -850,6 +890,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             precondition = _isPlaying
         ) {
             userPaused = true
+            // Reset initialFrameRead flag when switching to pause state
+            // This ensures that we'll read a new initial frame to display
+            initialFrameRead.set(false)
+            
             setPlaybackState(false, "Error while pausing playback")
         }
     }
@@ -876,6 +920,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             errorMessage = null
             _error = null
             userPaused = false
+            
+            // Reset initialFrameRead flag to ensure we read a new frame when playing again
+            initialFrameRead.set(false)
+            
             videoPlayerInstance?.let { instance ->
                 player.CloseMedia(instance)
             }
@@ -897,6 +945,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     if (_isPlaying) {
                         userPaused = false
                     }
+                    
+                    // Reset initialFrameRead flag to ensure we read a new frame after seeking
+                    // This is especially important if the player is paused
+                    initialFrameRead.set(false)
+                    
                     videoJob?.cancelAndJoin()
                     clearFrameChannel()
 
@@ -939,9 +992,17 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
 
                     delay(8)
+                    
+                    // If the player is paused, ensure isLoading is set to false
+                    // This prevents the UI from showing loading state indefinitely after seeking when paused
+                    if (userPaused) {
+                        isLoading = false
+                    }
                 } catch (e: Exception) {
                     setError("Error during seek: ${e.message}")
                 } finally {
+                    // Ensure isLoading is always set to false, even if an exception occurs
+                    // This is especially important when the player is paused
                     isLoading = false
                 }
             }
@@ -1032,31 +1093,68 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
      * If playback doesn't start within 5 seconds, attempts to restart it
      * unless the user has intentionally paused the video
      */
-    private suspend fun waitForPlaybackState() {
-        if (!_isPlaying) {
-            try {
-                withTimeoutOrNull(5000) {
-                    snapshotFlow { _isPlaying }.filter { it }.first()
-                } ?: run {
-                    // Only attempt to restart playback if the user hasn't intentionally paused
-                    if (_hasMedia && videoPlayerInstance != null && !userPaused && !isDisposing.get()) {
-                        setPlaybackState(true, "Error while restarting playback after timeout")
-                        delay(100)
-                        if (!_isPlaying) {
-                            yield()
-                        }
-                    } else {
-                        // If user paused, just yield to allow other coroutines to run
+    // Flag to track if we've read at least one frame when paused
+    // Initialize to false to ensure we read an initial frame when the player is first loaded
+    private val initialFrameRead = AtomicBoolean(false)
+    
+    /**
+     * Waits for the playback state to become active
+     * If playback doesn't start within 5 seconds, attempts to restart it
+     * unless the user has intentionally paused the video
+     * 
+     * @param allowInitialFrame If true, allows reading one frame even when paused (for thumbnail)
+     * @return True if the method should continue processing frames, false if it should wait
+     */
+    private suspend fun waitForPlaybackState(allowInitialFrame: Boolean = false): Boolean {
+        // If playing, continue processing frames
+        if (_isPlaying) {
+            return true
+        }
+        
+        // If paused but we need an initial frame and haven't read one yet, allow one frame
+        if (userPaused && allowInitialFrame && !initialFrameRead.getAndSet(true)) {
+            return true
+        }
+        
+        try {
+            // If we're not playing and user has intentionally paused, wait indefinitely
+            // This prevents reading frames and advancing position when paused
+            if (userPaused) {
+                // Set isLoading to false to ensure UI doesn't show loading state indefinitely
+                if (isLoading) {
+                    isLoading = false
+                }
+                
+                // Wait until the player starts playing
+                snapshotFlow { _isPlaying }.filter { it }.first()
+                return true
+            }
+            
+            // If we're not playing but not intentionally paused, wait with timeout
+            withTimeoutOrNull(5000) {
+                snapshotFlow { _isPlaying }.filter { it }.first()
+            } ?: run {
+                // Only attempt to restart playback if the user hasn't intentionally paused
+                if (_hasMedia && videoPlayerInstance != null && !userPaused && !isDisposing.get()) {
+                    setPlaybackState(true, "Error while restarting playback after timeout")
+                    delay(100)
+                    if (!_isPlaying) {
                         yield()
                     }
+                } else {
+                    // If user paused, just yield to allow other coroutines to run
+                    yield()
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                windowsLogger.e { "Error in waitForPlaybackState: ${e.message}" }
-                yield()
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            windowsLogger.e { "Error in waitForPlaybackState: ${e.message}" }
+            yield()
         }
+        
+        // Continue processing frames if playing, otherwise wait
+        return _isPlaying
     }
 
     /**
