@@ -332,6 +332,10 @@ actual open class VideoPlayerState {
                     volume = this@VideoPlayerState.volume
                     rate = _playbackSpeed
                     actionAtItemEnd = AVPlayerActionAtItemEndNone
+                    
+                    // Configure AVPlayer to prevent automatic pausing during configuration changes
+                    // like rotation or entering fullscreen mode
+                    automaticallyWaitsToMinimizeStalling = false
                 }
 
                 // Set up the end observer with the current loop setting
@@ -372,6 +376,10 @@ actual open class VideoPlayerState {
         _isLoading = true
         player?.volume = volume
         player?.rate = _playbackSpeed
+        
+        // Ensure the player won't pause during configuration changes like rotation
+        player?.automaticallyWaitsToMinimizeStalling = false
+        
         player?.play()
         _isPlaying = true
         _hasMedia = true
