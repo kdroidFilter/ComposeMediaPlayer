@@ -110,6 +110,10 @@ private fun VideoPlayerContent(
                         ContentScale.FillHeight -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
                         else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
+                },
+                onReset = { playerView ->
+                    // Clean up resources when the view is recycled in a LazyList
+                    playerView.player = null
                 }
             )
 
