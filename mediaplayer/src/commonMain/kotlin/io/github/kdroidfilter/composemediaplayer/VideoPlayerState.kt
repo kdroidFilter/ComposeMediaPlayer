@@ -35,6 +35,7 @@ expect open class VideoPlayerState() {
     val rightLevel: Float
     val positionText: String
     val durationText: String
+    val currentTime: Double
     var isFullscreen: Boolean
     val aspectRatio: Float
 

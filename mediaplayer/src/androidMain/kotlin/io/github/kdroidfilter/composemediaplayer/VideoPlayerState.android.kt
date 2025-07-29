@@ -197,6 +197,7 @@ actual open class VideoPlayerState {
     private var _duration by mutableStateOf(0.0)
     actual val positionText: String get() = formatTime(_currentTime)
     actual val durationText: String get() = formatTime(_duration)
+    actual val currentTime: Double get() = _currentTime
 
 
     init {

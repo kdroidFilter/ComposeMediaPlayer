@@ -98,6 +98,11 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
 
     private val _durationText = mutableStateOf("00:00")
     override val durationText: String get() = _durationText.value
+    
+    override val currentTime: Double
+        get() = runBlocking {
+            if (hasMedia) getPositionSafely() else 0.0
+        }
 
     // Non-blocking aspect ratio property
     private val _aspectRatio = mutableStateOf(16f / 9f)

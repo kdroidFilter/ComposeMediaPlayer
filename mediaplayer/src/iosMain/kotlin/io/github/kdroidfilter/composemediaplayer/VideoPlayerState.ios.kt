@@ -134,6 +134,7 @@ actual open class VideoPlayerState {
     // Internal time values (in seconds)
     private var _currentTime: Double = 0.0
     private var _duration: Double = 0.0
+    actual val currentTime: Double get() = _currentTime
 
     // Flag to indicate user-initiated pause
     private var userInitiatedPause: Boolean = false

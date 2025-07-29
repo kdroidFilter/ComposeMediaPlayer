@@ -41,6 +41,7 @@ interface PlatformVideoPlayerState {
     val rightLevel: Float
     val positionText: String
     val durationText: String
+    val currentTime: Double
     val isLoading: Boolean
     val error: VideoPlayerError?
     var isFullscreen: Boolean

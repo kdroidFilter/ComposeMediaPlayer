@@ -107,6 +107,7 @@ actual open class VideoPlayerState {
     actual open val rightLevel: Float get() = delegate.rightLevel
     actual open val positionText: String get() = delegate.positionText
     actual open val durationText: String get() = delegate.durationText
+    actual open val currentTime: Double get() = delegate.currentTime
 
     actual open fun openUri(uri: String) = delegate.openUri(uri)
     actual open fun openFile(file: PlatformFile) = delegate.openUri(file.file.path)
