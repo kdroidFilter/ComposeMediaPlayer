@@ -187,6 +187,9 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
     private var _durationText by mutableStateOf("00:00")
     override val durationText: String
         get() = _durationText
+        
+    override val currentTime: Double
+        get() = if (hasMedia) playbin.queryPosition(Format.TIME) / 1_000_000_000.0 else 0.0
 
     private var _isLoading by mutableStateOf(false)
     override val isLoading: Boolean

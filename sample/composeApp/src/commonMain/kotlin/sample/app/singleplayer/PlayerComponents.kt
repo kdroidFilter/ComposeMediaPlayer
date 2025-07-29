@@ -212,6 +212,10 @@ fun TimelineControls(
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
+                text = "Current: ${playerState.currentTime.toInt()}s",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
                 text = playerState.durationText,
                 style = MaterialTheme.typography.bodySmall
             )

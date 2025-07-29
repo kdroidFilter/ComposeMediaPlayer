@@ -211,6 +211,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         private set
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
+    override val currentTime: Double get() = _currentTime
     private var errorMessage: String? by mutableStateOf(null)
 
     // Fullscreen state

@@ -118,6 +118,10 @@ actual open class VideoPlayerState {
 
     // Current duration of the media
     private var _currentDuration: Float = 0f
+    
+    // Current time of the media in seconds
+    private var _currentTime: Double = 0.0
+    actual val currentTime: Double get() = _currentTime
 
     // Job for handling seek operations
     internal var seekJob: Job? = null
@@ -288,6 +292,7 @@ actual open class VideoPlayerState {
         sliderPos = 0.0f
         _positionText = "00:00"
         _durationText = "00:00"
+        _currentTime = 0.0
         // Note: We don't clear lastUri, so it can be used to replay the video
     }
 
@@ -363,6 +368,9 @@ actual open class VideoPlayerState {
 
             _positionText = if (displayTime.isNaN()) "00:00" else formatTime(displayTime)
             _durationText = if (duration.isNaN()) "00:00" else formatTime(duration)
+            
+            // Update the current time property
+            _currentTime = displayTime.toDouble()
 
             if (!userDragging && duration > 0f && !duration.isNaN() && !_isLoading) {
                 sliderPos = if (isNearEnd) {
