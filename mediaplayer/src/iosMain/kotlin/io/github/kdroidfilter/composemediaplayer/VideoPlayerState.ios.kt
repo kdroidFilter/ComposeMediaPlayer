@@ -289,6 +289,7 @@ actual open class VideoPlayerState {
             volume = this@VideoPlayerState.volume
             rate = 0.0f // Explicitly set rate to 0 to prevent auto-play
             pause() // Explicitly pause to ensure it doesn't auto-play
+            allowsExternalPlayback = false // Disable AirPlay
         }
         _hasMedia = true
         // Don't set _isPlaying to true yet, as we haven't decided whether to play or pause
@@ -382,6 +383,9 @@ actual open class VideoPlayerState {
                     // Configure AVPlayer to prevent automatic pausing during configuration changes
                     // like rotation or entering fullscreen mode
                     automaticallyWaitsToMinimizeStalling = false
+                    
+                    // Disable AirPlay
+                    allowsExternalPlayback = false
                 }
 
                 // Set up the end observer with the current loop setting
