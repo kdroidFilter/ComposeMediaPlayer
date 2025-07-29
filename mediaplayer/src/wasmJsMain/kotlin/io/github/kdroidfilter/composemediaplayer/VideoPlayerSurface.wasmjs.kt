@@ -515,7 +515,9 @@ private fun VideoContent(
                 .videoRatioClip(videoRatio, contentScale)
         ) {
             SubtitleOverlay(playerState)
-            overlay()
+            Box(modifier = Modifier.fillMaxSize()) {
+                overlay()
+            }
         }
     }
 
