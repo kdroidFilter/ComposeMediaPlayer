@@ -380,8 +380,10 @@ actual open class VideoPlayerState {
                 // Control initial playback state based on the parameter
                 if (initializeplayerState == InitialPlayerState.PLAY) {
                     player.play()
+                    _hasMedia = true
                 } else {
                     // Initialize player but don't start playback
+                    player.pause()
                     _isPlaying = false
                     _hasMedia = true
                 }
