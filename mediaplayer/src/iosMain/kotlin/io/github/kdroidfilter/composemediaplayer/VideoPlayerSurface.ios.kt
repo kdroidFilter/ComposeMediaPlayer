@@ -31,7 +31,8 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit
 ) {
-    VideoPlayerSurfaceImpl(playerState, modifier, contentScale, overlay, isInFullscreenView = false)
+    // Set pauseOnDispose to false to prevent pausing during screen rotation
+    VideoPlayerSurfaceImpl(playerState, modifier, contentScale, overlay, isInFullscreenView = false, pauseOnDispose = false)
 }
 
 @OptIn(ExperimentalForeignApi::class)
@@ -41,7 +42,8 @@ fun VideoPlayerSurfaceImpl(
     modifier: Modifier,
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
-    isInFullscreenView: Boolean = false
+    isInFullscreenView: Boolean = false,
+    pauseOnDispose: Boolean = true
 ) {
     // Create and store the AVPlayerViewController
     val avPlayerViewController = remember {
@@ -54,7 +56,13 @@ fun VideoPlayerSurfaceImpl(
     DisposableEffect(Unit) {
         onDispose {
             Logger.d { "[VideoPlayerSurface] Disposing" }
-            playerState.pause()
+            // Only pause if pauseOnDispose is true (prevents pausing during rotation or fullscreen transitions)
+            if (pauseOnDispose) {
+                Logger.d { "[VideoPlayerSurface] Pausing on dispose" }
+                playerState.pause()
+            } else {
+                Logger.d { "[VideoPlayerSurface] Not pausing on dispose (rotation or fullscreen transition)" }
+            }
             avPlayerViewController.removeFromParentViewController()
         }
     }
@@ -163,7 +171,8 @@ fun VideoPlayerSurfaceImpl(
     // Handle fullscreen mode
     if (playerState.isFullscreen && !isInFullscreenView) {
         openFullscreenView(playerState) { state, mod, inFullscreen ->
-            VideoPlayerSurfaceImpl(state, mod, contentScale, overlay, inFullscreen)
+            // Set pauseOnDispose to false to prevent pausing during fullscreen transitions
+            VideoPlayerSurfaceImpl(state, mod, contentScale, overlay, inFullscreen, pauseOnDispose = false)
         }
     }
 }

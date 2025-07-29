@@ -7,12 +7,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.VideoPlayerStateRegistry
 import kotlinx.cinterop.ExperimentalForeignApi
+import platform.Foundation.NSNotificationCenter
+import platform.UIKit.UIDevice
+import platform.UIKit.UIDeviceOrientationDidChangeNotification
 
 /**
  * Opens a fullscreen view for the video player on iOS.
@@ -45,12 +53,9 @@ private fun FullscreenVideoPlayerView(
         VideoPlayerStateRegistry.getRegisteredState()
     }
 
-    // Handle view close to exit fullscreen
-    DisposableEffect(Unit) {
-        onDispose {
-            playerState?.isFullscreen = false
-        }
-    }
+    // We don't need to handle view disposal during rotation
+    // The DisposableEffect is removed as it was causing the fullscreen player
+    // to close when the device was rotated on iOS
 
     fun exitFullScreen() {
         playerState?.isFullscreen = false

@@ -17,7 +17,11 @@ internal fun FullScreenLayout(
 ) {
     Dialog(
         onDismissRequest = onDismissRequest,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        )
     ) {
         Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
             content()
