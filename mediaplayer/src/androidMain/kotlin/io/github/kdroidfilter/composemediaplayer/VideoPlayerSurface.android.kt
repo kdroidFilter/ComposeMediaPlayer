@@ -9,6 +9,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,11 +35,34 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit
 ) {
-    if (playerState.isFullscreen) {
+    // Use rememberSaveable to preserve fullscreen state across configuration changes
+    var isFullscreen by rememberSaveable { 
+        mutableStateOf(playerState.isFullscreen) 
+    }
+    
+    // Keep the playerState.isFullscreen in sync with our saved state
+    LaunchedEffect(isFullscreen) {
+        if (playerState.isFullscreen != isFullscreen) {
+            playerState.isFullscreen = isFullscreen
+        }
+    }
+    
+    // Listen for changes from playerState.isFullscreen
+    LaunchedEffect(playerState.isFullscreen) {
+        if (isFullscreen != playerState.isFullscreen) {
+            isFullscreen = playerState.isFullscreen
+        }
+    }
+    
+    if (isFullscreen) {
         // Use FullScreenLayout for fullscreen mode
         FullScreenLayout(
             modifier = Modifier,
-            onDismissRequest = { playerState.toggleFullscreen() }
+            onDismissRequest = { 
+                isFullscreen = false
+                // Call playerState.toggleFullscreen() to ensure proper cleanup
+                playerState.toggleFullscreen()
+            }
         ) {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
                 VideoPlayerContent(
