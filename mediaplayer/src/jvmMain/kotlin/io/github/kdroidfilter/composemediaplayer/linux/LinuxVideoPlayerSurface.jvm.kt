@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer.linux
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,8 +84,11 @@ fun LinuxVideoPlayerSurface(
             )
         }
 
-        // Render the overlay content on top of the video
-        overlay()
+        // Render the overlay content on top of the video with fillMaxSize modifier
+        // to ensure it takes the full height of the parent Box
+        Box(modifier = Modifier.fillMaxSize()) {
+            overlay()
+        }
     }
 
     if (playerState.isFullscreen && !isInFullscreenWindow) {

@@ -157,7 +157,10 @@ private fun VideoPlayerContent(
             }
         }
 
-        // Render the overlay content on top of the video
-        overlay()
+        // Render the overlay content on top of the video with fillMaxSize modifier
+        // to ensure it takes the full height of the parent Box
+        Box(modifier = Modifier.fillMaxSize()) {
+            overlay()
+        }
     }
 }
