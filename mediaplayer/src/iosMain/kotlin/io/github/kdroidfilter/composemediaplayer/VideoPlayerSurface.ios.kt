@@ -3,8 +3,6 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
@@ -17,11 +15,14 @@ import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.cinterop.ExperimentalForeignApi
+import platform.AVFoundation.AVLayerVideoGravityResize
 import platform.AVFoundation.AVLayerVideoGravityResizeAspect
 import platform.AVFoundation.AVLayerVideoGravityResizeAspectFill
-import platform.AVFoundation.AVLayerVideoGravityResize
 import platform.AVKit.AVPlayerViewController
-import platform.UIKit.*
+import platform.UIKit.NSLayoutConstraint
+import platform.UIKit.UIColor
+import platform.UIKit.UIView
+import platform.UIKit.removeFromParentViewController
 
 @OptIn(ExperimentalForeignApi::class)
 @Composable
@@ -49,6 +50,8 @@ fun VideoPlayerSurfaceImpl(
     val avPlayerViewController = remember {
         AVPlayerViewController().apply {
             showsPlaybackControls = false
+            // Disable notification center controls (Now Playing)
+            updatesNowPlayingInfoCenter = false
         }
     }
 
