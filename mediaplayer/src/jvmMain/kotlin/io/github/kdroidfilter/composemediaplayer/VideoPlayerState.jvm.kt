@@ -109,8 +109,8 @@ actual open class VideoPlayerState {
     actual open val durationText: String get() = delegate.durationText
     actual open val currentTime: Double get() = delegate.currentTime
 
-    actual open fun openUri(uri: String) = delegate.openUri(uri)
-    actual open fun openFile(file: PlatformFile) = delegate.openUri(file.file.path)
+    actual open fun openUri(uri: String, initializeplayerState: InitialPlayerState) = delegate.openUri(uri, initializeplayerState)
+    actual open fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) = delegate.openUri(file.file.path, initializeplayerState)
     actual open fun play() = delegate.play()
     actual open fun pause() = delegate.pause()
     actual open fun stop() = delegate.stop()

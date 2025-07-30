@@ -47,8 +47,8 @@ expect open class VideoPlayerState() {
     fun toggleFullscreen()
 
     // Functions to manage media sources
-    fun openUri(uri: String)
-    fun openFile(file: PlatformFile)
+    fun openUri(uri: String, initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY)
+    fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY)
 
     // Error handling
     val error: VideoPlayerError?

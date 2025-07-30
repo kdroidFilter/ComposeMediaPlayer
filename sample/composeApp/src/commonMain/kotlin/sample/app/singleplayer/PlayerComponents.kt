@@ -22,6 +22,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
@@ -500,7 +501,9 @@ fun ControlsCard(
     playerState: VideoPlayerState,
     videoUrl: String,
     onVideoUrlChange: (String) -> Unit,
-    onOpenUrl: () -> Unit
+    onOpenUrl: () -> Unit,
+    initialPlayerState: InitialPlayerState,
+    onInitialPlayerStateChange: (InitialPlayerState) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -515,13 +518,53 @@ fun ControlsCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Initial Player State radio buttons
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+            ) {
+                Text(
+                    text = "Initial Player State",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = initialPlayerState == InitialPlayerState.PLAY,
+                        onClick = { onInitialPlayerStateChange(InitialPlayerState.PLAY) }
+                    )
+                    Text(
+                        text = "Auto-play",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.clickable { onInitialPlayerStateChange(InitialPlayerState.PLAY) }
+                    )
+                    
+                    Spacer(modifier = Modifier.width(16.dp))
+                    
+                    RadioButton(
+                        selected = initialPlayerState == InitialPlayerState.PAUSE,
+                        onClick = { onInitialPlayerStateChange(InitialPlayerState.PAUSE) }
+                    )
+                    Text(
+                        text = "Paused",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.clickable { onInitialPlayerStateChange(InitialPlayerState.PAUSE) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.padding(start = 8.dp)
             ) {
-
                 // Video URL input
                 VideoUrlInput(
                     videoUrl = videoUrl,
@@ -540,7 +583,6 @@ fun ControlsCard(
                     )
                 }
             }
-
         }
 
         AudioLevelDisplay(

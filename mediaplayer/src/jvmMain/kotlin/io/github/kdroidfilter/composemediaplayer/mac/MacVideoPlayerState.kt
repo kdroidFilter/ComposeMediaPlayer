@@ -12,6 +12,7 @@ import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Logger.Companion.setMinSeverity
 import co.touchlab.kermit.Severity
 import com.sun.jna.Pointer
+import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -217,8 +218,8 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
-    override fun openUri(uri: String) {
-        macLogger.d { "openUri() - Opening URI: $uri" }
+    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+        macLogger.d { "openUri() - Opening URI: $uri, initializeplayerState: $initializeplayerState" }
 
         lastUri = uri
 
@@ -266,7 +267,8 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                     withContext(Dispatchers.Main) {
                         hasMedia = true
                         isLoading = false
-                        isPlaying = true
+                        // Set isPlaying based on the initializeplayerState parameter
+                        isPlaying = initializeplayerState == InitialPlayerState.PLAY
                     }
 
                     // Start background processes for frame updates

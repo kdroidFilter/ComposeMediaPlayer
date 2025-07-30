@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.getUri
@@ -25,6 +26,9 @@ fun SinglePlayerScreen() {
         // Default video URL
         var videoUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
         val playerState = rememberVideoPlayerState()
+        
+        // State for initial player state (PLAY or PAUSE)
+        var initialPlayerState by remember { mutableStateOf<InitialPlayerState>(InitialPlayerState.PLAY) }
 
         // List of subtitle tracks and the currently selected track
         val subtitleTracks = remember { mutableStateListOf<SubtitleTrack>() }
@@ -36,7 +40,7 @@ fun SinglePlayerScreen() {
             title = "Select a video"
         ) { file ->
             file?.let {
-                playerState.openFile(it)
+                playerState.openFile(it, initialPlayerState)
             }
         }
 
@@ -136,9 +140,11 @@ fun SinglePlayerScreen() {
                             onVideoUrlChange = { videoUrl = it },
                             onOpenUrl = {
                                 if (videoUrl.isNotEmpty()) {
-                                    playerState.openUri(videoUrl)
+                                    playerState.openUri(videoUrl, initialPlayerState)
                                 }
-                            }
+                            },
+                            initialPlayerState = initialPlayerState,
+                            onInitialPlayerStateChange = { initialPlayerState = it }
                         )
                     }
                 }
@@ -186,9 +192,11 @@ fun SinglePlayerScreen() {
                         onVideoUrlChange = { videoUrl = it },
                         onOpenUrl = {
                             if (videoUrl.isNotEmpty()) {
-                                playerState.openUri(videoUrl)
+                                playerState.openUri(videoUrl, initialPlayerState)
                             }
-                        }
+                        },
+                        initialPlayerState = initialPlayerState,
+                        onInitialPlayerStateChange = { initialPlayerState = it }
                     )
                 }
             }

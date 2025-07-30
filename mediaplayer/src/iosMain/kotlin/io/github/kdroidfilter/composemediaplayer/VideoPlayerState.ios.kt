@@ -222,8 +222,21 @@ actual open class VideoPlayerState {
         }
     }
 
-    actual fun openUri(uri: String) {
-        Logger.d { "openUri called with uri: $uri" }
+    /**
+     * Opens a media source from the given URI.
+     * 
+     * IMPORTANT: iOS AVPlayer has a tendency to auto-play when certain properties are set.
+     * To ensure proper behavior with InitialPlayerState.PAUSE, we need to:
+     * 1. Explicitly call pause() on the player
+     * 2. Set rate to 0
+     * 3. Not set rate during initialization
+     * 4. Update all relevant state variables
+     *
+     * @param uri The URI of the media to open
+     * @param initializeplayerState Controls whether playback should start automatically after opening
+     */
+    actual fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+        Logger.d { "openUri called with uri: $uri, initializeplayerState: $initializeplayerState" }
         val nsUrl = NSURL.URLWithString(uri) ?: run {
             Logger.d { "Failed to create NSURL from uri: $uri" }
             return
@@ -246,9 +259,11 @@ actual open class VideoPlayerState {
         val tempPlayerItem = AVPlayerItem(nsUrl)
         player = AVPlayer(playerItem = tempPlayerItem).apply {
             volume = this@VideoPlayerState.volume
-            rate = 0.0f // Don't start playing yet
+            rate = 0.0f // Explicitly set rate to 0 to prevent auto-play
+            pause() // Explicitly pause to ensure it doesn't auto-play
         }
         _hasMedia = true
+        // Don't set _isPlaying to true yet, as we haven't decided whether to play or pause
 
         // Process the asset on a background thread to avoid blocking the UI
         dispatch_async(platform.darwin.dispatch_get_global_queue(platform.darwin.DISPATCH_QUEUE_PRIORITY_DEFAULT.toLong(), 0u)) {
@@ -330,7 +345,7 @@ actual open class VideoPlayerState {
                 // Create the final player with the fully loaded asset
                 player = AVPlayer(playerItem = playerItem).apply {
                     volume = this@VideoPlayerState.volume
-                    rate = _playbackSpeed
+                    // Don't set rate here, as it can cause auto-play
                     actionAtItemEnd = AVPlayerActionAtItemEndNone
                     
                     // Configure AVPlayer to prevent automatic pausing during configuration changes
@@ -360,7 +375,22 @@ actual open class VideoPlayerState {
                 }
 
                 startPositionUpdates()
-                play()
+                
+                // Control initial playback state based on the parameter
+                if (initializeplayerState == InitialPlayerState.PLAY) {
+                    // For PLAY state, explicitly call play() which will set the rate
+                    play()
+                } else {
+                    // For PAUSE state, ensure the player is paused
+                    player?.pause()
+                    // Explicitly set rate to 0 to prevent auto-play
+                    player?.rate = 0.0f
+                    // Update state variables
+                    _isPlaying = false
+                    _hasMedia = true
+                    // Set loading to false since we're not playing
+                    _isLoading = false
+                }
             }
         }
     }
@@ -475,12 +505,12 @@ actual open class VideoPlayerState {
         _metadata = VideoMetadata(audioChannels = 2)
     }
 
-    actual fun openFile(file: PlatformFile) {
-        Logger.d { "openFile called with file: $file" }
+    actual fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
+        Logger.d { "openFile called with file: $file, initializeplayerState: $initializeplayerState" }
         // Use the getUri extension function to get a proper file URL
         val fileUrl = file.getUri()
         Logger.d { "Opening file with URL: $fileUrl" }
-        openUri(fileUrl)
+        openUri(fileUrl, initializeplayerState)
     }
 
     actual val metadata: VideoMetadata

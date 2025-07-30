@@ -9,6 +9,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
@@ -220,8 +221,9 @@ actual open class VideoPlayerState {
      * Opens a media source from the given URI.
      *
      * @param uri The URI of the media to open
+     * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    actual fun openUri(uri: String) {
+    actual fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
         playerScope.coroutineContext.cancelChildren()
 
         // Store the URI for potential replay after stop
@@ -237,7 +239,8 @@ actual open class VideoPlayerState {
         // Don't set isLoading to false here - let the video events handle it
         playerScope.launch {
             try {
-                _isPlaying = true
+                // Set isPlaying based on the initializeplayerState parameter
+                _isPlaying = initializeplayerState == InitialPlayerState.PLAY
             } catch (e: Exception) {
                 _isLoading = false
                 _error = when (e) {
@@ -252,10 +255,11 @@ actual open class VideoPlayerState {
      * Opens a media file.
      *
      * @param file The file to open
+     * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    actual fun openFile(file: PlatformFile) {
+    actual fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
         val fileUri = file.toUriString()
-        openUri(fileUri)
+        openUri(fileUri, initializeplayerState)
     }
 
     /**
