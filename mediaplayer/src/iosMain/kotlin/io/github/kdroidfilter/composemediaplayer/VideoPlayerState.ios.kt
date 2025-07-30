@@ -22,6 +22,9 @@ import platform.CoreMedia.CMTimeGetSeconds
 import platform.CoreMedia.CMTimeMakeWithSeconds
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSURL
+import platform.UIKit.UIApplicationDidEnterBackgroundNotification
+import platform.UIKit.UIApplicationWillEnterForegroundNotification
+import platform.UIKit.UIApplication
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 
@@ -133,6 +136,13 @@ actual open class VideoPlayerState {
 
     // Stalled playback notification observer
     private var stalledObserver: Any? = null
+    
+    // App lifecycle notification observers
+    private var backgroundObserver: Any? = null
+    private var foregroundObserver: Any? = null
+    
+    // Flag to track if player was playing before going to background
+    private var wasPlayingBeforeBackground: Boolean = false
 
     // Internal time values (in seconds)
     private var _currentTime: Double = 0.0
@@ -227,6 +237,65 @@ actual open class VideoPlayerState {
         }
     }
 
+    private fun setupAppLifecycleObservers() {
+        // Remove any existing observers first
+        removeAppLifecycleObservers()
+        
+        // Add observer for when app goes to background (screen lock)
+        backgroundObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+            name = UIApplicationDidEnterBackgroundNotification,
+            `object` = UIApplication.sharedApplication,
+            queue = null
+        ) { _ ->
+            Logger.d { "App entered background (screen locked)" }
+            // Store current playing state before background
+            wasPlayingBeforeBackground = _isPlaying
+            
+            // If player is paused by the system, update our state to match
+            player?.let { player ->
+                if (player.rate == 0.0f) {
+                    Logger.d { "Player was paused by system, updating isPlaying state" }
+                    _isPlaying = false
+                }
+            }
+        }
+        
+        // Add observer for when app comes to foreground (screen unlock)
+        foregroundObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+            name = UIApplicationWillEnterForegroundNotification,
+            `object` = UIApplication.sharedApplication,
+            queue = null
+        ) { _ ->
+            Logger.d { "App will enter foreground (screen unlocked)" }
+            // If player was playing before going to background, resume playback
+            if (wasPlayingBeforeBackground) {
+                Logger.d { "Player was playing before background, resuming" }
+                player?.let { player ->
+                    // Only resume if the player is actually paused
+                    if (player.rate == 0.0f) {
+                        player.rate = _playbackSpeed
+                        player.play()
+                        _isPlaying = true
+                    }
+                }
+            }
+        }
+        
+        Logger.d { "App lifecycle observers set up" }
+    }
+    
+    private fun removeAppLifecycleObservers() {
+        backgroundObserver?.let {
+            NSNotificationCenter.defaultCenter.removeObserver(it)
+            backgroundObserver = null
+        }
+        
+        foregroundObserver?.let {
+            NSNotificationCenter.defaultCenter.removeObserver(it)
+            foregroundObserver = null
+        }
+    }
+
     private fun removeObservers() {
         endObserver?.let {
             NSNotificationCenter.defaultCenter.removeObserver(it)
@@ -237,6 +306,8 @@ actual open class VideoPlayerState {
             NSNotificationCenter.defaultCenter.removeObserver(it)
             stalledObserver = null
         }
+        
+        removeAppLifecycleObservers()
     }
 
     /**
@@ -410,6 +481,9 @@ actual open class VideoPlayerState {
                 }
 
                 startPositionUpdates()
+                
+                // Set up app lifecycle observers
+                setupAppLifecycleObservers()
 
                 // Control initial playback state based on the parameter
                 if (initializeplayerState == InitialPlayerState.PLAY) {
@@ -444,6 +518,9 @@ actual open class VideoPlayerState {
 
         // Ensure the player won't pause during configuration changes like rotation
         player?.automaticallyWaitsToMinimizeStalling = false
+        
+        // Set up app lifecycle observers
+        setupAppLifecycleObservers()
 
         player?.play()
         _isPlaying = true
