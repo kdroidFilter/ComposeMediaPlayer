@@ -6,7 +6,7 @@ filekit = "0.10.0"
 gst1JavaCore = "1.4.0"
 kermit = "2.0.6"
 kotlin = "2.2.0"
-agp = "8.9.3"
+agp = "8.1.4"
 kotlinx-coroutines = "1.10.2"
 kotlinxBrowserWasmJs = "0.3"
 kotlinxDatetime = "0.7.1-0.6.x-compat"
@@ -49,5 +49,5 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 android-application = { id = "com.android.application", version.ref = "agp" }
-vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.33.0"}
+vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.34.0"}
 dokka = { id = "org.jetbrains.dokka" , version = "2.0.0"}

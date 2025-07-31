@@ -1,6 +1,5 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
-import com.vanniktech.maven.publish.SonatypeHost
 import org.jetbrains.dokka.gradle.DokkaTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
@@ -209,7 +208,7 @@ mavenPublishing {
         }
     }
 
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
+    publishToMavenCentral()
 
     signAllPublications()
 }
