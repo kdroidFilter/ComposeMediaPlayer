@@ -29,6 +29,7 @@
   - [Initialization](#initialization)
   - [Displaying the Video Surface](#displaying-the-video-surface)
     - [Content Scaling](#content-scaling)
+    - [Surface type](#surface-type)
     - [Custom Overlay UI](#custom-overlay-ui)
   - [Video Playback via URL or Local Files](#video-playback-via-url-or-local-files)
   - [Full Controls](#full-controls)
@@ -150,8 +151,9 @@ Available content scale options:
 > [!WARNING]
 > Surface type is supported only for Android target.
 
-`SurfaceType.Surface` uses SurfaceView for the player view, which is more performant for video playback but has limitations in terms of composability and animations.
-`SurfaceType.Texture` uses TextureView for the player view, which allows for more complex composable layouts and animations.
+Available surface type options:
+- `SurfaceType.Surface` (default): uses SurfaceView for the player view, which is more performant for video playback but has limitations in terms of composability and animations.
+- `SurfaceType.Texture`: uses TextureView for the player view, which allows for more complex composable layouts and animations.
 
 ```kotlin
 VideoPlayerSurface(
