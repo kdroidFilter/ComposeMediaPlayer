@@ -1,5 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import android.content.Context
+import android.view.LayoutInflater
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -25,6 +27,7 @@ actual fun VideoPlayerSurface(
     playerState: VideoPlayerState, 
     modifier: Modifier,
     contentScale: ContentScale,
+    surfaceType: SurfaceType,
     overlay: @Composable () -> Unit
 ) {
     // Use rememberSaveable to preserve fullscreen state across configuration changes
@@ -61,7 +64,8 @@ actual fun VideoPlayerSurface(
                     playerState = playerState,
                     modifier = Modifier.fillMaxHeight(),
                     overlay = overlay,
-                    contentScale = contentScale
+                    contentScale = contentScale,
+                    surfaceType = surfaceType
                 )
             }
         }
@@ -71,7 +75,8 @@ actual fun VideoPlayerSurface(
             playerState = playerState,
             modifier = modifier,
             overlay = overlay,
-            contentScale = contentScale
+            contentScale = contentScale,
+            surfaceType = surfaceType
         )
     }
 }
@@ -82,7 +87,8 @@ private fun VideoPlayerContent(
     playerState: VideoPlayerState,
     modifier: Modifier,
     overlay: @Composable () -> Unit,
-    contentScale: ContentScale
+    contentScale: ContentScale,
+    surfaceType: SurfaceType
 ) {
     Box(
         modifier = modifier,
@@ -94,7 +100,7 @@ private fun VideoPlayerContent(
                     contentScale.toCanvasModifier(playerState.aspectRatio,playerState.metadata.width,playerState.metadata.height),
                 factory = { context ->
                     // Create PlayerView with subtitles support
-                    PlayerView(context).apply {
+                    createPlayerViewWithSurfaceType(context, surfaceType).apply {
                         // Attach the player from the state
                         player = playerState.exoPlayer
                         useController = false
@@ -163,4 +169,13 @@ private fun VideoPlayerContent(
             overlay()
         }
     }
+}
+
+private fun createPlayerViewWithSurfaceType(context: Context, surfaceType: SurfaceType): PlayerView {
+    val layoutId = when (surfaceType) {
+        SurfaceType.Surface -> R.layout.player_view_surface
+        SurfaceType.Texture -> R.layout.player_view_texture
+    }
+
+    return LayoutInflater.from(context).inflate(layoutId, null) as PlayerView
 }

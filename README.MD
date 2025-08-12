@@ -145,6 +145,22 @@ Available content scale options:
 - `ContentScale.Inside`: Similar to Fit, but won't scale up if the video is smaller than the surface
 - `ContentScale.None`: No scaling applied
 
+#### Surface type
+
+> [!WARNING]
+> Surface type is supported only for Android target.
+
+`SurfaceType.Surface` uses SurfaceView for the player view, which is more performant for video playback but has limitations in terms of composability and animations.
+`SurfaceType.Texture` uses TextureView for the player view, which allows for more complex composable layouts and animations.
+
+```kotlin
+VideoPlayerSurface(
+    playerState = playerState,
+    modifier = Modifier.fillMaxSize(),
+    surfaceType = SurfaceType.Texture // Default is SurfaceType.Surface
+)
+```
+
 #### Custom Overlay UI
 
 You can add a custom overlay UI that will always be visible, even in fullscreen mode, by using the `overlay` parameter:

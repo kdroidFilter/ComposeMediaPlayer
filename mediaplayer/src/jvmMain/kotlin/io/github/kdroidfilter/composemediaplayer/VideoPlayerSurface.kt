@@ -30,6 +30,7 @@ actual fun VideoPlayerSurface(
     playerState: VideoPlayerState, 
     modifier: Modifier,
     contentScale: ContentScale,
+    surfaceType: SurfaceType,
     overlay: @Composable () -> Unit
 ) {
     when (val delegate = playerState.delegate) {

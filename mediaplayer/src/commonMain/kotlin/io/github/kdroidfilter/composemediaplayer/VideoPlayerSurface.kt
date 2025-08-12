@@ -14,6 +14,8 @@ import androidx.compose.ui.layout.ContentScale
  * @param contentScale Controls how the video content should be scaled inside the surface.
  *                    This affects how the video is displayed when its dimensions don't match
  *                    the surface dimensions.
+ * @param surfaceType  Specifies the type of surface to be used for video playback.
+ *                    Applicable only for Android target.
  * @param overlay     Optional composable content to be displayed on top of the video surface.
  *                    This can be used to add custom controls, information, or any UI elements.
  */
@@ -22,5 +24,6 @@ expect fun VideoPlayerSurface(
     playerState: VideoPlayerState, 
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
+    surfaceType: SurfaceType = SurfaceType.Surface,
     overlay: @Composable () -> Unit = {}
 )
