@@ -29,6 +29,7 @@
   - [Initialization](#initialization)
   - [Displaying the Video Surface](#displaying-the-video-surface)
     - [Content Scaling](#content-scaling)
+    - [Surface type](#surface-type)
     - [Custom Overlay UI](#custom-overlay-ui)
   - [Video Playback via URL or Local Files](#video-playback-via-url-or-local-files)
   - [Full Controls](#full-controls)
@@ -144,6 +145,23 @@ Available content scale options:
 - `ContentScale.FillBounds`: Stretches the video to fill the surface, may distort the aspect ratio
 - `ContentScale.Inside`: Similar to Fit, but won't scale up if the video is smaller than the surface
 - `ContentScale.None`: No scaling applied
+
+#### Surface type
+
+> [!WARNING]
+> Surface type parameter is supported only for Android target.
+
+Available surface type options:
+- `SurfaceType.SurfaceView`: uses SurfaceView for the player view, which is more performant for video playback but has limitations in terms of composability and animations.
+- `SurfaceType.TextureView` (default): uses TextureView for the player view, which allows for more complex composable layouts and animations.
+
+```kotlin
+VideoPlayerSurface(
+    playerState = playerState,
+    modifier = Modifier.fillMaxSize(),
+    surfaceType = SurfaceType.SurfaceView // Default is SurfaceType.TextureView
+)
+```
 
 #### Custom Overlay UI
 
