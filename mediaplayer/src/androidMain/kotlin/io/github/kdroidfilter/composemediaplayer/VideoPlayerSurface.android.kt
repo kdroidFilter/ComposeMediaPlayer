@@ -24,7 +24,42 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 @UnstableApi
 @Composable
 actual fun VideoPlayerSurface(
-    playerState: VideoPlayerState, 
+    playerState: VideoPlayerState,
+    modifier: Modifier,
+    contentScale: ContentScale,
+    overlay: @Composable () -> Unit
+) {
+    VideoPlayerSurfaceInternal(
+        playerState = playerState,
+        modifier = modifier,
+        contentScale = contentScale,
+        overlay = overlay,
+        surfaceType = SurfaceType.TextureView
+    )
+}
+
+@UnstableApi
+@Composable
+fun VideoPlayerSurface(
+    playerState: VideoPlayerState,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    surfaceType: SurfaceType = SurfaceType.TextureView,
+    overlay: @Composable () -> Unit = {}
+) {
+    VideoPlayerSurfaceInternal(
+        playerState = playerState,
+        modifier = modifier,
+        contentScale = contentScale,
+        overlay = overlay,
+        surfaceType = surfaceType
+    )
+}
+
+@UnstableApi
+@Composable
+private fun VideoPlayerSurfaceInternal(
+    playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
     surfaceType: SurfaceType,
@@ -65,7 +100,7 @@ actual fun VideoPlayerSurface(
                     modifier = Modifier.fillMaxHeight(),
                     overlay = overlay,
                     contentScale = contentScale,
-                    surfaceType = surfaceType
+                    surfaceType = surfaceType,
                 )
             }
         }
@@ -76,7 +111,7 @@ actual fun VideoPlayerSurface(
             modifier = modifier,
             overlay = overlay,
             contentScale = contentScale,
-            surfaceType = surfaceType
+            surfaceType = surfaceType,
         )
     }
 }
@@ -88,7 +123,7 @@ private fun VideoPlayerContent(
     modifier: Modifier,
     overlay: @Composable () -> Unit,
     contentScale: ContentScale,
-    surfaceType: SurfaceType
+    surfaceType: SurfaceType,
 ) {
     Box(
         modifier = modifier,
@@ -173,8 +208,8 @@ private fun VideoPlayerContent(
 
 private fun createPlayerViewWithSurfaceType(context: Context, surfaceType: SurfaceType): PlayerView {
     val layoutId = when (surfaceType) {
-        SurfaceType.Surface -> R.layout.player_view_surface
-        SurfaceType.Texture -> R.layout.player_view_texture
+        SurfaceType.SurfaceView -> R.layout.player_view_surface
+        SurfaceType.TextureView -> R.layout.player_view_texture
     }
 
     return LayoutInflater.from(context).inflate(layoutId, null) as PlayerView

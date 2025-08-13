@@ -31,7 +31,6 @@ actual fun VideoPlayerSurface(
     playerState: VideoPlayerState, 
     modifier: Modifier,
     contentScale: ContentScale,
-    surfaceType: SurfaceType,
     overlay: @Composable () -> Unit
 ) {
     // Set pauseOnDispose to false to prevent pausing during screen rotation
