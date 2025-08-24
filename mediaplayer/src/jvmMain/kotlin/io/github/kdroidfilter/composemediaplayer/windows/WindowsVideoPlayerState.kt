@@ -369,6 +369,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
+        
+        // Hint the GC after freeing big objects synchronously
+        System.gc()
     }
 
     private fun releaseAllResources() {
@@ -396,6 +399,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
+        
+        // Hint GC after releasing frame buffers and bitmaps
+        System.gc()
     }
 
     private fun clearFrameChannel() {
