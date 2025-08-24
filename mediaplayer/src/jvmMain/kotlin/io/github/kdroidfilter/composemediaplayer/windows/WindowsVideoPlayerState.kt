@@ -1017,26 +1017,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     fun onResized() {
         if (isDisposing.get()) return
 
+        // Mark resizing in progress and debounce rapid events without heavy operations
         isResizing.set(true)
-        scope.launch {
-            try {
-                // Clear frame channel to stop processing frames during resize
-                clearFrameChannel()
-
-                // Release shared frame buffer to reduce memory pressure during resize
-                // This is especially important for 4K videos
-                sharedFrameBuffer = null
-
-                // Force garbage collection to free up memory
-                System.gc()
-            } finally {
-                resizeJob?.cancel()
-                resizeJob = scope.launch {
-                    // Increased delay for 4K videos (was 200ms)
-                    delay(500)
-                    isResizing.set(false)
-                }
-            }
+        // Cancel any pending end-of-resize job and schedule a shorter debounce
+        resizeJob?.cancel()
+        resizeJob = scope.launch {
+            // Short debounce to smooth out successive resize events
+            delay(120)
+            isResizing.set(false)
         }
     }
 
@@ -1166,9 +1154,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private suspend fun waitIfResizing(): Boolean {
         if (isResizing.get()) {
             try {
-                // Increased delay for 4K videos (was 100ms)
-                // This helps reduce memory pressure during resizing
-                delay(200)
+                // Keep the pipeline responsive during resize while avoiding busy-wait
+                yield()
+                delay(8)
             } catch (e: CancellationException) {
                 throw e
             }
