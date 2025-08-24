@@ -67,7 +67,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
          */
         private fun ensureMfInitialized() {
             if (!isMfBootstrapped.getAndSet(true)) {
-                val hr = MediaFoundationLib.INSTANCE.InitMediaFoundation()
+                val hr = MediaFoundationLib.InitMediaFoundation()
                 if (hr < 0) {
                     windowsLogger.e { "Media Foundation initialization failed (hr=0x${hr.toString(16)})" }
                 }
@@ -81,7 +81,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     /** Instance of the native Media Foundation player */
-    private val player = MediaFoundationLib.INSTANCE
+    private val player = MediaFoundationLib
 
     /** Coroutine scope for all async operations */
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
