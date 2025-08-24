@@ -67,7 +67,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
          */
         private fun ensureMfInitialized() {
             if (!isMfBootstrapped.getAndSet(true)) {
-                val hr = MediaFoundationLib.INSTANCE.InitMediaFoundation()
+                val hr = MediaFoundationLib.InitMediaFoundation()
                 if (hr < 0) {
                     windowsLogger.e { "Media Foundation initialization failed (hr=0x${hr.toString(16)})" }
                 }
@@ -81,7 +81,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     }
 
     /** Instance of the native Media Foundation player */
-    private val player = MediaFoundationLib.INSTANCE
+    private val player = MediaFoundationLib
 
     /** Coroutine scope for all async operations */
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -369,6 +369,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
+        
+        // Hint the GC after freeing big objects synchronously
+        System.gc()
     }
 
     private fun releaseAllResources() {
@@ -396,6 +399,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
+        
+        // Hint GC after releasing frame buffers and bitmaps
+        System.gc()
     }
 
     private fun clearFrameChannel() {
@@ -1017,26 +1023,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     fun onResized() {
         if (isDisposing.get()) return
 
+        // Mark resizing in progress and debounce rapid events without heavy operations
         isResizing.set(true)
-        scope.launch {
-            try {
-                // Clear frame channel to stop processing frames during resize
-                clearFrameChannel()
-
-                // Release shared frame buffer to reduce memory pressure during resize
-                // This is especially important for 4K videos
-                sharedFrameBuffer = null
-
-                // Force garbage collection to free up memory
-                System.gc()
-            } finally {
-                resizeJob?.cancel()
-                resizeJob = scope.launch {
-                    // Increased delay for 4K videos (was 200ms)
-                    delay(500)
-                    isResizing.set(false)
-                }
-            }
+        // Cancel any pending end-of-resize job and schedule a shorter debounce
+        resizeJob?.cancel()
+        resizeJob = scope.launch {
+            // Short debounce to smooth out successive resize events
+            delay(120)
+            isResizing.set(false)
         }
     }
 
@@ -1166,9 +1160,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private suspend fun waitIfResizing(): Boolean {
         if (isResizing.get()) {
             try {
-                // Increased delay for 4K videos (was 100ms)
-                // This helps reduce memory pressure during resizing
-                delay(200)
+                // Keep the pipeline responsive during resize while avoiding busy-wait
+                yield()
+                delay(8)
             } catch (e: CancellationException) {
                 throw e
             }

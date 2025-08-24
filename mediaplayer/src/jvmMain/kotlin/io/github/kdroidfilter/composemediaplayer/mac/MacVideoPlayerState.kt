@@ -181,7 +181,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     private suspend fun initPlayer() = ioScope.launch {
         macLogger.d { "initPlayer() - Creating native player" }
         try {
-            val ptr = SharedVideoPlayer.INSTANCE.createVideoPlayer()
+            val ptr = SharedVideoPlayer.createVideoPlayer()
             if (ptr != null) {
                 mainMutex.withLock { playerPtr = ptr }
                 macLogger.d { "Native player created successfully" }
@@ -208,9 +208,9 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         val ptr = mainMutex.withLock { playerPtr } ?: return
 
         try {
-            videoFrameRate = SharedVideoPlayer.INSTANCE.getVideoFrameRate(ptr)
-            screenRefreshRate = SharedVideoPlayer.INSTANCE.getScreenRefreshRate(ptr)
-            captureFrameRate = SharedVideoPlayer.INSTANCE.getCaptureFrameRate(ptr)
+            videoFrameRate = SharedVideoPlayer.getVideoFrameRate(ptr)
+            screenRefreshRate = SharedVideoPlayer.getScreenRefreshRate(ptr)
+            captureFrameRate = SharedVideoPlayer.getCaptureFrameRate(ptr)
             macLogger.d { "Frame Rates - Video: $videoFrameRate, Screen: $screenRefreshRate, Capture: $captureFrameRate" }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -316,7 +316,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         // Release resources outside of the mutex lock
         ptrToDispose?.let {
             try {
-                SharedVideoPlayer.INSTANCE.disposeVideoPlayer(it)
+                SharedVideoPlayer.disposeVideoPlayer(it)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 macLogger.e { "Error disposing player: ${e.message}" }
@@ -334,7 +334,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         val isPlayerNull = mainMutex.withLock { playerPtr == null }
 
         if (isPlayerNull) {
-            val ptr = SharedVideoPlayer.INSTANCE.createVideoPlayer()
+            val ptr = SharedVideoPlayer.createVideoPlayer()
             if (ptr != null) {
                 mainMutex.withLock { playerPtr = ptr }
                 applyVolume()
@@ -365,7 +365,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
 
         return try {
             // Open video asynchronously
-            SharedVideoPlayer.INSTANCE.openUri(ptr, uri)
+            SharedVideoPlayer.openUri(ptr, uri)
 
             // Instead of directly calling `updateMetadata()`,
             // we poll until valid dimensions are available
@@ -390,8 +390,8 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
      */
     private suspend fun pollDimensionsUntilReady(ptr: Pointer, maxAttempts: Int = 20) {
         for (attempt in 1..maxAttempts) {
-            val width = SharedVideoPlayer.INSTANCE.getFrameWidth(ptr)
-            val height = SharedVideoPlayer.INSTANCE.getFrameHeight(ptr)
+            val width = SharedVideoPlayer.getFrameWidth(ptr)
+            val height = SharedVideoPlayer.getFrameHeight(ptr)
 
             if (width > 0 && height > 0) {
                 macLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
@@ -409,10 +409,10 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         val ptr = mainMutex.withLock { playerPtr } ?: return
 
         try {
-            val width = SharedVideoPlayer.INSTANCE.getFrameWidth(ptr)
-            val height = SharedVideoPlayer.INSTANCE.getFrameHeight(ptr)
-            val duration = SharedVideoPlayer.INSTANCE.getVideoDuration(ptr).toLong()
-            val frameRate = SharedVideoPlayer.INSTANCE.getVideoFrameRate(ptr)
+            val width = SharedVideoPlayer.getFrameWidth(ptr)
+            val height = SharedVideoPlayer.getFrameHeight(ptr)
+            val duration = SharedVideoPlayer.getVideoDuration(ptr).toLong()
+            val frameRate = SharedVideoPlayer.getVideoFrameRate(ptr)
 
             // Calculate aspect ratio
             val newAspectRatio = if (width > 0 && height > 0) {
@@ -424,11 +424,11 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             }
 
             // Get additional metadata
-            val title = SharedVideoPlayer.INSTANCE.getVideoTitle(ptr)
-            val bitrate = SharedVideoPlayer.INSTANCE.getVideoBitrate(ptr)
-            val mimeType = SharedVideoPlayer.INSTANCE.getVideoMimeType(ptr)
-            val audioChannels = SharedVideoPlayer.INSTANCE.getAudioChannels(ptr)
-            val audioSampleRate = SharedVideoPlayer.INSTANCE.getAudioSampleRate(ptr)
+            val title = SharedVideoPlayer.getVideoTitle(ptr)
+            val bitrate = SharedVideoPlayer.getVideoBitrate(ptr)
+            val mimeType = SharedVideoPlayer.getVideoMimeType(ptr)
+            val audioChannels = SharedVideoPlayer.getAudioChannels(ptr)
+            val audioSampleRate = SharedVideoPlayer.getAudioSampleRate(ptr)
 
             withContext(Dispatchers.Main) {
                 // Update metadata
@@ -537,15 +537,15 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             val ptr = mainMutex.withLock { playerPtr } ?: return
 
             // Get frame dimensions
-            val width = SharedVideoPlayer.INSTANCE.getFrameWidth(ptr)
-            val height = SharedVideoPlayer.INSTANCE.getFrameHeight(ptr)
+            val width = SharedVideoPlayer.getFrameWidth(ptr)
+            val height = SharedVideoPlayer.getFrameHeight(ptr)
 
             if (width <= 0 || height <= 0) {
                 return
             }
 
             // Get the latest frame to minimize mutex lock time
-            val framePtr = SharedVideoPlayer.INSTANCE.getLatestFrame(ptr) ?: return
+            val framePtr = SharedVideoPlayer.getLatestFrame(ptr) ?: return
 
             // Create or reuse a buffered image on a compute thread
             val bufferedImage = withContext(Dispatchers.Default) {
@@ -599,8 +599,8 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         try {
             val ptr = mainMutex.withLock { playerPtr }
             if (ptr != null) {
-                val newLeft = SharedVideoPlayer.INSTANCE.getLeftAudioLevel(ptr)
-                val newRight = SharedVideoPlayer.INSTANCE.getRightAudioLevel(ptr)
+                val newLeft = SharedVideoPlayer.getLeftAudioLevel(ptr)
+                val newRight = SharedVideoPlayer.getRightAudioLevel(ptr)
 //                macLogger.d { "Audio levels fetched: L=$newLeft, R=$newRight" }
 
                 // Converts the linear level to a percentage on a logarithmic scale.
@@ -710,7 +710,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         val ptr = mainMutex.withLock { playerPtr } ?: return
 
         try {
-            SharedVideoPlayer.INSTANCE.playVideo(ptr)
+            SharedVideoPlayer.playVideo(ptr)
 
             withContext(Dispatchers.Main) {
                 isPlaying = true
@@ -737,7 +737,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         val ptr = mainMutex.withLock { playerPtr } ?: return
 
         try {
-            SharedVideoPlayer.INSTANCE.pauseVideo(ptr)
+            SharedVideoPlayer.pauseVideo(ptr)
 
             withContext(Dispatchers.Main) {
                 isPlaying = false
@@ -803,10 +803,10 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             lastFrameUpdateTime = System.currentTimeMillis()
 
             val ptr = mainMutex.withLock { playerPtr } ?: return
-            SharedVideoPlayer.INSTANCE.seekTo(ptr, seekTime.toDouble())
+            SharedVideoPlayer.seekTo(ptr, seekTime.toDouble())
 
             if (isPlaying) {
-                SharedVideoPlayer.INSTANCE.playVideo(ptr)
+                SharedVideoPlayer.playVideo(ptr)
                 // Reduce delay to update frame faster for local videos
                 delay(10)
                 updateFrameAsync()
@@ -854,7 +854,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             ptrToDispose?.let {
                 macLogger.d { "dispose() - Disposing native player" }
                 try {
-                    SharedVideoPlayer.INSTANCE.disposeVideoPlayer(it)
+                    SharedVideoPlayer.disposeVideoPlayer(it)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     macLogger.e { "Error disposing player: ${e.message}" }
@@ -919,7 +919,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     private suspend fun getPositionSafely(): Double {
         val ptr = mainMutex.withLock { playerPtr } ?: return 0.0
         return try {
-            SharedVideoPlayer.INSTANCE.getCurrentTime(ptr)
+            SharedVideoPlayer.getCurrentTime(ptr)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error getting position: ${e.message}" }
@@ -931,7 +931,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     private suspend fun getDurationSafely(): Double {
         val ptr = mainMutex.withLock { playerPtr } ?: return 0.0
         return try {
-            SharedVideoPlayer.INSTANCE.getVideoDuration(ptr)
+            SharedVideoPlayer.getVideoDuration(ptr)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error getting duration: ${e.message}" }
@@ -948,7 +948,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         mainMutex.withLock {
             playerPtr?.let { ptr ->
                 try {
-                    SharedVideoPlayer.INSTANCE.setVolume(ptr, _volumeState.value)
+                    SharedVideoPlayer.setVolume(ptr, _volumeState.value)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     macLogger.e { "Error applying volume: ${e.message}" }
@@ -966,7 +966,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         mainMutex.withLock {
             playerPtr?.let { ptr ->
                 try {
-                    SharedVideoPlayer.INSTANCE.setPlaybackSpeed(ptr, _playbackSpeedState.value)
+                    SharedVideoPlayer.setPlaybackSpeed(ptr, _playbackSpeedState.value)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     macLogger.e { "Error applying playback speed: ${e.message}" }
