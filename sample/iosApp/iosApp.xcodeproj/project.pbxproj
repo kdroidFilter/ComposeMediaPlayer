@@ -114,6 +114,7 @@
 		A9D80A052AAB5CDE006C8738 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
+			alwaysOutOfDate = 1;
 			files = (
 			);
 			inputFileListPaths = (
@@ -126,7 +127,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"$SRCROOT/..\"\n./../gradlew :sample:composeApp:embedAndSignAppleFrameworkForXcode\n";
+				shellScript = "set -eo pipefail\n# Ensure we run from the iOS project folder's parent (sample)\ncd \"$SRCROOT/..\"\n\n# Prefer JDK 17 (or 21) for Gradle, if available\nif command -v /usr/libexec/java_home >/dev/null 2>&1; then\n  export JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home -v 21 2>/dev/null || true)\nfi\n\n# Run Gradle task to build and embed the Kotlin framework for Xcode\n./../gradlew :sample:composeApp:embedAndSignAppleFrameworkForXcode --no-configuration-cache --stacktrace --info\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
