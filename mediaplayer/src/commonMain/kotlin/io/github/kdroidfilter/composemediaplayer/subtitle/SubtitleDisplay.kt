@@ -21,7 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import kotlinx.datetime.Clock
+import kotlin.time.TimeSource
 
 /**
  * A composable function that displays subtitles.
@@ -104,12 +104,11 @@ fun AutoUpdatingSubtitleDisplay(
     // Periodically update display time when playing
     LaunchedEffect(isPlaying, currentTimeMs) {
         if (isPlaying) {
-            var lastUpdateTime = Clock.System.now().toEpochMilliseconds()
+            var mark = TimeSource.Monotonic.markNow()
             while (true) {
                 delay(16) // ~60fps
-                val now = Clock.System.now().toEpochMilliseconds()
-                val elapsed = now - lastUpdateTime
-                lastUpdateTime = now
+                val elapsed = mark.elapsedNow().inWholeMilliseconds
+                mark = TimeSource.Monotonic.markNow()
                 displayTimeMs += elapsed
             }
         }
