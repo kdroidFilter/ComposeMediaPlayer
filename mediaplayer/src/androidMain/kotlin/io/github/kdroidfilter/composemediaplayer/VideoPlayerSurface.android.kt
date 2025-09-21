@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer
 
 import android.content.Context
 import android.view.LayoutInflater
+import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -66,29 +67,41 @@ private fun VideoPlayerSurfaceInternal(
     overlay: @Composable () -> Unit
 ) {
     // Use rememberSaveable to preserve fullscreen state across configuration changes
-    var isFullscreen by rememberSaveable { 
-        mutableStateOf(playerState.isFullscreen) 
+    var isFullscreen by rememberSaveable {
+        mutableStateOf(playerState.isFullscreen)
     }
-    
+
     // Keep the playerState.isFullscreen in sync with our saved state
     LaunchedEffect(isFullscreen) {
         if (playerState.isFullscreen != isFullscreen) {
             playerState.isFullscreen = isFullscreen
         }
     }
-    
+
     // Listen for changes from playerState.isFullscreen
     LaunchedEffect(playerState.isFullscreen) {
         if (isFullscreen != playerState.isFullscreen) {
             isFullscreen = playerState.isFullscreen
         }
     }
-    
+
+    // Nettoyer lorsque le composable est détruit
+    DisposableEffect(playerState) {
+        onDispose {
+            try {
+                // Détacher la vue du player
+                playerState.attachPlayerView(null)
+            } catch (e: Exception) {
+                androidVideoLogger.e { "Error detaching PlayerView on dispose: ${e.message}" }
+            }
+        }
+    }
+
     if (isFullscreen) {
         // Use FullScreenLayout for fullscreen mode
         FullScreenLayout(
             modifier = Modifier,
-            onDismissRequest = { 
+            onDismissRequest = {
                 isFullscreen = false
                 // Call playerState.toggleFullscreen() to ensure proper cleanup
                 playerState.toggleFullscreen()
@@ -129,62 +142,82 @@ private fun VideoPlayerContent(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        if (playerState.hasMedia) {
+        if (playerState.hasMedia && playerState.exoPlayer != null) {
             AndroidView(
-                modifier =
-                    contentScale.toCanvasModifier(playerState.aspectRatio,playerState.metadata.width,playerState.metadata.height),
+                modifier = contentScale.toCanvasModifier(
+                    playerState.aspectRatio,
+                    playerState.metadata.width,
+                    playerState.metadata.height
+                ),
                 factory = { context ->
-                    // Create PlayerView with subtitles support
-                    createPlayerViewWithSurfaceType(context, surfaceType).apply {
-                        // Attach the player from the state
-                        player = playerState.exoPlayer
-                        useController = false
-                        defaultArtwork = null
-                        setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    try {
+                        // Créer PlayerView avec le type de surface approprié
+                        createPlayerViewWithSurfaceType(context, surfaceType).apply {
+                            // Attacher le lecteur depuis l'état
+                            player = playerState.exoPlayer
+                            useController = false
+                            defaultArtwork = null
+                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
-                        // Map Compose ContentScale to ExoPlayer resize modes
-                        resizeMode = when (contentScale) {
-                            ContentScale.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                            ContentScale.FillBounds -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                            ContentScale.Fit, ContentScale.Inside -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                            ContentScale.FillWidth -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
-                            ContentScale.FillHeight -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
-                            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            // Mapper ContentScale vers les modes de redimensionnement ExoPlayer
+                            resizeMode = mapContentScaleToResizeMode(contentScale)
+
+                            // Désactiver la vue de sous-titres native car nous utilisons des sous-titres basés sur Compose
+                            subtitleView?.visibility = android.view.View.GONE
+
+                            // Attacher cette vue à l'état du lecteur
+                            playerState.attachPlayerView(this)
                         }
-
-                        // Disable native subtitle view since we're using Compose-based subtitles
-                        subtitleView?.visibility = android.view.View.GONE
-
-                        // Attach this view to the player state
-                        playerState.attachPlayerView(this)
+                    } catch (e: Exception) {
+                        androidVideoLogger.e { "Error creating PlayerView: ${e.message}" }
+                        // Retourner une vue vide en cas d'erreur
+                        PlayerView(context).apply {
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                        }
                     }
                 },
                 update = { playerView ->
-                    // Update the resize mode when contentScale changes
-                    playerView.resizeMode = when (contentScale) {
-                        ContentScale.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                        ContentScale.FillBounds -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                        ContentScale.Fit, ContentScale.Inside -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        ContentScale.FillWidth -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
-                        ContentScale.FillHeight -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
-                        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    try {
+                        // Vérifier que le player est toujours valide avant la mise à jour
+                        if (playerState.exoPlayer != null && playerView.player != null) {
+                            // Mettre à jour le mode de redimensionnement lorsque contentScale change
+                            playerView.resizeMode = mapContentScaleToResizeMode(contentScale)
+                        }
+                    } catch (e: Exception) {
+                        androidVideoLogger.e { "Error updating PlayerView: ${e.message}" }
                     }
                 },
                 onReset = { playerView ->
-                    // Clean up resources when the view is recycled in a LazyList
-                    playerView.player = null
+                    try {
+                        // Nettoyer les ressources lorsque la vue est recyclée dans une LazyList
+                        playerView.player = null
+                        playerView.onPause()
+                    } catch (e: Exception) {
+                        androidVideoLogger.e { "Error resetting PlayerView: ${e.message}" }
+                    }
+                },
+                onRelease = { playerView ->
+                    try {
+                        // Nettoyer complètement la vue lors de sa libération
+                        playerView.player = null
+                    } catch (e: Exception) {
+                        androidVideoLogger.e { "Error releasing PlayerView: ${e.message}" }
+                    }
                 }
             )
 
-            // Add Compose-based subtitle layer
+            // Ajouter une couche de sous-titres basée sur Compose
             if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
-                // Calculate current time in milliseconds
-                val currentTimeMs = (playerState.sliderPos / 1000f * 
-                    playerState.durationText.toTimeMs()).toLong()
+                // Calculer le temps actuel en millisecondes
+                val currentTimeMs = remember(playerState.sliderPos, playerState.durationText) {
+                    (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
+                }
 
-                // Calculate duration in milliseconds
-                val durationMs = playerState.durationText.toTimeMs()
+                // Calculer la durée en millisecondes
+                val durationMs = remember(playerState.durationText) {
+                    playerState.durationText.toTimeMs()
+                }
 
                 ComposeSubtitleLayer(
                     currentTimeMs = currentTimeMs,
@@ -198,19 +231,70 @@ private fun VideoPlayerContent(
             }
         }
 
-        // Render the overlay content on top of the video with fillMaxSize modifier
-        // to ensure it takes the full height of the parent Box
+        // Rendre le contenu de l'overlay au-dessus de la vidéo avec le modificateur fillMaxSize
+        // pour s'assurer qu'il prend toute la hauteur du Box parent
         Box(modifier = Modifier.fillMaxSize()) {
             overlay()
         }
     }
 }
 
-private fun createPlayerViewWithSurfaceType(context: Context, surfaceType: SurfaceType): PlayerView {
-    val layoutId = when (surfaceType) {
-        SurfaceType.SurfaceView -> R.layout.player_view_surface
-        SurfaceType.TextureView -> R.layout.player_view_texture
+@OptIn(UnstableApi::class)
+private fun mapContentScaleToResizeMode(contentScale: ContentScale): Int {
+    return when (contentScale) {
+        ContentScale.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        ContentScale.FillBounds -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+        ContentScale.Fit, ContentScale.Inside -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        ContentScale.FillWidth -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
+        ContentScale.FillHeight -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
+        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
+}
 
-    return LayoutInflater.from(context).inflate(layoutId, null) as PlayerView
+@OptIn(UnstableApi::class)
+private fun createPlayerViewWithSurfaceType(context: Context, surfaceType: SurfaceType): PlayerView {
+    return try {
+        // Essayer d'abord d'inflater les layouts personnalisés
+        val layoutId = when (surfaceType) {
+            SurfaceType.SurfaceView -> R.layout.player_view_surface
+            SurfaceType.TextureView -> R.layout.player_view_texture
+        }
+
+        LayoutInflater.from(context).inflate(layoutId, null) as PlayerView
+    } catch (e: Exception) {
+        androidVideoLogger.e { "Error inflating PlayerView layout: ${e.message}, creating programmatically" }
+
+        // Créer PlayerView programmatiquement pour éviter les problèmes de ressources manquantes
+        try {
+            PlayerView(context).apply {
+                // Désactiver complètement les contrôles pour éviter l'inflation du layout des contrôles
+                useController = false
+
+                // Configurer le type de surface programmatiquement
+                when (surfaceType) {
+                    SurfaceType.TextureView -> {
+                        // Utiliser TextureView si disponible
+                        videoSurfaceView?.let { view ->
+                            if (view is android.view.TextureView) {
+                                androidVideoLogger.d { "Using TextureView" }
+                            }
+                        }
+                    }
+                    SurfaceType.SurfaceView -> {
+                        // SurfaceView est le défaut
+                        androidVideoLogger.d { "Using SurfaceView" }
+                    }
+                }
+
+                // Désactiver les fonctionnalités qui pourraient causer des problèmes
+                controllerAutoShow = false
+                controllerHideOnTouch = false
+                setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+            }
+        } catch (e2: Exception) {
+            androidVideoLogger.e { "Error creating PlayerView programmatically: ${e2.message}" }
+            // Dernier recours : créer une vue vide pour éviter le crash
+            throw RuntimeException("Unable to create PlayerView", e2)
+        }
+    }
 }
