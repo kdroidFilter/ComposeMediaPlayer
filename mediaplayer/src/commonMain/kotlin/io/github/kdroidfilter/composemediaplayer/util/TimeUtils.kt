@@ -1,9 +1,5 @@
 package io.github.kdroidfilter.composemediaplayer.util
 
-import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * Formats a given time into either "HH:MM:SS" (if hours > 0) or "MM:SS".

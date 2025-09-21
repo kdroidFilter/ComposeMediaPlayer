@@ -92,10 +92,11 @@ dependencies {
 
 ## 📊 Compatibility Table
 
-| Library Version | Kotlin Version |
-|-----------------|----------------|
-| 0.7.10          | 2.1.21         |
-| 0.7.11          | 2.2.0          |
+| Library Version | Kotlin Version | Compose Version |
+|-----------------|----------------|-----------------|
+| 0.8.3           | 2.2.20         | 1.9.0           |
+| 0.7.11          | 2.2.0          | 1.8.2           |
+| 0.7.10          | 2.1.21         | 1.8.2           |
 
 ## 🚀 Getting Started
 
