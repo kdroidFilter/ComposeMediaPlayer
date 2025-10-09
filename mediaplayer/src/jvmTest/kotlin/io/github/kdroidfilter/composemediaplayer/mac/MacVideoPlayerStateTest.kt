@@ -1,7 +1,5 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
-import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -167,5 +165,83 @@ class MacVideoPlayerStateTest {
         
         // Clean up
         playerState.dispose()
+    }
+
+    private fun testOpenLocalFile(file: String) {
+        // Skip test if not running on Mac
+        if (!Platform.isMac()) {
+            println("Skipping Mac-specific test on non-Mac platform")
+            return
+        }
+
+        val playerState = MacVideoPlayerState()
+
+        // Initially there should be no error
+        assertNull(playerState.error)
+
+        // Test opening a non-existent file (should cause an error)
+        runBlocking {
+            playerState.openUri(file)
+            delay(500) // Give some time for the error to be set
+        }
+
+        // There should be no error
+        assertNull(playerState.error)
+
+        // Clean up
+        playerState.dispose()
+    }
+
+    @Test
+    fun testOpenLocalFile() {
+        val path = assertNotNull(javaClass.classLoader.getResource("existing_file.mp4")).toURI().path
+        testOpenLocalFile(path)
+    }
+
+    @Test
+    fun testOpenLocalFileWithScheme() {
+        val path = assertNotNull(javaClass.classLoader.getResource("existing_file.mp4")).toURI().path
+        testOpenLocalFile("file:$path")
+    }
+
+    @Test
+    fun testOpenLocalFileWithSchemeWithAuthority() {
+        val path = assertNotNull(javaClass.classLoader.getResource("existing_file.mp4")).toURI().path
+        testOpenLocalFile("file://$path")
+    }
+
+    private fun testMalformedUri(uri: String) {
+        // Skip test if not running on Mac
+        if (!Platform.isMac()) {
+            println("Skipping Mac-specific test on non-Mac platform")
+            return
+        }
+
+        val playerState = MacVideoPlayerState()
+
+        // Initially there should be no error
+        assertNull(playerState.error)
+
+        // Test opening a non-existent file (should cause an error)
+        runBlocking {
+            playerState.openUri(uri)
+            delay(500) // Give some time for the error to be set
+        }
+
+        // There should be an error now
+        assertNotNull(playerState.error)
+
+        // Test clearing the error
+        playerState.clearError()
+        assertNull(playerState.error)
+
+        // Clean up
+        playerState.dispose()
+    }
+
+    @Test
+    fun testMalformedUri() {
+        val path = assertNotNull(javaClass.classLoader.getResource("existing_file.mp4")).toURI().path
+        testMalformedUri("file:${path.removePrefix("/")}")
     }
 }
