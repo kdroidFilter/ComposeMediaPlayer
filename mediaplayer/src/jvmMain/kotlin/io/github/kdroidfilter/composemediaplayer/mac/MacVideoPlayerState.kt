@@ -18,6 +18,8 @@ import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.vinceglb.filekit.utils.toFile
+import io.github.vinceglb.filekit.utils.toPath
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
@@ -25,6 +27,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferInt
+import java.net.URI
 import kotlin.math.abs
 import kotlin.math.log10
 
@@ -218,21 +221,33 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    // Check if this is a local file that doesn't exist
+    // This handles both URIs with a "file:" scheme and simple filenames without a scheme, with or without authority.
+    private fun checkExistsIfLocalFile(uri: String): Boolean {
+        val javaUri = try {
+            URI.create(uri)
+        } catch (e: IllegalArgumentException) {
+            macLogger.e(e) { "URI object is malformed: $uri" }
+            return false
+        }
+        return if (javaUri.scheme == "file" || javaUri.scheme == null) {
+            val file = javaUri.path?.toPath()?.toFile()
+            file?.exists() == true
+        } else {
+            true
+        }
+    }
+
     override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
         macLogger.d { "openUri() - Opening URI: $uri, initializeplayerState: $initializeplayerState" }
 
         lastUri = uri
 
         // Check if this is a local file that doesn't exist
-        // This handles both URIs with file:// scheme and simple filenames without a scheme
-        if (uri.startsWith("file://") || !uri.contains("://") || !uri.matches("^[a-zA-Z]+://.*".toRegex())) {
-            val filePath = uri.replace("file://", "")
-            val file = java.io.File(filePath)
-            if (!file.exists()) {
-                macLogger.e { "File does not exist: $filePath" }
-                setPlayerError(VideoPlayerError.SourceError("File not found: $filePath"))
-                return
-            }
+        if (!checkExistsIfLocalFile(uri)) {
+            macLogger.e { "File does not exist: $uri" }
+            setPlayerError(VideoPlayerError.SourceError("File not found: $uri"))
+            return
         }
 
         // Update UI state first
@@ -352,15 +367,11 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
 
         // Check if file exists (for local files)
         // This handles both URIs with file:// scheme and simple filenames without a scheme
-        if (uri.startsWith("file://") || !uri.contains("://") || !uri.matches("^[a-zA-Z]+://.*".toRegex())) {
-            val filePath = uri.replace("file://", "")
-            val file = java.io.File(filePath)
-            if (!file.exists()) {
-                macLogger.e { "File does not exist: $filePath" }
-                // Use setPlayerError to ensure the error is set synchronously
-                setPlayerError(VideoPlayerError.SourceError("File not found: $filePath"))
-                return false
-            }
+        if (!checkExistsIfLocalFile(uri)) {
+            macLogger.e { "File does not exist: $uri" }
+            // Use setPlayerError to ensure the error is set synchronously
+            setPlayerError(VideoPlayerError.SourceError("File not found: $uri"))
+            return false
         }
 
         return try {
