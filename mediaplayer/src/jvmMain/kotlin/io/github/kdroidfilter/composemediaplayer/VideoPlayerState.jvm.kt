@@ -1,5 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Stable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -39,13 +42,10 @@ import io.github.vinceglb.filekit.PlatformFile
  * - `dispose()`: Releases resources used by the video player and disposes of the state.
  */
 @Stable
-actual open class VideoPlayerState {
-    val delegate: PlatformVideoPlayerState = when {
-        Platform.isWindows() -> WindowsVideoPlayerState()
-        Platform.isMac() -> MacVideoPlayerState()
-        Platform.isLinux() -> LinuxVideoPlayerState()
-        else -> throw UnsupportedOperationException("Unsupported platform")
-    }
+actual open class VideoPlayerState internal constructor(
+    val delegate: PlatformVideoPlayerState,
+) {
+    actual constructor() : this(createPlatformDelegate())
 
     actual open val hasMedia: Boolean get() = delegate.hasMedia
     actual open val isPlaying: Boolean get() = delegate.isPlaying
@@ -87,9 +87,21 @@ actual open class VideoPlayerState {
     actual open val metadata: VideoMetadata get() = delegate.metadata
     actual open val aspectRatio: Float get() = delegate.aspectRatio
 
-    actual var subtitlesEnabled = delegate.subtitlesEnabled
-    actual var currentSubtitleTrack : SubtitleTrack? = delegate.currentSubtitleTrack
-    actual val availableSubtitleTracks  = delegate.availableSubtitleTracks
+    actual var subtitlesEnabled: Boolean
+        get() = delegate.subtitlesEnabled
+        set(value) {
+            delegate.subtitlesEnabled = value
+        }
+
+    actual var currentSubtitleTrack: SubtitleTrack?
+        get() = delegate.currentSubtitleTrack
+        set(value) {
+            delegate.currentSubtitleTrack = value
+        }
+
+    actual val availableSubtitleTracks: MutableList<SubtitleTrack>
+        get() = delegate.availableSubtitleTracks
+
     actual var subtitleTextStyle: TextStyle
         get() = delegate.subtitleTextStyle
         set(value) {
@@ -119,4 +131,100 @@ actual open class VideoPlayerState {
     actual open fun dispose() = delegate.dispose()
     actual open fun clearError() = delegate.clearError()
 
+}
+
+private fun createPlatformDelegate(): PlatformVideoPlayerState = when {
+    Platform.isWindows() -> WindowsVideoPlayerState()
+    Platform.isMac() -> MacVideoPlayerState()
+    Platform.isLinux() -> LinuxVideoPlayerState()
+    else -> throw UnsupportedOperationException("Unsupported platform")
+}
+
+internal actual fun createVideoPlayerState(isInPreview: Boolean): VideoPlayerState {
+    return if (isInPreview) {
+        VideoPlayerState(PreviewPlatformVideoPlayerState())
+    } else {
+        VideoPlayerState()
+    }
+}
+
+@Stable
+private class PreviewPlatformVideoPlayerState : PlatformVideoPlayerState {
+    private var _hasMedia by mutableStateOf(false)
+    override val hasMedia: Boolean get() = _hasMedia
+
+    private var _isPlaying by mutableStateOf(false)
+    override val isPlaying: Boolean get() = _isPlaying
+
+    override var volume: Float by mutableStateOf(1f)
+    override var sliderPos: Float by mutableStateOf(0f)
+    override var userDragging: Boolean by mutableStateOf(false)
+    override var loop: Boolean by mutableStateOf(false)
+    override var playbackSpeed: Float by mutableStateOf(1f)
+
+    override val leftLevel: Float get() = 0f
+    override val rightLevel: Float get() = 0f
+    override val positionText: String get() = "00:00"
+    override val durationText: String get() = "00:00"
+    override val currentTime: Double get() = 0.0
+
+    override val isLoading: Boolean get() = false
+
+    private var _error by mutableStateOf<VideoPlayerError?>(null)
+    override val error: VideoPlayerError? get() = _error
+
+    override var isFullscreen: Boolean by mutableStateOf(false)
+
+    override val metadata: VideoMetadata = VideoMetadata()
+    override val aspectRatio: Float get() = 16f / 9f
+
+    override var subtitlesEnabled: Boolean by mutableStateOf(false)
+    override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
+    override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableListOf()
+    override var subtitleTextStyle: TextStyle by mutableStateOf(TextStyle(color = Color.White))
+    override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+
+    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+        currentSubtitleTrack = track
+        subtitlesEnabled = track != null
+    }
+
+    override fun disableSubtitles() {
+        currentSubtitleTrack = null
+        subtitlesEnabled = false
+    }
+
+    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+        _hasMedia = true
+        _isPlaying = initializeplayerState == InitialPlayerState.PLAY
+        _error = VideoPlayerError.UnknownError("Video playback is not available in preview.")
+    }
+
+    override fun play() {
+        _hasMedia = true
+        _isPlaying = true
+    }
+
+    override fun pause() {
+        _isPlaying = false
+    }
+
+    override fun stop() {
+        _isPlaying = false
+        sliderPos = 0f
+    }
+
+    override fun seekTo(value: Float) {
+        sliderPos = value.coerceIn(0f, 1000f)
+    }
+
+    override fun toggleFullscreen() {
+        isFullscreen = !isFullscreen
+    }
+
+    override fun dispose() = Unit
+
+    override fun clearError() {
+        _error = null
+    }
 }
