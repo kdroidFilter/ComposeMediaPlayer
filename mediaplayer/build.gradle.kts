@@ -34,10 +34,17 @@ kotlin {
     jvmToolchain(17)
     androidTarget { publishLibraryVariants("release") }
     jvm()
+    js {
+        browser()
+        binaries.executable()
+    }
+
+    @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
         browser()
         binaries.executable()
     }
+
     iosX64()
     iosArm64()
     iosSimulatorArm64()
@@ -81,6 +88,7 @@ kotlin {
             implementation(libs.androidx.media3.exoplayer)
             implementation(libs.androidx.media3.ui)
             implementation(libs.androidx.activityCompose)
+            implementation(libs.androidx.core)
         }
 
         androidUnitTest.dependencies {
@@ -111,8 +119,10 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
 
-        wasmJsMain.dependencies {
-            implementation(libs.kotlinx.browser.wasm.js)
+        webMain.dependencies {
+            implementation(libs.kotlinx.browser)
+            implementation(compose.ui)
+
         }
 
         wasmJsTest.dependencies {
@@ -138,28 +148,32 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 21
+        minSdk = 23
     }
 }
 
 val buildMacArm: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacArm") {
     onlyIf { System.getProperty("os.name").startsWith("Mac") }
     workingDir(rootDir)
-    commandLine("swiftc", "-emit-library", "-emit-module", "-module-name", "NativeVideoPlayer",
+    commandLine(
+        "swiftc", "-emit-library", "-emit-module", "-module-name", "NativeVideoPlayer",
         "-target", "arm64-apple-macosx14.0",
         "-o", "mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib",
         "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift",
-        "-O", "-whole-module-optimization")
+        "-O", "-whole-module-optimization"
+    )
 }
 
 val buildMacX64: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacX64") {
     onlyIf { System.getProperty("os.name").startsWith("Mac") }
     workingDir(rootDir)
-    commandLine("swiftc", "-emit-library", "-emit-module", "-module-name", "NativeVideoPlayer",
+    commandLine(
+        "swiftc", "-emit-library", "-emit-module", "-module-name", "NativeVideoPlayer",
         "-target", "x86_64-apple-macosx14.0",
         "-o", "mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib",
         "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift",
-        "-O", "-whole-module-optimization")
+        "-O", "-whole-module-optimization"
+    )
 }
 
 val buildWin: TaskProvider<Exec> = tasks.register<Exec>("buildNativeWin") {

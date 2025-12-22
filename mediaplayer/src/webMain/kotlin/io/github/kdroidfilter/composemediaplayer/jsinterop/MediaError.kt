@@ -2,11 +2,13 @@
 
 package io.github.kdroidfilter.composemediaplayer.jsinterop
 
+import kotlin.js.ExperimentalWasmJsInterop
 import kotlin.js.JsAny
 
 /**
  * Represents a media error in the HTMLMediaElement
  */
+@OptIn(ExperimentalWasmJsInterop::class)
 external class MediaError : JsAny {
     /**
      * Error code for the media error
