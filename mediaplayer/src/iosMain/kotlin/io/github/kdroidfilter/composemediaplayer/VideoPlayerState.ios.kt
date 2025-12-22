@@ -686,3 +686,5 @@ actual open class VideoPlayerState {
         // the native player for subtitle display
     }
 }
+
+internal actual fun createVideoPlayerState(isInPreview: Boolean): VideoPlayerState = VideoPlayerState()

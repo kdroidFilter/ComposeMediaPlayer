@@ -5,6 +5,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.TextStyle
 import io.github.vinceglb.filekit.PlatformFile
 
@@ -70,6 +71,8 @@ expect open class VideoPlayerState() {
     fun dispose()
 }
 
+internal expect fun createVideoPlayerState(isInPreview: Boolean): VideoPlayerState
+
 /**
  * Creates and manages an instance of `VideoPlayerState` within a composable function, ensuring
  * proper disposal of the player state when the composable leaves the composition. This function
@@ -80,7 +83,19 @@ expect open class VideoPlayerState() {
  */
 @Composable
 fun rememberVideoPlayerState(): VideoPlayerState {
-    val playerState = remember { VideoPlayerState() }
+    val isInPreview = LocalInspectionMode.current
+    val playerState = remember { createVideoPlayerState(isInPreview) }
+    DisposableEffect(Unit) {
+        onDispose {
+            playerState.dispose()
+        }
+    }
+    return playerState
+}
+
+@Composable
+fun rememberPreviewVideoPlayerState(): VideoPlayerState {
+    val playerState = remember { createVideoPlayerState(isInPreview = true) }
     DisposableEffect(Unit) {
         onDispose {
             playerState.dispose()

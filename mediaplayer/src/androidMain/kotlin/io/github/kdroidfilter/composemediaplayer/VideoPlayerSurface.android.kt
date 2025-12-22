@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -66,6 +67,10 @@ private fun VideoPlayerSurfaceInternal(
     surfaceType: SurfaceType,
     overlay: @Composable () -> Unit
 ) {
+    if (LocalInspectionMode.current) {
+        VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
+        return
+    }
     // Use rememberSaveable to preserve fullscreen state across configuration changes
     var isFullscreen by rememberSaveable {
         mutableStateOf(playerState.isFullscreen)
