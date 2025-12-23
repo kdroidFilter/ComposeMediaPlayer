@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
@@ -798,5 +799,6 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
     }
 }
 
+@OptIn(UnstableApi::class)
 internal actual fun createVideoPlayerState(isInPreview: Boolean): VideoPlayerState =
     VideoPlayerState(isInPreview)
