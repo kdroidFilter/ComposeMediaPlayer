@@ -6,7 +6,7 @@ import sample.app.App
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main() {
-    ComposeViewport(document.body!!) {
+    ComposeViewport {
         hideLoader()
         App()
     }

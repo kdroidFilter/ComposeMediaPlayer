@@ -10,11 +10,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 import kotlinx.io.IOException
-import org.w3c.dom.url.URL
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
@@ -258,7 +258,7 @@ actual open class VideoPlayerState {
      * @param initializeplayerState Controls whether playback should start automatically after opening
      */
     actual fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
-        val fileUri = file.toUriString()
+        val fileUri = file.getUri()
         openUri(fileUri, initializeplayerState)
     }
 
@@ -413,11 +413,4 @@ actual open class VideoPlayerState {
     }
 }
 
-/**
- * Converts a PlatformFile to a URI string that can be used by the media player.
- *
- * @return A URI string representing the file
- */
-fun PlatformFile.toUriString(): String {
-    return URL.createObjectURL(this.file)
-}
+internal actual fun createVideoPlayerState(isInPreview: Boolean): VideoPlayerState = VideoPlayerState()

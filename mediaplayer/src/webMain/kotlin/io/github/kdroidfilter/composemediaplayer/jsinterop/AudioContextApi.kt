@@ -6,10 +6,13 @@ import kotlin.js.JsAny
 import org.khronos.webgl.Float32Array
 import org.khronos.webgl.Uint8Array
 import org.w3c.dom.HTMLMediaElement
+import kotlin.js.ExperimentalWasmJsInterop
+import kotlin.js.definedExternally
 
 /**
  * Represents the main audio context
  */
+@OptIn(ExperimentalWasmJsInterop::class)
 external class AudioContext : JsAny {
     constructor()
     val destination: AudioDestinationNode
@@ -26,7 +29,8 @@ external class AudioContext : JsAny {
 /**
  * Represents a generic node of the Web Audio API
  */
-external open class AudioNode : JsAny {
+@OptIn(ExperimentalWasmJsInterop::class)
+open external class AudioNode : JsAny {
     fun connect(destination: AudioNode, output: Int = definedExternally, input: Int = definedExternally): AudioNode
     fun disconnect()
 }
@@ -94,4 +98,3 @@ external class AnalyserNode : AudioNode {
     fun getFloatFrequencyData(array: Float32Array)
     fun getFloatTimeDomainData(array: Float32Array)
 }
-

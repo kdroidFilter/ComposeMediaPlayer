@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.js.ExperimentalWasmJsInterop
 
 /**
  * Manages fullscreen functionality for the video player
@@ -13,6 +14,7 @@ object FullscreenManager {
     /**
      * Exit fullscreen if document is in fullscreen mode
      */
+    @OptIn(ExperimentalWasmJsInterop::class)
     fun exitFullscreen() {
         if (document.fullscreenElement != null) {
             document.exitFullscreen()
@@ -22,6 +24,7 @@ object FullscreenManager {
     /**
      * Request fullscreen mode
      */
+    @OptIn(ExperimentalWasmJsInterop::class)
     fun requestFullScreen() {
         val document = document.documentElement
         document?.requestFullscreen()

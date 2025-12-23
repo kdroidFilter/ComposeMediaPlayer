@@ -17,19 +17,33 @@ kotlin {
 
     androidTarget()
     jvm()
-    wasmJs {
-        outputModuleName = "composeApp"
+    js(IR) {
+        outputModuleName.set("composeApp")
         browser {
             val rootDirPath = project.rootDir.path
             val projectDirPath = project.projectDir.path
             commonWebpackConfig {
                 outputFileName = "composeApp.js"
                 devServer = (devServer ?: KotlinWebpackConfig.DevServer()).apply {
-                    static = (static ?: mutableListOf()).apply {
-                        // Serve sources to debug inside browser
-                        add(rootDirPath)
-                        add(projectDirPath)
-                    }
+                    // Serve sources to debug inside browser
+                    static(rootDirPath)
+                    static(projectDirPath)
+                }
+            }
+        }
+        binaries.executable()
+    }
+    wasmJs {
+        outputModuleName.set("composeApp")
+        browser {
+            val rootDirPath = project.rootDir.path
+            val projectDirPath = project.projectDir.path
+            commonWebpackConfig {
+                outputFileName = "composeApp.js"
+                devServer = (devServer ?: KotlinWebpackConfig.DevServer()).apply {
+                    // Serve sources to debug inside browser
+                    static(rootDirPath)
+                    static(projectDirPath)
                 }
             }
         }
@@ -51,6 +65,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
+            implementation(compose.components.uiToolingPreview)
             implementation(project(":mediaplayer"))
             implementation(compose.materialIconsExtended)
             implementation(libs.filekit.dialogs.compose)
@@ -59,12 +74,21 @@ kotlin {
 
         androidMain.dependencies {
             implementation(libs.androidx.activityCompose)
+            implementation(libs.androidx.core)
         }
 
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
         }
+        webMain.dependencies {
+            implementation(libs.kotlinx.browser)
+
+        }
     }
+}
+
+dependencies {
+    debugImplementation(compose.uiTooling)
 }
 
 android {
@@ -72,7 +96,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 21
+        minSdk = 23
         targetSdk = 36
 
         applicationId = "sample.app.androidApp"

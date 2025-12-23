@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.subtitle
 
-import io.github.kdroidfilter.composemediaplayer.wasmVideoLogger
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Severity
 import kotlinx.browser.window
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.w3c.dom.url.URL
@@ -14,6 +15,10 @@ import kotlin.coroutines.resume
  * @param src The source URI of the subtitle file
  * @return The content of the subtitle file as a string
  */
+private val webSubtitleLogger = Logger.withTag("WebSubtitleLoader").apply {
+    Logger.setMinSeverity(Severity.Warn)
+}
+
 actual suspend fun loadSubtitleContent(src: String): String = suspendCancellableCoroutine { continuation ->
     try {
         // Handle different types of URLs
@@ -29,7 +34,7 @@ actual suspend fun loadSubtitleContent(src: String): String = suspendCancellable
 
             // Handle file: URLs
             src.startsWith("file:") -> {
-                wasmVideoLogger.d { "File URLs are not directly supported in browser. Using as-is: $src" }
+                webSubtitleLogger.d { "File URLs are not directly supported in browser. Using as-is: $src" }
                 src
             }
 
@@ -39,14 +44,14 @@ actual suspend fun loadSubtitleContent(src: String): String = suspendCancellable
                     // Try to resolve relative to the current page
                     URL(src, window.location.href).toString()
                 } catch (e: Exception) {
-                    wasmVideoLogger.e { "Failed to resolve URL: $src - ${e.message}" }
+                    webSubtitleLogger.e { "Failed to resolve URL: $src - ${e.message}" }
                     src // Use as-is if resolution fails
                 }
             }
         }
 
         // Log the URL we're fetching
-        wasmVideoLogger.d { "Fetching subtitle content from: $url" }
+        webSubtitleLogger.d { "Fetching subtitle content from: $url" }
 
         // Use XMLHttpRequest to fetch the content
         val xhr = XMLHttpRequest()
@@ -55,16 +60,16 @@ actual suspend fun loadSubtitleContent(src: String): String = suspendCancellable
 
         xhr.onload = {
             if (xhr.status.toInt() in 200..299) {
-                val content = xhr.responseText ?: ""
+                val content = xhr.responseText
                 continuation.resume(content)
             } else {
-                wasmVideoLogger.e { "Failed to fetch subtitle content: ${xhr.status} ${xhr.statusText}" }
+                webSubtitleLogger.e { "Failed to fetch subtitle content: ${xhr.status} ${xhr.statusText}" }
                 continuation.resume("")
             }
         }
 
         xhr.onerror = {
-            wasmVideoLogger.e { "Error fetching subtitle content" }
+            webSubtitleLogger.e { "Error fetching subtitle content" }
             continuation.resume("")
         }
 
@@ -74,12 +79,12 @@ actual suspend fun loadSubtitleContent(src: String): String = suspendCancellable
         continuation.invokeOnCancellation {
             try {
                 xhr.abort()
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // Ignore abort errors
             }
         }
     } catch (e: Exception) {
-        wasmVideoLogger.e { "Error loading subtitle content: ${e.message}" }
+        webSubtitleLogger.e { "Error loading subtitle content: ${e.message}" }
         continuation.resume("")
     }
 }
