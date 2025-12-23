@@ -355,7 +355,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
         // Free bitmaps and frame buffers
         bitmapLock.write {
-            _currentFrame?.close()
+            val currentFrame = _currentFrame
+            if (currentFrame != null &&
+                currentFrame !== skiaBitmapA &&
+                currentFrame !== skiaBitmapB &&
+                currentFrame !== frameBitmapRecycler
+            ) {
+                currentFrame.close()
+            }
             _currentFrame = null
             currentFrameState.value = null
             frameBitmapRecycler?.close()
@@ -404,7 +411,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
         // Free bitmaps and frame buffers
         bitmapLock.write {
-            _currentFrame?.close()  // Close the current frame bitmap if any
+            val currentFrame = _currentFrame
+            if (currentFrame != null &&
+                currentFrame !== skiaBitmapA &&
+                currentFrame !== skiaBitmapB &&
+                currentFrame !== frameBitmapRecycler
+            ) {
+                currentFrame.close()
+            }
             _currentFrame = null
             // Reset the currentFrameState
             currentFrameState.value = null
