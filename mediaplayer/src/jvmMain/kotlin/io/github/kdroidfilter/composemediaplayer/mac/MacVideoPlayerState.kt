@@ -3,7 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.mac
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.graphics.asComposeImageBitmap
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -25,9 +25,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.awt.image.BufferedImage
-import java.awt.image.DataBufferInt
 import java.net.URI
+import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.ImageInfo
 import kotlin.math.abs
 import kotlin.math.log10
 
@@ -45,10 +47,15 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
 
     // Main state variables
     private val mainMutex = Mutex()
+    private val frameMutex = Mutex()
     private var playerPtr: Pointer? = null
     private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
     internal val currentFrameState: State<ImageBitmap?> = mutableStateOf(null)
-    private var _bufferImage: BufferedImage? = null
+    private var skiaBitmapWidth: Int = 0
+    private var skiaBitmapHeight: Int = 0
+    private var skiaBitmapA: Bitmap? = null
+    private var skiaBitmapB: Bitmap? = null
+    private var nextSkiaBitmapA: Boolean = true
 
     // Audio level state variables (added for left and right levels)
     private val _leftLevel = mutableStateOf(0.0f)
@@ -67,7 +74,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
     private var lastFrameUpdateTime: Long = 0
     private var seekInProgress = false
     private var targetSeekTime: Double? = null
-    private var lastFrameHash: Int = 0
+    private var lastFrameHash: Int = Int.MIN_VALUE
     private var videoFrameRate: Float = 0.0f
     private var screenRefreshRate: Float = 0.0f
     private var captureFrameRate: Float = 0.0f
@@ -322,10 +329,13 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         stopFrameUpdates()
         stopBufferingCheck()
 
-        val ptrToDispose = mainMutex.withLock {
-            val ptr = playerPtr
-            playerPtr = null
-            ptr
+        val ptrToDispose = frameMutex.withLock {
+            lastFrameHash = Int.MIN_VALUE
+            mainMutex.withLock {
+                val ptr = playerPtr
+                playerPtr = null
+                ptr
+            }
         }
 
         // Release resources outside of the mutex lock
@@ -524,71 +534,70 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         bufferingCheckJob = null
     }
 
-    /**
-     * Calculates a simple hash of the image data to detect if the frame has
-     * changed. This runs on the compute dispatcher for CPU-intensive work and
-     * samples fewer pixels for better performance.
-     */
-    private suspend fun calculateFrameHash(data: IntArray): Int = withContext(Dispatchers.Default) {
-        var hash = 0
-        // Sample a smaller subset of pixels for performance
-        val step = data.size / 200
-        if (step > 0) {
-            for (i in data.indices step step) {
-                hash = 31 * hash + data[i]
-            }
-        }
-        hash
-    }
-
     /** Updates the current video frame on a background thread. */
     private suspend fun updateFrameAsync() {
-        try {
-            // Safely get the player pointer
-            val ptr = mainMutex.withLock { playerPtr } ?: return
+        frameMutex.withLock {
+            try {
+                // Safely get the player pointer
+                val ptr = mainMutex.withLock { playerPtr } ?: return
 
-            // Get frame dimensions
-            val width = SharedVideoPlayer.getFrameWidth(ptr)
-            val height = SharedVideoPlayer.getFrameHeight(ptr)
+                // Get frame dimensions
+                val width = SharedVideoPlayer.getFrameWidth(ptr)
+                val height = SharedVideoPlayer.getFrameHeight(ptr)
 
-            if (width <= 0 || height <= 0) {
-                return
-            }
-
-            // Get the latest frame to minimize mutex lock time
-            val framePtr = SharedVideoPlayer.getLatestFrame(ptr) ?: return
-
-            // Create or reuse a buffered image on a compute thread
-            val bufferedImage = withContext(Dispatchers.Default) {
-                val existingBuffer = mainMutex.withLock { _bufferImage }
-                if (existingBuffer == null || existingBuffer.width != width || existingBuffer.height != height) {
-                    val newBuffer = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
-                    mainMutex.withLock { _bufferImage = newBuffer }
-                    newBuffer
-                } else {
-                    existingBuffer
+                if (width <= 0 || height <= 0) {
+                    return
                 }
-            }
 
-            // Copy frame data on a compute thread for performance
-            withContext(Dispatchers.Default) {
-                val pixels = (bufferedImage.raster.dataBuffer as DataBufferInt).data
-                framePtr.getByteBuffer(0, (width * height * 4).toLong()).asIntBuffer().get(pixels)
+                // Get the latest frame to minimize mutex lock time
+                val framePtr = SharedVideoPlayer.getLatestFrame(ptr) ?: return
 
-                // Calculate frame hash to detect changes
-                val newHash = calculateFrameHash(pixels)
-                val frameChanged = newHash != lastFrameHash
-                lastFrameHash = newHash
+                val pixelCount = width * height
+                val frameSizeBytes = pixelCount.toLong() * 4L
+                var framePublished = false
 
-                if (frameChanged) {
-                    // Update timestamp
-                    lastFrameUpdateTime = System.currentTimeMillis()
+                withContext(Dispatchers.Default) {
+                    val srcBuf = framePtr.getByteBuffer(0, frameSizeBytes)
 
-                    // Convert to ImageBitmap on a compute thread
-                    val imageBitmap = bufferedImage.toComposeImageBitmap()
+                    // Calculate a simple hash to avoid redundant copies/conversions.
+                    val newHash = calculateFrameHash(srcBuf, pixelCount)
+                    if (newHash == lastFrameHash) return@withContext
+                    lastFrameHash = newHash
+
+                    // Allocate/reuse two bitmaps (double-buffering) to avoid writing while the UI draws.
+                    if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
+                        skiaBitmapA?.close()
+                        skiaBitmapB?.close()
+
+                        val imageInfo = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+                        skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
+                        skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
+                        skiaBitmapWidth = width
+                        skiaBitmapHeight = height
+                        nextSkiaBitmapA = true
+                    }
+
+                    val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+                    nextSkiaBitmapA = !nextSkiaBitmapA
+
+                    val pixmap = targetBitmap.peekPixels() ?: return@withContext
+                    val pixelsAddr = pixmap.addr
+                    if (pixelsAddr == 0L) return@withContext
+
+                    // Native-to-native copy: frame buffer (JNA) -> Skia bitmap pixels.
+                    srcBuf.rewind()
+                    val destRowBytes = pixmap.rowBytes.toInt()
+                    val destSizeBytes = destRowBytes.toLong() * height.toLong()
+                    val destBuf = Pointer(pixelsAddr).getByteBuffer(0, destSizeBytes)
+                    copyBgraFrame(srcBuf, destBuf, width, height, destRowBytes)
 
                     // Publish to flow
-                    _currentFrameState.value = imageBitmap
+                    _currentFrameState.value = targetBitmap.asComposeImageBitmap()
+                    framePublished = true
+                }
+
+                if (framePublished) {
+                    lastFrameUpdateTime = System.currentTimeMillis()
 
                     // Update loading state if needed on the main thread
                     if (isLoading && !seekInProgress) {
@@ -597,10 +606,10 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                         }
                     }
                 }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                macLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
             }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            macLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
         }
     }
 
@@ -854,11 +863,23 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
         playerScope.cancel()
 
         ioScope.launch {
-            // Get player pointer to dispose
-            val ptrToDispose = mainMutex.withLock {
-                val ptr = playerPtr
-                playerPtr = null
-                ptr
+            // Get player pointer and clear cached bitmaps while frame updates are paused.
+            val ptrToDispose = frameMutex.withLock {
+                val ptrToDispose = mainMutex.withLock {
+                    val ptr = playerPtr
+                    playerPtr = null
+                    ptr
+                }
+
+                skiaBitmapA?.close()
+                skiaBitmapB?.close()
+                skiaBitmapA = null
+                skiaBitmapB = null
+                skiaBitmapWidth = 0
+                skiaBitmapHeight = 0
+                nextSkiaBitmapA = true
+
+                ptrToDispose
             }
 
             // Dispose native resources outside the mutex lock
@@ -874,10 +895,6 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
 
             resetState()
 
-            // Clear buffered image
-            mainMutex.withLock {
-                _bufferImage = null
-            }
         }
 
         // Cancel ioScope last to ensure cleanup completes
@@ -895,6 +912,7 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
             _aspectRatio.value = 16f / 9f
             error = null
         }
+        lastFrameHash = Int.MIN_VALUE
         _currentFrameState.value = null
     }
 

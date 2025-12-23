@@ -38,6 +38,7 @@ import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import java.io.File
+import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -243,7 +244,15 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         val timestamp: Double
     )
 
-    // Singleton buffer to limit allocations
+    // Double-buffering for zero-copy frame rendering
+    private var skiaBitmapA: Bitmap? = null
+    private var skiaBitmapB: Bitmap? = null
+    private var nextSkiaBitmapA: Boolean = true
+    private var lastFrameHash: Int = Int.MIN_VALUE
+    private var skiaBitmapWidth: Int = 0
+    private var skiaBitmapHeight: Int = 0
+
+    // Legacy buffer - kept for fallback but no longer used in optimized path
     private var sharedFrameBuffer: ByteArray? = null
     private var frameBitmapRecycler: Bitmap? = null
 
@@ -351,6 +360,16 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             currentFrameState.value = null
             frameBitmapRecycler?.close()
             frameBitmapRecycler = null
+
+            // Clean up double-buffering bitmaps
+            skiaBitmapA?.close()
+            skiaBitmapB?.close()
+            skiaBitmapA = null
+            skiaBitmapB = null
+            skiaBitmapWidth = 0
+            skiaBitmapHeight = 0
+            nextSkiaBitmapA = true
+            lastFrameHash = Int.MIN_VALUE
         }
 
         // Clear any shared buffer allocated for frames
@@ -366,10 +385,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         isLoading = false
         errorMessage = null
         _error = null
-        
+
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
-        
+
         // Hint the GC after freeing big objects synchronously
         System.gc()
     }
@@ -391,15 +410,25 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             currentFrameState.value = null
             frameBitmapRecycler?.close()  // Recycle the bitmap if any
             frameBitmapRecycler = null
+
+            // Clean up double-buffering bitmaps
+            skiaBitmapA?.close()
+            skiaBitmapB?.close()
+            skiaBitmapA = null
+            skiaBitmapB = null
+            skiaBitmapWidth = 0
+            skiaBitmapHeight = 0
+            nextSkiaBitmapA = true
+            lastFrameHash = Int.MIN_VALUE
         }
 
         // Clear any shared buffer allocated for frames
         sharedFrameBuffer = null
         frameBufferSize = 0  // Reset frame buffer size
-        
+
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
-        
+
         // Hint GC after releasing frame buffers and bitmaps
         System.gc()
     }
@@ -635,6 +664,15 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Zero-copy optimized frame producer using double-buffering and direct memory access.
+     *
+     * Optimizations applied:
+     * 1. Double-buffering: Reuses two Bitmap objects, alternating between them.
+     * 2. Frame hashing: Skips processing if the frame content hasn't changed.
+     * 3. peekPixels(): Direct access to Skia bitmap memory, no ByteArray allocation.
+     * 4. Single memory copy: Native buffer → Skia bitmap pixels.
+     */
     private suspend fun produceFrames() {
         while (scope.isActive && _hasMedia && !isDisposing.get()) {
             val instance = videoPlayerInstance ?: break
@@ -644,6 +682,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     try {
                         userPaused = false  // Reset userPaused when looping
                         initialFrameRead.set(false)  // Reset initialFrameRead flag
+                        lastFrameHash = Int.MIN_VALUE  // Reset hash for new loop
                         seekTo(0f)
                         play()
                     } catch (e: Exception) {
@@ -680,66 +719,91 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     continue
                 }
 
-                // For 4K videos, we need to be careful with memory allocation
-                // Only allocate a new buffer if absolutely necessary
-                if (sharedFrameBuffer == null) {
-                    // First allocation
-                    sharedFrameBuffer = ByteArray(frameBufferSize)
-                } else if (sharedFrameBuffer!!.size < frameBufferSize) {
-                    // Buffer is too small, release old one before allocating new one
-                    sharedFrameBuffer = null
-                    System.gc() // Hint to garbage collector
-                    delay(10) // Give GC a chance to run
-                    sharedFrameBuffer = ByteArray(frameBufferSize)
-                }
+                val width = videoWidth
+                val height = videoHeight
 
-                // Use the shared buffer with null safety check
-                val sharedBuffer = sharedFrameBuffer ?: run {
-                    // Fallback if buffer is null (shouldn't happen)
-                    ByteArray(frameBufferSize).also { sharedFrameBuffer = it }
-                }
-
-                try {
-                    val buffer = ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
-                    val copySize = min(sizeRef.value, frameBufferSize)
-                    if (buffer != null && copySize > 0) {
-                        buffer.get(sharedBuffer, 0, copySize)
-                    }
-                } catch (e: Exception) {
-                    setError("Error copying frame data: ${e.message}")
-                    delay(100)
+                if (width <= 0 || height <= 0) {
+                    player.UnlockVideoFrame(instance)
+                    yield()
                     continue
                 }
 
+                // Get the native frame buffer
+                val srcBuffer = ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
+                if (srcBuffer == null) {
+                    player.UnlockVideoFrame(instance)
+                    yield()
+                    continue
+                }
+                srcBuffer.rewind()
+
+                val pixelCount = width * height
+
+                // Calculate frame hash to detect identical frames
+                val newHash = calculateFrameHash(srcBuffer, pixelCount)
+                if (newHash == lastFrameHash) {
+                    player.UnlockVideoFrame(instance)
+                    yield()
+                    continue
+                }
+                lastFrameHash = newHash
+
+                // Reallocate bitmaps if dimensions changed
+                if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
+                    bitmapLock.write {
+                        skiaBitmapA?.close()
+                        skiaBitmapB?.close()
+
+                        val imageInfo = createVideoImageInfo()
+                        skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
+                        skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
+                        skiaBitmapWidth = width
+                        skiaBitmapHeight = height
+                        nextSkiaBitmapA = true
+                    }
+                }
+
+                // Select the target bitmap (double-buffering)
+                val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+                nextSkiaBitmapA = !nextSkiaBitmapA
+
+                // Get direct access to bitmap pixels via peekPixels (zero-copy access)
+                val pixmap = targetBitmap.peekPixels()
+                if (pixmap == null) {
+                    player.UnlockVideoFrame(instance)
+                    windowsLogger.e { "Failed to get pixmap from bitmap" }
+                    yield()
+                    continue
+                }
+
+                val pixelsAddr = pixmap.addr
+                if (pixelsAddr == 0L) {
+                    player.UnlockVideoFrame(instance)
+                    windowsLogger.e { "Invalid pixel address" }
+                    yield()
+                    continue
+                }
+
+                // Single memory copy: native buffer → Skia bitmap
+                val dstRowBytes = pixmap.rowBytes
+                val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
+                val dstBuffer = Pointer(pixelsAddr).getByteBuffer(0, dstSizeBytes)
+
+                srcBuffer.rewind()
+                copyBgraFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
+
                 player.UnlockVideoFrame(instance)
 
-                var bitmap = frameBitmapRecycler
-                if (bitmap == null) {
-                    bitmap = Bitmap().apply {
-                        allocPixels(createVideoImageInfo())
-                    }
-                    frameBitmapRecycler = bitmap
+                // Get frame timestamp
+                val posRef = LongByReference()
+                val frameTime = if (player.GetMediaPosition(instance, posRef) >= 0) {
+                    posRef.value / 10000000.0
+                } else {
+                    0.0
                 }
 
-                try {
-                    bitmap.installPixels(
-                        createVideoImageInfo(),
-                        sharedBuffer,
-                        videoWidth * 4
-                    )
-                    val frameBitmap = bitmap
-                    val posRef = LongByReference()
-                    val frameTime = if (player.GetMediaPosition(instance, posRef) >= 0) {
-                        posRef.value / 10000000.0
-                    } else {
-                        0.0
-                    }
-                    frameChannel.trySend(FrameData(frameBitmap, frameTime))
-                    frameBitmapRecycler = null
-                } catch (e: Exception) {
-                    windowsLogger.e { "Error processing frame bitmap: ${e.message}" }
-                    frameBitmapRecycler = bitmap
-                }
+                // Send frame to channel
+                frameChannel.trySend(FrameData(targetBitmap, frameTime))
 
                 delay(1)
 
@@ -754,6 +818,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         }
     }
 
+    /**
+     * Consumes frames from the channel and updates the UI.
+     * With zero-copy optimization, bitmaps are reused from the double-buffer pool
+     * and should not be closed here.
+     */
     private suspend fun consumeFrames() {
         // Timeout mechanism to prevent getting stuck in loading state
         var frameReceived = false
@@ -795,14 +864,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 loadingTimeout = 0
                 frameReceived = true
 
+                // With double-buffering, we don't close old bitmaps - they're reused
+                // Just update the reference and create a new ImageBitmap view
                 bitmapLock.write {
-                    _currentFrame?.let { oldBitmap ->
-                        if (frameBitmapRecycler == null) {
-                            frameBitmapRecycler = oldBitmap
-                        } else {
-                            oldBitmap.close()
-                        }
-                    }
                     _currentFrame = frameData.bitmap
                     // Update the currentFrameState with the new frame
                     currentFrameState.value = frameData.bitmap.asComposeImageBitmap()
@@ -951,27 +1015,16 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     if (_isPlaying) {
                         userPaused = false
                     }
-                    
+
                     // Reset initialFrameRead flag to ensure we read a new frame after seeking
                     // This is especially important if the player is paused
                     initialFrameRead.set(false)
-                    
+
+                    // Reset frame hash to ensure the first frame after seek is always processed
+                    lastFrameHash = Int.MIN_VALUE
+
                     videoJob?.cancelAndJoin()
                     clearFrameChannel()
-
-                    // For 4K videos, we need to be careful with memory allocation
-                    // Only allocate a new buffer if absolutely necessary
-                    if (sharedFrameBuffer == null) {
-                        // First allocation
-                        sharedFrameBuffer = ByteArray(frameBufferSize)
-                    } else if (sharedFrameBuffer!!.size < frameBufferSize) {
-                        // Buffer is too small, release old one before allocating new one
-                        sharedFrameBuffer = null
-                        System.gc() // Hint to garbage collector
-                        delay(10) // Give GC a chance to run
-                        sharedFrameBuffer = ByteArray(frameBufferSize)
-                    }
-                    // If buffer exists and is large enough, reuse it
 
                     val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
                     var hr = player.SeekMedia(instance, targetPos)
