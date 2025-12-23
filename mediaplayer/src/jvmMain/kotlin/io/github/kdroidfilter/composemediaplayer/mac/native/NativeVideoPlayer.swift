@@ -348,6 +348,65 @@ class SharedVideoPlayer {
         }
     }
 
+    /// Detects the MIME type of a file by reading its magic bytes (file signature)
+    private func detectMimeType(at url: URL) -> String? {
+        guard url.isFileURL else { return nil }
+
+        do {
+            let fileHandle = try FileHandle(forReadingFrom: url)
+            defer { try? fileHandle.close() }
+
+            // Read the first 12 bytes to identify the file format
+            guard let data = try fileHandle.read(upToCount: 12), data.count >= 4 else {
+                return nil
+            }
+
+            let bytes = [UInt8](data)
+
+            // MP4/MOV files start with size and 'ftyp' box
+            if data.count >= 8 {
+                let fourcc = String(bytes: bytes[4..<8], encoding: .ascii) ?? ""
+                if fourcc == "ftyp" {
+                    // Check the brand to differentiate between MP4 and MOV
+                    if data.count >= 12 {
+                        let brand = String(bytes: bytes[8..<12], encoding: .ascii) ?? ""
+                        if brand.contains("qt") {
+                            return "video/quicktime"
+                        }
+                    }
+                    return "video/mp4"
+                }
+            }
+
+            // WebM/Matroska files start with 0x1A 0x45 0xDF 0xA3
+            if bytes.count >= 4 && bytes[0] == 0x1A && bytes[1] == 0x45 && bytes[2] == 0xDF && bytes[3] == 0xA3 {
+                return "video/webm"
+            }
+
+            // FLV files start with 'FLV'
+            if bytes.count >= 3 && bytes[0] == 0x46 && bytes[1] == 0x4C && bytes[2] == 0x56 {
+                return "video/x-flv"
+            }
+
+            // AVI files start with 'RIFF' ... 'AVI '
+            if bytes.count >= 12 && bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+               bytes[8] == 0x41 && bytes[9] == 0x56 && bytes[10] == 0x49 && bytes[11] == 0x20 {
+                return "video/x-msvideo"
+            }
+
+            // MPEG-TS files start with 0x47 (sync byte)
+            if bytes[0] == 0x47 {
+                return "video/mp2t"
+            }
+
+            return nil
+        } catch {
+            print("Error detecting MIME type: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+
     /// Extracts metadata from the asset
     private func extractMetadata(from asset: AVAsset) {
         // Reset metadata values
@@ -645,8 +704,8 @@ class SharedVideoPlayer {
             print("Detected HLS stream: \(url)")
         }
 
-        var asset = AVURLAsset(url: url)
-
+        let mimeType = detectMimeType(at:url)
+        var asset = AVURLAsset(url: url, options: mimeType != nil ? ["AVURLAssetOutOfBandMIMETypeKey": mimeType!] : nil)
         // Configure asset for HLS if needed
         if isHLSStream {
             asset = configureHLSAsset(asset)
