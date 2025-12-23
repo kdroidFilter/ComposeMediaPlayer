@@ -15,6 +15,7 @@ androidx-activityCompose = "1.12.2"
 androidx-core = "1.17.0"
 media3Exoplayer = "1.9.0"
 jna = "5.18.1"
+javacpp = "1.5.12"
 platformtoolsDarkmodedetector = "0.7.4"
 slf4jSimple = "2.0.17"
 
@@ -41,6 +42,7 @@ jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jna-jpms = { module = "net.java.dev.jna:jna-jpms", version.ref = "jna" }
 jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
 jna-platform-jpms = { module = "net.java.dev.jna:jna-platform-jpms", version.ref = "jna"}
+javacpp = { module = "org.bytedeco:javacpp", version.ref = "javacpp" }
 platformtools-darkmodedetector = { module = "io.github.kdroidfilter:platformtools.darkmodedetector", version.ref = "platformtoolsDarkmodedetector" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4jSimple" }
 

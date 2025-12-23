@@ -1,9 +1,10 @@
-@file:OptIn(ExperimentalWasmDsl::class)
+@file:OptIn(ExperimentalWasmDsl::class, ExperimentalKotlinGradlePluginApi::class)
 
-import com.vanniktech.maven.publish.SonatypeHost
 import org.jetbrains.dokka.gradle.DokkaTask
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
+import java.io.ByteArrayOutputStream
 
 plugins {
     alias(libs.plugins.multiplatform)
@@ -22,6 +23,7 @@ val version = if (ref.startsWith("refs/tags/")) {
     val tag = ref.removePrefix("refs/tags/")
     if (tag.startsWith("v")) tag.substring(1) else tag
 } else "dev"
+val javacppVersion = libs.versions.javacpp.get()
 
 
 tasks.withType<DokkaTask>().configureEach {
@@ -102,6 +104,8 @@ kotlin {
             implementation(libs.gst1.java.core)
             implementation(libs.jna.jpms)
             implementation(libs.jna.platform.jpms)
+            implementation(libs.javacpp)
+            implementation("org.bytedeco:javacpp:$javacppVersion:windows-x86_64")
             implementation(libs.slf4j.simple)
         }
 
@@ -182,9 +186,101 @@ val buildWin: TaskProvider<Exec> = tasks.register<Exec>("buildNativeWin") {
     commandLine("cmd", "/c", "build.bat")
 }
 
+val buildWinJni: TaskProvider<Exec> = tasks.register<Exec>("buildNativeWinJni") {
+    onlyIf {
+        System.getProperty("os.name").startsWith("Windows") &&
+            !System.getProperty("os.arch").lowercase().contains("arm")
+    }
+    dependsOn(buildWin)
+
+    notCompatibleWithConfigurationCache("Uses dynamic toolchain discovery and writes argfiles at execution time.")
+
+    val javacppToolClasspath = configurations.detachedConfiguration(
+        dependencies.create("org.bytedeco:javacpp:$javacppVersion")
+    )
+    val jvmMainRuntimeClasspath = configurations.named("jvmMainRuntimeClasspath")
+    val jvmMainClasses = tasks.named("jvmMainClasses")
+    dependsOn(jvmMainClasses)
+
+    val outputDir = rootDir.resolve("mediaplayer/src/jvmMain/resources/windows-x86_64")
+    val includeDir = rootDir.resolve("winlib")
+    val linkDir = rootDir.resolve("winlib/build-x64/Release")
+
+    doFirst {
+        outputDir.mkdirs()
+    }
+
+    doFirst {
+        val kotlinStdlibFiles = jvmMainRuntimeClasspath.get().files.filter {
+            it.name.startsWith("kotlin-stdlib")
+        }
+        val jvmKotlinClasses = layout.buildDirectory.dir("classes/kotlin/jvm/main").get().asFile
+        val jvmJavaClasses = layout.buildDirectory.dir("classes/java/jvm/main").get().asFile
+        val userClasspath = (listOf(jvmKotlinClasses, jvmJavaClasses) + kotlinStdlibFiles)
+            .distinct()
+        val classpathLine = userClasspath.joinToString(";") { it.absolutePath }
+        val javacppJar = javacppToolClasspath.singleFile.absolutePath
+        val javaPath = File(System.getProperty("java.home"), "bin/java.exe").absolutePath
+
+        val vswhere = File(
+            "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+        )
+        val vcvars = if (vswhere.exists()) {
+            val output = ByteArrayOutputStream()
+            exec {
+                commandLine(
+                    vswhere.absolutePath,
+                    "-latest",
+                    "-products", "*",
+                    "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                    "-property", "installationPath"
+                )
+                standardOutput = output
+                isIgnoreExitValue = true
+            }
+            val installPath = output.toString().trim()
+            if (installPath.isNotEmpty()) {
+                File(installPath, "VC/Auxiliary/Build/vcvars64.bat").absolutePath
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+
+        val argFile = File(outputDir, "javacpp-args.txt")
+        argFile.writeText(
+            listOf(
+                "-jar",
+                javacppJar,
+                "-classpath",
+                classpathLine,
+                "-Xcompiler",
+                "/D_CRT_SECURE_NO_WARNINGS",
+                "-Dplatform=windows-x86_64",
+                "-Dplatform.includepath=${includeDir.absolutePath}",
+                "-Dplatform.linkpath=${linkDir.absolutePath}",
+                "-d",
+                outputDir.absolutePath,
+                "io.github.kdroidfilter.composemediaplayer.windows.MediaFoundationLib",
+            ).joinToString(System.lineSeparator())
+        )
+
+        val builderCmd = "\"$javaPath\" \"@${argFile.absolutePath}\""
+
+        val cmd = if (vcvars != null && File(vcvars).exists()) {
+            "call \"$vcvars\" && $builderCmd"
+        } else {
+            builderCmd
+        }
+
+        commandLine("cmd", "/c", cmd)
+    }
+}
+
 // tâche d’agrégation
 tasks.register("buildNativeLibraries") {
-    dependsOn(buildMacArm, buildMacX64, buildWin)
+    dependsOn(buildMacArm, buildMacX64, buildWin, buildWinJni)
 }
 
 
@@ -223,7 +319,7 @@ mavenPublishing {
         }
     }
 
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
+    publishToMavenCentral()
 
     signAllPublications()
 }

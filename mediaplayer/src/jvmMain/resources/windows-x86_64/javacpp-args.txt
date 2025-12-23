@@ -1,0 +1,12 @@
+-jar
+C:\Users\Elie\.gradle\caches\modules-2\files-2.1\org.bytedeco\javacpp\1.5.12\d37e3e9c7f3e3a9e492c245e62fd358611889e04\javacpp-1.5.12.jar
+-classpath
+C:\Users\Elie\IdeaProjects\ComposeMediaPlayer\mediaplayer\build\classes\kotlin\jvm\main;C:\Users\Elie\IdeaProjects\ComposeMediaPlayer\mediaplayer\build\classes\java\jvm\main;C:\Users\Elie\.gradle\caches\modules-2\files-2.1\org.jetbrains.kotlin\kotlin-stdlib-jdk8\2.1.21\fb62497994f5cfa4ad41fcff05020c35976307c6\kotlin-stdlib-jdk8-2.1.21.jar;C:\Users\Elie\.gradle\caches\modules-2\files-2.1\org.jetbrains.kotlin\kotlin-stdlib-jdk7\2.1.21\f5e72fe5f9501e0d27ec633beb3996c29641b877\kotlin-stdlib-jdk7-2.1.21.jar;C:\Users\Elie\.gradle\caches\modules-2\files-2.1\org.jetbrains.kotlin\kotlin-stdlib\2.3.0\ebc4eb2b6e6c91b6c844c1e3183920d86f2ef656\kotlin-stdlib-2.3.0.jar
+-Xcompiler
+/D_CRT_SECURE_NO_WARNINGS
+-Dplatform=windows-x86_64
+-Dplatform.includepath=C:\Users\Elie\IdeaProjects\ComposeMediaPlayer\winlib
+-Dplatform.linkpath=C:\Users\Elie\IdeaProjects\ComposeMediaPlayer\winlib\build-x64\Release
+-d
+C:\Users\Elie\IdeaProjects\ComposeMediaPlayer\mediaplayer\src\jvmMain\resources\windows-x86_64
+io.github.kdroidfilter.composemediaplayer.windows.MediaFoundationLib

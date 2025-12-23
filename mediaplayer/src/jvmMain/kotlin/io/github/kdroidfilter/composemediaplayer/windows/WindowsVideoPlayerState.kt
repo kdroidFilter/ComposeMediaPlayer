@@ -14,12 +14,13 @@ import androidx.compose.ui.unit.sp
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Logger.Companion.setMinSeverity
 import co.touchlab.kermit.Severity
-import com.sun.jna.Pointer
-import com.sun.jna.WString
-import com.sun.jna.ptr.FloatByReference
-import com.sun.jna.ptr.IntByReference
-import com.sun.jna.ptr.LongByReference
-import com.sun.jna.ptr.PointerByReference
+import org.bytedeco.javacpp.BytePointer
+import org.bytedeco.javacpp.CharPointer
+import org.bytedeco.javacpp.FloatPointer
+import org.bytedeco.javacpp.IntPointer
+import org.bytedeco.javacpp.LongPointer
+import org.bytedeco.javacpp.Pointer
+import org.bytedeco.javacpp.PointerPointer
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
@@ -60,7 +61,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         private val isMfBootstrapped = AtomicBoolean(false)
 
         /** Map to store volume settings for each player instance */
-        private val instanceVolumes = ConcurrentHashMap<Pointer, Float>()
+        private val instanceVolumes = ConcurrentHashMap<MediaFoundationLib.VideoPlayerInstance, Float>()
 
         /**
          * Initialize Media Foundation only once for all instances.
@@ -99,7 +100,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private var userPaused = false
 
     /** Video player instance handle */
-    private var videoPlayerInstance: Pointer? = null
+    private var videoPlayerInstance: MediaFoundationLib.VideoPlayerInstance? = null
 
     /** Deferred completed when initialization is ready */
     private val initReady = CompletableDeferred<Unit>()
@@ -244,6 +245,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         val timestamp: Double
     )
 
+    private class AddressPointer(address: Long) : Pointer() {
+        init {
+            this.address = address
+        }
+    }
+
     // Double-buffering for zero-copy frame rendering
     private var skiaBitmapA: Bitmap? = null
     private var skiaBitmapB: Bitmap? = null
@@ -306,7 +313,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     if (instance != null) {
                         try {
                             // Stop playback before releasing resources
-                            val hr = player.SetPlaybackState(instance, false, true)
+                            val hr = player.SetPlaybackState(instance, 0, 1)
                             if (hr < 0) {
                                 windowsLogger.e { "Error stopping playback (hr=0x${hr.toString(16)})" }
                             }
@@ -509,7 +516,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     }
 
                     if (wasPlaying) {
-                        player.SetPlaybackState(instance, false, false)
+                        player.SetPlaybackState(instance, 0, 0)
                         _isPlaying = false
                         delay(50)
                     }
@@ -539,23 +546,25 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     // This prevents the native library from starting to read the video immediately
                     // and fixes the issue where the video would start playing even when paused on Windows
                     val startPlayback = initializeplayerState == InitialPlayerState.PLAY
-                    val hrOpen = player.OpenMedia(instance, WString(uri), startPlayback)
+                    val hrOpen = CharPointer(uri).use { urlPtr ->
+                        player.OpenMedia(instance, urlPtr, if (startPlayback) 1 else 0)
+                    }
                     if (hrOpen < 0) {
                         setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                         return@withLock
                     }
 
                     // Get the video dimensions
-                    val wRef = IntByReference()
-                    val hRef = IntByReference()
+                    val wRef = IntPointer(1)
+                    val hRef = IntPointer(1)
                     player.GetVideoSize(instance, wRef, hRef)
-                    if (wRef.value <= 0 || hRef.value <= 0) {
+                    if (wRef.get() <= 0 || hRef.get() <= 0) {
                         setError("Failed to retrieve video size")
                         player.CloseMedia(instance)
                         return@withLock
                     }
-                    videoWidth = wRef.value
-                    videoHeight = hRef.value
+                    videoWidth = wRef.get()
+                    videoHeight = hRef.get()
 
                     // Calculate the buffer size for frames
                     frameBufferSize = videoWidth * videoHeight * 4
@@ -564,14 +573,14 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     sharedFrameBuffer = ByteArray(frameBufferSize)
 
                     // Get the media duration
-                    val durationRef = LongByReference()
+                    val durationRef = LongPointer(1)
                     val hrDuration = player.GetMediaDuration(instance, durationRef)
                     if (hrDuration < 0) {
                         setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
                         player.CloseMedia(instance)
                         return@withLock
                     }
-                    _duration = durationRef.value / 10000000.0
+                    _duration = durationRef.get() / 10000000.0
 
                     // Retrieve metadata using the native function
                     val retrievedMetadata = MediaFoundationLib.getVideoMetadata(instance)
@@ -615,9 +624,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                     // Restore the volume setting for this instance
                     val storedVolume = instanceVolumes[instance]
                     if (storedVolume != null) {
-                        val volumeRef = FloatByReference()
+                        val volumeRef = FloatPointer(1)
                         val hr = player.GetAudioVolume(instance, volumeRef)
-                        if (hr >= 0 && storedVolume != volumeRef.value) {
+                        if (hr >= 0 && storedVolume != volumeRef.get()) {
                             val setHr = player.SetAudioVolume(instance, storedVolume)
                             if (setHr < 0) {
                                 windowsLogger.e { "Error restoring volume (hr=0x${setHr.toString(16)})" }
@@ -667,12 +676,12 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
 
         mediaOperationMutex.withLock {
             videoPlayerInstance?.let { instance ->
-                val leftRef = FloatByReference()
-                val rightRef = FloatByReference()
+                val leftRef = FloatPointer(1)
+                val rightRef = FloatPointer(1)
                 val hr = player.GetAudioLevels(instance, leftRef, rightRef)
                 if (hr >= 0) {
-                    _leftLevel = leftRef.value
-                    _rightLevel = rightRef.value
+                    _leftLevel = leftRef.get()
+                    _rightLevel = rightRef.get()
                 }
             }
         }
@@ -691,7 +700,7 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
         while (scope.isActive && _hasMedia && !isDisposing.get()) {
             val instance = videoPlayerInstance ?: break
 
-            if (player.IsEOF(instance)) {
+            if (player.IsEOF(instance) != 0) {
                 if (loop) {
                     try {
                         userPaused = false  // Reset userPaused when looping
@@ -724,11 +733,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             }
 
             try {
-                val ptrRef = PointerByReference()
-                val sizeRef = IntByReference()
+                val ptrRef = PointerPointer<BytePointer>(1)
+                val sizeRef = IntPointer(1)
                 val readResult = player.ReadVideoFrame(instance, ptrRef, sizeRef)
+                val framePtr = ptrRef.get(BytePointer::class.java, 0)
+                val frameSize = sizeRef.get()
 
-                if (readResult < 0 || ptrRef.value == null || sizeRef.value <= 0) {
+                if (readResult < 0 || framePtr == null || framePtr.isNull || frameSize <= 0) {
                     yield()
                     continue
                 }
@@ -743,7 +754,8 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 }
 
                 // Get the native frame buffer
-                val srcBuffer = ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
+                framePtr.capacity(frameSize.toLong())
+                val srcBuffer = framePtr.position(0).asByteBuffer()
                 if (srcBuffer == null) {
                     player.UnlockVideoFrame(instance)
                     yield()
@@ -801,7 +813,10 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 // Single memory copy: native buffer → Skia bitmap
                 val dstRowBytes = pixmap.rowBytes
                 val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
-                val dstBuffer = Pointer(pixelsAddr).getByteBuffer(0, dstSizeBytes)
+                val dstPointer = BytePointer(AddressPointer(pixelsAddr))
+                dstPointer.capacity(dstSizeBytes)
+                dstPointer.position(0)
+                val dstBuffer = dstPointer.asByteBuffer()
 
                 srcBuffer.rewind()
                 copyBgraFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
@@ -809,9 +824,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 player.UnlockVideoFrame(instance)
 
                 // Get frame timestamp
-                val posRef = LongByReference()
+                val posRef = LongPointer(1)
                 val frameTime = if (player.GetMediaPosition(instance, posRef) >= 0) {
-                    posRef.value / 10000000.0
+                    posRef.get() / 10000000.0
                 } else {
                     0.0
                 }
@@ -950,9 +965,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
             if (instance != null) {
                 val storedVolume = instanceVolumes[instance]
                 if (storedVolume != null) {
-                    val volumeRef = FloatByReference()
+                    val volumeRef = FloatPointer(1)
                     val hr = player.GetAudioVolume(instance, volumeRef)
-                    if (hr >= 0 && storedVolume != volumeRef.value) {
+                    if (hr >= 0 && storedVolume != volumeRef.get()) {
                         val setHr = player.SetAudioVolume(instance, storedVolume)
                         if (setHr < 0) {
                             windowsLogger.e { "Error restoring volume during play (hr=0x${setHr.toString(16)})" }
@@ -1051,9 +1066,9 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                         }
                     }
 
-                    val posRef = LongByReference()
+                    val posRef = LongPointer(1)
                     if (player.GetMediaPosition(instance, posRef) >= 0) {
-                        _currentTime = posRef.value / 10000000.0
+                        _currentTime = posRef.get() / 10000000.0
                         _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                     }
 
@@ -1132,7 +1147,11 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
     private fun setPlaybackState(playing: Boolean, errorMessage: String, bStop: Boolean = false): Boolean {
         return videoPlayerInstance?.let { instance ->
             for (attempt in 1..3) {
-                val res = player.SetPlaybackState(instance, playing, bStop)
+                val res = player.SetPlaybackState(
+                    instance,
+                    if (playing) 1 else 0,
+                    if (bStop) 1 else 0
+                )
                 if (res >= 0) {
                     _isPlaying = playing
                     _error?.let { clearError() }
