@@ -33,14 +33,13 @@ actual fun VideoPlayerSurface(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit
 ) {
-    if (LocalInspectionMode.current) {
-        VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
-        return
-    }
-    when (val delegate = playerState.delegate) {
-        is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-        is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-        is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier, contentScale, overlay)
-        else -> VideoPlayerSurfacePreview(modifier = modifier, message = "VideoPlayerSurface (preview)", overlay = overlay)
-    }
+    if (playerState is DefaultVideoPlayerState)
+        when (val delegate = playerState.delegate) {
+            is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, contentScale, overlay)
+            is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier, contentScale, overlay)
+            is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier, contentScale, overlay)
+            else -> throw IllegalArgumentException("Unsupported player state type")
+        }
+    else
+        throw IllegalArgumentException("Unsupported player state type")
 }

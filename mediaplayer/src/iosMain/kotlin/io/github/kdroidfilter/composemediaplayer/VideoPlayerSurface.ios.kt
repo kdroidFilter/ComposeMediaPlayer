@@ -71,11 +71,13 @@ fun VideoPlayerSurfaceImpl(
         }
     }
 
-    // Update the player when it changes
-    DisposableEffect(playerState.player) {
-        Logger.d{"Video Player updated"}
-        avPlayerViewController.player = playerState.player
-        onDispose { }
+    if (playerState is DefaultVideoPlayerState) {
+        // Update the player when it changes
+        DisposableEffect(playerState.player) {
+            Logger.d { "Video Player updated" }
+            avPlayerViewController.player = playerState.player
+            onDispose { }
+        }
     }
     if (playerState.hasMedia) {
         Box(
@@ -86,9 +88,13 @@ fun VideoPlayerSurfaceImpl(
             // Use the contentScale parameter to adjust the view's size and scaling behavior
             UIKitView(
             modifier = contentScale.toCanvasModifier(
-                playerState.videoAspectRatio.toFloat(),
-                playerState.metadata.width,
-                playerState.metadata.height
+                aspectRatio =
+                    if (playerState is DefaultVideoPlayerState)
+                        playerState.videoAspectRatio.toFloat()
+                    else 16.0f / 9.0f
+                ,
+                width = playerState.metadata.width,
+                height = playerState.metadata.height
             ),
                 factory = {
                     UIView().apply {

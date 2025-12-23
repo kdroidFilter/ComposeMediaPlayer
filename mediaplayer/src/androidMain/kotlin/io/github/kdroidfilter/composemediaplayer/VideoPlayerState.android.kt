@@ -34,6 +34,9 @@ import io.github.vinceglb.filekit.AndroidFile
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 
+@OptIn(UnstableApi::class)
+actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState()
+
 /**
  * Logger for WebAssembly video player surface
  */
@@ -42,11 +45,8 @@ internal val androidVideoLogger = Logger.withTag("AndroidVideoPlayerSurface")
 
 @UnstableApi
 @Stable
-actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
-    actual constructor() : this(false)
-
-    private var appContext: Context? = null
-    internal var previewMode: Boolean = isInPreview
+open class DefaultVideoPlayerState: VideoPlayerState {
+    private val context: Context = ContextProvider.getContext()
     internal var exoPlayer: ExoPlayer? = null
     private var updateJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -62,26 +62,26 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
     private var wasPlayingBeforeScreenLock: Boolean = false
 
     private var _hasMedia by mutableStateOf(false)
-    actual val hasMedia: Boolean get() = _hasMedia
+    override val hasMedia: Boolean get() = _hasMedia
 
     // State properties
     private var _isPlaying by mutableStateOf(false)
-    actual val isPlaying: Boolean get() = _isPlaying
+    override val isPlaying: Boolean get() = _isPlaying
 
     private var _isLoading by mutableStateOf(false)
-    actual val isLoading: Boolean get() = _isLoading
+    override val isLoading: Boolean get() = _isLoading
 
     private var _error by mutableStateOf<VideoPlayerError?>(null)
-    actual val error: VideoPlayerError? get() = _error
+    override val error: VideoPlayerError? get() = _error
 
     private var _metadata = VideoMetadata()
-    actual val metadata: VideoMetadata get() = _metadata
+    override val metadata: VideoMetadata get() = _metadata
 
     // Subtitle state
-    actual var subtitlesEnabled by mutableStateOf(false)
-    actual var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
-    actual val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
-    actual var subtitleTextStyle by mutableStateOf(
+    override var subtitlesEnabled by mutableStateOf(false)
+    override var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
+    override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    override var subtitleTextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
             fontSize = 18.sp,
@@ -90,12 +90,12 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         )
     )
 
-    actual var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
 
     private var playerView: PlayerView? = null
 
     // Select an external subtitle track
-    actual fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?) {
         if (track == null) {
             disableSubtitles()
             return
@@ -114,7 +114,7 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         }
     }
 
-    actual fun disableSubtitles() {
+    override fun disableSubtitles() {
         currentSubtitleTrack = null
         subtitlesEnabled = false
 
@@ -150,7 +150,7 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
 
     // Volume control
     private var _volume by mutableFloatStateOf(1f)
-    actual var volume: Float
+    override var volume: Float
         get() = _volume
         set(value) {
             _volume = value.coerceIn(0f, 1f)
@@ -159,7 +159,7 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
 
     // Slider position
     private var _sliderPos by mutableFloatStateOf(0f)
-    actual var sliderPos: Float
+    override var sliderPos: Float
         get() = _sliderPos
         set(value) {
             _sliderPos = value.coerceIn(0f, 1000f)
@@ -169,11 +169,11 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         }
 
     // User interaction states
-    actual var userDragging by mutableStateOf(false)
+    override var userDragging by mutableStateOf(false)
 
     // Loop control
     private var _loop by mutableStateOf(false)
-    actual var loop: Boolean
+    override var loop: Boolean
         get() = _loop
         set(value) {
             _loop = value
@@ -182,7 +182,7 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
 
     // Playback speed control
     private var _playbackSpeed by mutableFloatStateOf(1.0f)
-    actual var playbackSpeed: Float
+    override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
             _playbackSpeed = value.coerceIn(0.5f, 2.0f)
@@ -194,16 +194,16 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
     // Audio levels
     private var _leftLevel by mutableFloatStateOf(0f)
     private var _rightLevel by mutableFloatStateOf(0f)
-    actual val leftLevel: Float get() = _leftLevel
-    actual val rightLevel: Float get() = _rightLevel
+    override val leftLevel: Float get() = _leftLevel
+    override val rightLevel: Float get() = _rightLevel
 
     // Aspect ratio
     private var _aspectRatio by mutableFloatStateOf(16f / 9f)
-    actual val aspectRatio: Float get() = _aspectRatio
+    override val aspectRatio: Float get() = _aspectRatio
 
     // Fullscreen state
     private var _isFullscreen by mutableStateOf(false)
-    actual var isFullscreen: Boolean
+    override var isFullscreen: Boolean
         get() = _isFullscreen
         set(value) {
             _isFullscreen = value
@@ -212,35 +212,18 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
     // Time tracking
     private var _currentTime by mutableDoubleStateOf(0.0)
     private var _duration by mutableDoubleStateOf(0.0)
-    actual val positionText: String get() = formatTime(_currentTime)
-    actual val durationText: String get() = formatTime(_duration)
-    actual val currentTime: Double get() = _currentTime
+    override val positionText: String get() = formatTime(_currentTime)
+    override val durationText: String get() = formatTime(_duration)
+    override val currentTime: Double get() = _currentTime
 
 
     init {
-        if (!previewMode) {
-            audioProcessor.setOnAudioLevelUpdateListener { left, right ->
-                _leftLevel = left
-                _rightLevel = right
-            }
-            ensureInitialized()
+        audioProcessor.setOnAudioLevelUpdateListener { left, right ->
+            _leftLevel = left
+            _rightLevel = right
         }
-    }
-
-    private fun ensureInitialized(): Boolean {
-        synchronized(playerInitializationLock) {
-            if (isPlayerReleased) return false
-            if (exoPlayer != null) return true
-
-            val context = appContext ?: runCatching { ContextProvider.getContext().applicationContext }
-                .getOrNull()
-                ?: return false
-
-            appContext = context
-            initializePlayer(context)
-            registerScreenLockReceiver(context)
-            return exoPlayer != null
-        }
+        initializePlayer()
+        registerScreenLockReceiver()
     }
 
     private fun shouldUseConservativeCodecHandling(): Boolean {
@@ -260,8 +243,8 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
                 manufacturer.equals("mediatek", ignoreCase = true)
     }
 
-    private fun registerScreenLockReceiver(context: Context) {
-        unregisterScreenLockReceiver(context)
+    private fun registerScreenLockReceiver() {
+        unregisterScreenLockReceiver()
 
         screenLockReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
@@ -309,16 +292,11 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
         }
-        try {
-            context.registerReceiver(screenLockReceiver, filter)
-            androidVideoLogger.d { "Screen lock receiver registered" }
-        } catch (e: Exception) {
-            androidVideoLogger.e { "Error registering screen lock receiver: ${e.message}" }
-            screenLockReceiver = null
-        }
+        context.registerReceiver(screenLockReceiver, filter)
+        androidVideoLogger.d { "Screen lock receiver registered" }
     }
 
-    private fun unregisterScreenLockReceiver(context: Context) {
+    private fun unregisterScreenLockReceiver() {
         screenLockReceiver?.let {
             try {
                 context.unregisterReceiver(it)
@@ -330,50 +308,45 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         }
     }
 
-    private fun initializePlayer(context: Context) {
+    private fun initializePlayer() {
         synchronized(playerInitializationLock) {
-            if (isPlayerReleased || exoPlayer != null) return
+            if (isPlayerReleased) return
 
-            try {
-                val audioSink = DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(audioProcessor))
-                    .build()
+            val audioSink = DefaultAudioSink.Builder(context)
+                .setAudioProcessors(arrayOf(audioProcessor))
+                .build()
 
-                val renderersFactory = object : DefaultRenderersFactory(context) {
-                    override fun buildAudioSink(
-                        context: Context,
-                        enableFloatOutput: Boolean,
-                        enableAudioTrackPlaybackParams: Boolean
-                    ): AudioSink = audioSink
-                }.apply {
-                    setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-                    // Activer le fallback du décodeur pour une meilleure stabilité
-                    setEnableDecoderFallback(true)
+            val renderersFactory = object : DefaultRenderersFactory(context) {
+                override fun buildAudioSink(
+                    context: Context,
+                    enableFloatOutput: Boolean,
+                    enableAudioTrackPlaybackParams: Boolean
+                ): AudioSink = audioSink
+            }.apply {
+                setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+                // Activer le fallback du décodeur pour une meilleure stabilité
+                setEnableDecoderFallback(true)
 
-                    // Sur les appareils problématiques, utiliser des paramètres plus conservateurs
-                    if (shouldUseConservativeCodecHandling()) {
-                        // On ne peut pas désactiver l'async queueing car la méthode n'existe pas
-                        // Mais on peut utiliser le MediaCodecSelector par défaut
-                        setMediaCodecSelector(MediaCodecSelector.DEFAULT)
-                    }
+                // Sur les appareils problématiques, utiliser des paramètres plus conservateurs
+                if (shouldUseConservativeCodecHandling()) {
+                    // On ne peut pas désactiver l'async queueing car la méthode n'existe pas
+                    // Mais on peut utiliser le MediaCodecSelector par défaut
+                    setMediaCodecSelector(MediaCodecSelector.DEFAULT)
                 }
-
-                exoPlayer = ExoPlayer.Builder(context)
-                    .setRenderersFactory(renderersFactory)
-                    .setHandleAudioBecomingNoisy(true)
-                    .setWakeMode(C.WAKE_MODE_LOCAL)
-                    .setPauseAtEndOfMediaItems(false)
-                    .setReleaseTimeoutMs(2000) // Augmenter le timeout de libération
-                    .build()
-                    .apply {
-                        playerListener = createPlayerListener()
-                        addListener(playerListener!!)
-                        volume = _volume
-                    }
-            } catch (e: Exception) {
-                androidVideoLogger.e { "Error initializing player: ${e.message}" }
-                exoPlayer = null
             }
+
+            exoPlayer = ExoPlayer.Builder(context)
+                .setRenderersFactory(renderersFactory)
+                .setHandleAudioBecomingNoisy(true)
+                .setWakeMode(C.WAKE_MODE_LOCAL)
+                .setPauseAtEndOfMediaItems(false)
+                .setReleaseTimeoutMs(2000) // Augmenter le timeout de libération
+                .build()
+                .apply {
+                    playerListener = createPlayerListener()
+                    addListener(playerListener!!)
+                    volume = _volume
+                }
         }
     }
 
@@ -491,12 +464,7 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
                             player.release()
 
                             // Réinitialiser
-                            exoPlayer = null
-                            playerListener = null
-                            appContext?.let { context ->
-                                initializePlayer(context)
-                                registerScreenLockReceiver(context)
-                            }
+                            initializePlayer()
 
                             // Restaurer l'élément média et la position
                             currentMediaItem?.let {
@@ -544,33 +512,13 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         updateJob = null
     }
 
-    actual fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
-        if (previewMode) {
-            _error = null
-            _hasMedia = true
-            _isPlaying = initializeplayerState == InitialPlayerState.PLAY
-            return
-        }
-        if (!ensureInitialized()) {
-            _error = VideoPlayerError.UnknownError("Android context is not available (preview or missing ContextProvider initialization).")
-            return
-        }
+    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
         val mediaItemBuilder = MediaItem.Builder().setUri(uri)
         val mediaItem = mediaItemBuilder.build()
         openFromMediaItem(mediaItem, initializeplayerState)
     }
 
-    actual fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
-        if (previewMode) {
-            _error = null
-            _hasMedia = true
-            _isPlaying = initializeplayerState == InitialPlayerState.PLAY
-            return
-        }
-        if (!ensureInitialized()) {
-            _error = VideoPlayerError.UnknownError("Android context is not available (preview or missing ContextProvider initialization).")
-            return
-        }
+    override fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
         val mediaItemBuilder = MediaItem.Builder()
         val videoUri: Uri = when (val androidFile = file.androidFile) {
             is AndroidFile.UriWrapper -> androidFile.uri
@@ -585,55 +533,43 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         synchronized(playerInitializationLock) {
             if (isPlayerReleased) return
 
-            val player = exoPlayer ?: run {
-                _isPlaying = false
-                _hasMedia = false
-                _error = VideoPlayerError.UnknownError("Video player is not initialized.")
-                return
-            }
+            exoPlayer?.let { player ->
+                player.stop()
+                player.clearMediaItems()
+                try {
+                    _error = null
+                    resetStates(keepMedia = true)
 
-            player.stop()
-            player.clearMediaItems()
-            try {
-                _error = null
-                resetStates(keepMedia = true)
+                    // Extraire les métadonnées avant de préparer le lecteur
+                    extractMediaItemMetadata(mediaItem)
 
-                // Extraire les métadonnées avant de préparer le lecteur
-                extractMediaItemMetadata(mediaItem)
+                    player.setMediaItem(mediaItem)
+                    player.prepare()
+                    player.volume = volume
+                    player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
 
-                player.setMediaItem(mediaItem)
-                player.prepare()
-                player.volume = volume
-                player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
-
-                // Contrôler l'état de lecture initial
-                if (initializeplayerState == InitialPlayerState.PLAY) {
-                    player.play()
-                    _hasMedia = true
-                } else {
-                    player.pause()
+                    // Contrôler l'état de lecture initial
+                    if (initializeplayerState == InitialPlayerState.PLAY) {
+                        player.play()
+                        _hasMedia = true
+                    } else {
+                        player.pause()
+                        _isPlaying = false
+                        _hasMedia = true
+                    }
+                } catch (e: Exception) {
+                    androidVideoLogger.d { "Error opening media: ${e.message}" }
                     _isPlaying = false
-                    _hasMedia = true
+                    _hasMedia = false
+                    _error = VideoPlayerError.SourceError("Failed to load media: ${e.message}")
                 }
-            } catch (e: Exception) {
-                androidVideoLogger.d { "Error opening media: ${e.message}" }
-                _isPlaying = false
-                _hasMedia = false
-                _error = VideoPlayerError.SourceError("Failed to load media: ${e.message}")
             }
         }
     }
 
-    actual fun play() {
+    override fun play() {
         synchronized(playerInitializationLock) {
             if (!isPlayerReleased) {
-                if (previewMode && exoPlayer == null) {
-                    _hasMedia = true
-                    _isPlaying = true
-                    return
-                }
-
-                ensureInitialized()
                 exoPlayer?.let { player ->
                     if (player.playbackState == Player.STATE_IDLE) {
                         player.prepare()
@@ -645,31 +581,17 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         }
     }
 
-    actual fun pause() {
+    override fun pause() {
         synchronized(playerInitializationLock) {
             if (!isPlayerReleased) {
-                if (previewMode && exoPlayer == null) {
-                    _isPlaying = false
-                    return
-                }
-
-                ensureInitialized()
                 exoPlayer?.pause()
             }
         }
     }
 
-    actual fun stop() {
+    override fun stop() {
         synchronized(playerInitializationLock) {
             if (!isPlayerReleased) {
-                if (previewMode && exoPlayer == null) {
-                    _hasMedia = false
-                    _isPlaying = false
-                    resetStates(keepMedia = true)
-                    return
-                }
-
-                ensureInitialized()
                 exoPlayer?.let { player ->
                     player.stop()
                     player.seekTo(0)
@@ -680,18 +602,18 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         }
     }
 
-    actual fun seekTo(value: Float) {
+    override fun seekTo(value: Float) {
         if (_duration > 0 && !isPlayerReleased) {
             val targetTime = (value / 1000.0) * _duration
             exoPlayer?.seekTo((targetTime * 1000).toLong())
         }
     }
 
-    actual fun clearError() {
+    override fun clearError() {
         _error = null
     }
 
-    actual fun toggleFullscreen() {
+    override fun toggleFullscreen() {
         _isFullscreen = !_isFullscreen
     }
 
@@ -769,7 +691,7 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
         }
     }
 
-    actual fun dispose() {
+    override fun dispose() {
         synchronized(playerInitializationLock) {
             isPlayerReleased = true
             stopPositionUpdates()
@@ -793,12 +715,8 @@ actual open class VideoPlayerState internal constructor(isInPreview: Boolean) {
 
             playerListener = null
             exoPlayer = null
-            appContext?.let { unregisterScreenLockReceiver(it) }
+            unregisterScreenLockReceiver()
             resetStates()
         }
     }
 }
-
-@OptIn(UnstableApi::class)
-internal actual fun createVideoPlayerState(isInPreview: Boolean): VideoPlayerState =
-    VideoPlayerState(isInPreview)

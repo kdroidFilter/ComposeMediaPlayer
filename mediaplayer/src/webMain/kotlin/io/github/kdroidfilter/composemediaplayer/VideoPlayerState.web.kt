@@ -9,15 +9,23 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.PlatformFile
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.io.IOException
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
+
+actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState()
 
 /**
  * Implementation of VideoPlayerState for WebAssembly/JavaScript platform.
@@ -25,7 +33,7 @@ import kotlin.time.TimeSource
  * and error handling.
  */
 @Stable
-actual open class VideoPlayerState {
+open class DefaultVideoPlayerState: VideoPlayerState {
 
     // Variable to store the last opened URI for potential replay
     private var lastUri: String? = null
@@ -46,27 +54,27 @@ actual open class VideoPlayerState {
 
     // Playback state properties
     private var _isPlaying by mutableStateOf(false)
-    actual val isPlaying: Boolean get() = _isPlaying
+    override val isPlaying: Boolean get() = _isPlaying
 
     private var _hasMedia by mutableStateOf(false)
-    actual val hasMedia: Boolean get() = _hasMedia
+    override val hasMedia: Boolean get() = _hasMedia
 
     internal var _isLoading by mutableStateOf(false)
-    actual val isLoading: Boolean get() = _isLoading
+    override val isLoading: Boolean get() = _isLoading
 
     // Error handling
     private var _error by mutableStateOf<VideoPlayerError?>(null)
-    actual val error: VideoPlayerError? get() = _error
+    override val error: VideoPlayerError? get() = _error
 
     // Media metadata
-    actual val metadata = VideoMetadata()
-    actual val aspectRatio : Float = 16f / 9f //TO DO: Get from video source
+    override val metadata = VideoMetadata()
+    override val aspectRatio : Float = 16f / 9f //TO DO: Get from video source
 
     // Subtitle management
-    actual var subtitlesEnabled by mutableStateOf(false)
-    actual var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
-    actual val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
-    actual var subtitleTextStyle by mutableStateOf(
+    override var subtitlesEnabled by mutableStateOf(false)
+    override var currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
+    override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
+    override var subtitleTextStyle by mutableStateOf(
         TextStyle(
             color = Color.White,
             fontSize = 18.sp,
@@ -74,11 +82,11 @@ actual open class VideoPlayerState {
             textAlign = TextAlign.Center
         )
     )
-    actual var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
 
     // Playback control properties
     private var _volume by mutableStateOf(1.0f)
-    actual var volume: Float
+    override var volume: Float
         get() = _volume
         set(value) {
             val newValue = value.coerceIn(0f, 1f)
@@ -88,12 +96,12 @@ actual open class VideoPlayerState {
             }
         }
 
-    actual var sliderPos by mutableStateOf(0.0f)
-    actual var userDragging by mutableStateOf(false)
-    actual var loop by mutableStateOf(false)
+    override var sliderPos by mutableStateOf(0.0f)
+    override var userDragging by mutableStateOf(false)
+    override var loop by mutableStateOf(false)
 
     private var _playbackSpeed by mutableStateOf(1.0f)
-    actual var playbackSpeed: Float
+    override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
             val newValue = value.coerceIn(0.5f, 2.0f)
@@ -103,26 +111,26 @@ actual open class VideoPlayerState {
             }
         }
 
-    actual var isFullscreen by mutableStateOf(false)
+    override var isFullscreen by mutableStateOf(false)
 
     // Audio level indicators
     private var _leftLevel by mutableStateOf(0f)
     private var _rightLevel by mutableStateOf(0f)
-    actual val leftLevel: Float get() = _leftLevel
-    actual val rightLevel: Float get() = _rightLevel
+    override val leftLevel: Float get() = _leftLevel
+    override val rightLevel: Float get() = _rightLevel
 
     // Time display properties
     private var _positionText by mutableStateOf("00:00")
     private var _durationText by mutableStateOf("00:00")
-    actual val positionText: String get() = _positionText
-    actual val durationText: String get() = _durationText
+    override val positionText: String get() = _positionText
+    override val durationText: String get() = _durationText
 
     // Current duration of the media
     private var _currentDuration: Float = 0f
     
     // Current time of the media in seconds
     private var _currentTime: Double = 0.0
-    actual val currentTime: Double get() = _currentTime
+    override val currentTime: Double get() = _currentTime
 
     // Job for handling seek operations
     internal var seekJob: Job? = null
@@ -204,7 +212,7 @@ actual open class VideoPlayerState {
      *
      * @param track The subtitle track to select, or null to disable subtitles
      */
-    actual fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?) {
         currentSubtitleTrack = track
         subtitlesEnabled = (track != null)
     }
@@ -212,7 +220,7 @@ actual open class VideoPlayerState {
     /**
      * Disables subtitles by clearing the current track and setting subtitlesEnabled to false.
      */
-    actual fun disableSubtitles() {
+    override fun disableSubtitles() {
         currentSubtitleTrack = null
         subtitlesEnabled = false
     }
@@ -223,7 +231,7 @@ actual open class VideoPlayerState {
      * @param uri The URI of the media to open
      * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    actual fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
         playerScope.coroutineContext.cancelChildren()
 
         // Store the URI for potential replay after stop
@@ -257,7 +265,7 @@ actual open class VideoPlayerState {
      * @param file The file to open
      * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    actual fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
+    override fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
         val fileUri = file.getUri()
         openUri(fileUri, initializeplayerState)
     }
@@ -266,7 +274,7 @@ actual open class VideoPlayerState {
      * Starts or resumes playback of the current media.
      * If no media is loaded but a previous URI exists, reopens that media.
      */
-    actual fun play() {
+    override fun play() {
         if (_hasMedia && !_isPlaying) {
             _isPlaying = true
         } else if (!_hasMedia && lastUri != null) {
@@ -278,7 +286,7 @@ actual open class VideoPlayerState {
     /**
      * Pauses playback of the current media.
      */
-    actual fun pause() {
+    override fun pause() {
         if (_isPlaying) {
             _isPlaying = false
         }
@@ -288,7 +296,7 @@ actual open class VideoPlayerState {
      * Stops playback and resets the player state.
      * Note: lastUri is preserved for potential replay.
      */
-    actual fun stop() {
+    override fun stop() {
         _isPlaying = false
         _sourceUri = null
         _hasMedia = false
@@ -305,7 +313,7 @@ actual open class VideoPlayerState {
      *
      * @param value The position to seek to, as a percentage (0-1000)
      */
-    actual fun seekTo(value: Float) {
+    override fun seekTo(value: Float) {
         sliderPos = value
         seekJob?.cancel()
     }
@@ -313,14 +321,14 @@ actual open class VideoPlayerState {
     /**
      * Clears any error state.
      */
-    actual fun clearError() {
+    override fun clearError() {
         _error = null
     }
 
     /**
      * Toggles the fullscreen state of the video player
      */
-    actual fun toggleFullscreen() {
+    override fun toggleFullscreen() {
         FullscreenManager.toggleFullscreen(isFullscreen) { newFullscreenState ->
             isFullscreen = newFullscreenState
         }
@@ -402,7 +410,7 @@ actual open class VideoPlayerState {
     /**
      * Disposes of resources used by the player.
      */
-    actual fun dispose() {
+    override fun dispose() {
         pendingVolumeChange?.cancel()
         pendingSpeedChange?.cancel()
         playerScope.cancel()
@@ -412,5 +420,3 @@ actual open class VideoPlayerState {
         internal const val PERCENTAGE_MULTIPLIER = 1000f
     }
 }
-
-internal actual fun createVideoPlayerState(isInPreview: Boolean): VideoPlayerState = VideoPlayerState()

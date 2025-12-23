@@ -96,7 +96,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 23
+        minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = 36
 
         applicationId = "sample.app.androidApp"
@@ -143,3 +143,8 @@ tasks.register<Exec>("runIos") {
         println("Running iOS app in simulator...")
     }
 }
+
+dependencies {
+    debugImplementation(compose.uiTooling)
+}
+

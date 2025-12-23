@@ -13,11 +13,12 @@ import co.touchlab.kermit.Logger.Companion.setMinSeverity
 import co.touchlab.kermit.Severity
 import com.sun.jna.Pointer
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
+import io.github.vinceglb.filekit.PlatformFile
 import io.github.vinceglb.filekit.utils.toFile
 import io.github.vinceglb.filekit.utils.toPath
 import kotlinx.coroutines.*
@@ -41,7 +42,7 @@ internal val macLogger = Logger.withTag("MacVideoPlayerState")
  * This implementation uses a native video player via SharedVideoPlayer.
  * All debug logs are handled with Kermit.
  */
-class MacVideoPlayerState : PlatformVideoPlayerState {
+class MacVideoPlayerState : VideoPlayerState {
 
     // Main state variables
     private val mainMutex = Mutex()
@@ -313,6 +314,13 @@ class MacVideoPlayerState : PlatformVideoPlayerState {
                 handleError(e)
             }
         }
+    }
+
+    override fun openFile(
+        file: PlatformFile,
+        initializeplayerState: InitialPlayerState
+    ) {
+        openUri(file.file.path, initializeplayerState)
     }
 
     /** Cleans up current playback state. */

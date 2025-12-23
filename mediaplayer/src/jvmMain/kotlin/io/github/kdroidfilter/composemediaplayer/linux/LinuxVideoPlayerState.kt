@@ -12,16 +12,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.DEFAULT_ASPECT_RATIO
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
-import org.freedesktop.gstreamer.*
+import io.github.vinceglb.filekit.PlatformFile
+import org.freedesktop.gstreamer.Bin
+import org.freedesktop.gstreamer.Bus
+import org.freedesktop.gstreamer.Caps
+import org.freedesktop.gstreamer.Element
+import org.freedesktop.gstreamer.ElementFactory
+import org.freedesktop.gstreamer.FlowReturn
+import org.freedesktop.gstreamer.Format
+import org.freedesktop.gstreamer.GhostPad
+import org.freedesktop.gstreamer.Sample
+import org.freedesktop.gstreamer.State
 import org.freedesktop.gstreamer.elements.AppSink
 import org.freedesktop.gstreamer.elements.PlayBin
-import org.freedesktop.gstreamer.Format
 import org.freedesktop.gstreamer.event.SeekFlags
 import org.freedesktop.gstreamer.event.SeekType
 import org.freedesktop.gstreamer.message.MessageType
@@ -46,7 +55,7 @@ import kotlin.math.pow
  * A Timer performs a slight seek to reposition exactly at the saved position.
  */
 @Stable
-class LinuxVideoPlayerState : PlatformVideoPlayerState {
+class LinuxVideoPlayerState : VideoPlayerState {
 
     companion object {
         // Flag to enable text subtitles (GST_PLAY_FLAG_TEXT)
@@ -734,6 +743,13 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             _hasMedia = false
             e.printStackTrace()
         }
+    }
+
+    override fun openFile(
+        file: PlatformFile,
+        initializeplayerState: InitialPlayerState
+    ) {
+        openUri(file.file.path, initializeplayerState)
     }
 
     override fun play() {

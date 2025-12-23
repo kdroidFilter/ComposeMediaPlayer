@@ -1,23 +1,21 @@
 package io.github.kdroidfilter.composemediaplayer.linux
 
-import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import com.sun.jna.Platform
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import org.freedesktop.gstreamer.Gst
+import org.freedesktop.gstreamer.Version
+import org.junit.Assume
+import org.junit.Before
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.delay
-import com.sun.jna.Platform
-import org.junit.Before
-import org.junit.Assume
-import org.freedesktop.gstreamer.Gst
-import org.freedesktop.gstreamer.Version
 
 /**
- * Tests for the Linux implementation of PlatformVideoPlayerState
+ * Tests for the Linux implementation of VideoPlayerState
  * 
  * Note: These tests will only run on Linux platforms. On other platforms,
  * the tests will be skipped.

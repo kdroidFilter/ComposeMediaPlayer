@@ -25,7 +25,7 @@ class VideoPlayerStatePreviewTest {
 
     @Test
     fun createStateWithoutInitializedContextProviderDoesNotThrow() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
         playerState.dispose()
     }
 }

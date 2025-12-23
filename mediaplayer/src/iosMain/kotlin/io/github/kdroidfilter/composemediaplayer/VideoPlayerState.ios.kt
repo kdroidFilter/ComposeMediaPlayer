@@ -28,14 +28,14 @@ import platform.UIKit.UIApplication
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 
+actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState()
 
-@OptIn(ExperimentalForeignApi::class)
 @Stable
-actual open class VideoPlayerState {
+open class DefaultVideoPlayerState: VideoPlayerState {
 
     // Base states
     private var _volume = mutableStateOf(1.0f)
-    actual var volume: Float
+    override var volume: Float
         get() = _volume.value
         set(value) {
             val clampedValue = value.coerceIn(0f, 1f)
@@ -45,10 +45,10 @@ actual open class VideoPlayerState {
             }
         }
 
-    actual var sliderPos: Float by mutableStateOf(0f) // value between 0 and 1000
-    actual var userDragging: Boolean = false
+    override var sliderPos: Float by mutableStateOf(0f) // value between 0 and 1000
+    override var userDragging: Boolean = false
     private var _loop by mutableStateOf(false)
-    actual var loop: Boolean
+    override var loop: Boolean
         get() = _loop
         set(value) {
             _loop = value
@@ -87,7 +87,7 @@ actual open class VideoPlayerState {
 
     // Playback speed control
     private var _playbackSpeed by mutableStateOf(1.0f)
-    actual var playbackSpeed: Float
+    override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
             _playbackSpeed = value.coerceIn(0.5f, 2.0f)
@@ -95,31 +95,31 @@ actual open class VideoPlayerState {
         }
 
     // Playback states
-    actual val hasMedia: Boolean get() = _hasMedia
-    actual val isPlaying: Boolean get() = _isPlaying
+    override val hasMedia: Boolean get() = _hasMedia
+    override val isPlaying: Boolean get() = _isPlaying
     private var _hasMedia by mutableStateOf(false)
     private var _isPlaying by mutableStateOf(false)
 
     // Displayed texts for position and duration
     private var _positionText: String by mutableStateOf("00:00")
-    actual val positionText: String get() = _positionText
+    override val positionText: String get() = _positionText
     private var _durationText: String by mutableStateOf("00:00")
-    actual val durationText: String get() = _durationText
+    override val durationText: String get() = _durationText
 
     // Loading state
     private var _isLoading by mutableStateOf(false)
-    actual val isLoading: Boolean
+    override val isLoading: Boolean
         get() = _isLoading
 
     // Fullscreen state
     private var _isFullscreen by mutableStateOf(false)
-    actual var isFullscreen: Boolean
+    override var isFullscreen: Boolean
         get() = _isFullscreen
         set(value) {
             _isFullscreen = value
         }
 
-    actual val error: VideoPlayerError? = null
+    override val error: VideoPlayerError? = null
 
     // Observable instance of AVPlayer
     var player: AVPlayer? by mutableStateOf(null)
@@ -147,21 +147,21 @@ actual open class VideoPlayerState {
     // Internal time values (in seconds)
     private var _currentTime: Double = 0.0
     private var _duration: Double = 0.0
-    actual val currentTime: Double get() = _currentTime
+    override val currentTime: Double get() = _currentTime
 
     // Flag to indicate user-initiated pause
     private var userInitiatedPause: Boolean = false
 
     // Audio levels (not yet implemented)
-    actual val leftLevel: Float = 0f
-    actual val rightLevel: Float = 0f
+    override val leftLevel: Float = 0f
+    override val rightLevel: Float = 0f
 
     // Observable video aspect ratio (default to 16:9)
     private var _videoAspectRatio by mutableStateOf(16.0 / 9.0)
     val videoAspectRatio: CGFloat
         get() = _videoAspectRatio
 
-    actual val aspectRatio: Float = _videoAspectRatio.toFloat()
+    override val aspectRatio: Float = _videoAspectRatio.toFloat()
 
     // Video metadata
     private var _metadata = VideoMetadata(audioChannels = 2)
@@ -271,7 +271,7 @@ actual open class VideoPlayerState {
             if (wasPlayingBeforeBackground) {
                 Logger.d { "Player was playing before background, resuming" }
                 player?.let { player ->
-                    // Only resume if the player is actually paused
+                    // Only resume if the player is overridely paused
                     if (player.rate == 0.0f) {
                         player.rate = _playbackSpeed
                         player.play()
@@ -335,7 +335,7 @@ actual open class VideoPlayerState {
      * @param uri The URI of the media to open
      * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    actual fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
         Logger.d { "openUri called with uri: $uri, initializeplayerState: $initializeplayerState" }
         val nsUrl = NSURL.URLWithString(uri) ?: run {
             Logger.d { "Failed to create NSURL from uri: $uri" }
@@ -357,7 +357,7 @@ actual open class VideoPlayerState {
         // Create a temporary player with minimal setup to show something immediately
         val tempPlayerItem = AVPlayerItem(nsUrl)
         player = AVPlayer(playerItem = tempPlayerItem).apply {
-            volume = this@VideoPlayerState.volume
+            volume = this@DefaultVideoPlayerState.volume
             rate = 0.0f // Explicitly set rate to 0 to prevent auto-play
             pause() // Explicitly pause to ensure it doesn't auto-play
             allowsExternalPlayback = false // Disable AirPlay
@@ -409,7 +409,7 @@ actual open class VideoPlayerState {
             val audioTracks = asset.tracksWithMediaType(AVMediaTypeAudio)
             if (audioTracks.isNotEmpty()) {
                 // Set audio channels to 2 (stereo) as a more accurate default
-                // Most audio content is stereo, and we can't easily get the actual channel count
+                // Most audio content is stereo, and we can't easily get the override channel count
                 // from AVAssetTrack in Kotlin/Native
                 _metadata.audioChannels = 2 // Default to stereo instead of using track count
 
@@ -447,7 +447,7 @@ actual open class VideoPlayerState {
 
                 // Create the final player with the fully loaded asset
                 player = AVPlayer(playerItem = playerItem).apply {
-                    volume = this@VideoPlayerState.volume
+                    volume = this@DefaultVideoPlayerState.volume
                     // Don't set rate here, as it can cause auto-play
                     actionAtItemEnd = AVPlayerActionAtItemEndNone
 
@@ -504,7 +504,7 @@ actual open class VideoPlayerState {
         }
     }
 
-    actual fun play() {
+    override fun play() {
         Logger.d { "play called" }
         userInitiatedPause = false
         if (player == null) {
@@ -546,7 +546,7 @@ actual open class VideoPlayerState {
         }
     }
 
-    actual fun pause() {
+    override fun pause() {
         Logger.d { "pause called" }
         userInitiatedPause = true
         // Ensure the pause call is on the main thread:
@@ -556,7 +556,7 @@ actual open class VideoPlayerState {
         _isPlaying = false
     }
 
-    actual fun stop() {
+    override fun stop() {
         Logger.d { "stop called" }
         player?.pause()
         player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
@@ -567,7 +567,7 @@ actual open class VideoPlayerState {
         _metadata = VideoMetadata(audioChannels = 2)
     }
 
-    actual fun seekTo(value: Float) {
+    override fun seekTo(value: Float) {
         if (_duration > 0) {
             // Set loading state to true to indicate seeking is happening
             _isLoading = true
@@ -592,19 +592,19 @@ actual open class VideoPlayerState {
     }
 
 
-    actual fun clearError() {
+    override fun clearError() {
         Logger.d { "clearError called" }
     }
 
     /**
      * Toggles the fullscreen state of the video player
      */
-    actual fun toggleFullscreen() {
+    override fun toggleFullscreen() {
         Logger.d { "toggleFullscreen called" }
         _isFullscreen = !_isFullscreen
     }
 
-    actual fun dispose() {
+    override fun dispose() {
         Logger.d { "dispose called" }
         cleanupCurrentPlayer()
         _hasMedia = false
@@ -614,7 +614,7 @@ actual open class VideoPlayerState {
         _metadata = VideoMetadata(audioChannels = 2)
     }
 
-    actual fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
+    override fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
         Logger.d { "openFile called with file: $file, initializeplayerState: $initializeplayerState" }
         // Use the getUri extension function to get a proper file URL
         val fileUrl = file.getUri()
@@ -622,35 +622,35 @@ actual open class VideoPlayerState {
         openUri(fileUrl, initializeplayerState)
     }
 
-    actual val metadata: VideoMetadata
+    override val metadata: VideoMetadata
         get() = _metadata
     // Subtitle state
     private var _subtitlesEnabled by mutableStateOf(false)
-    actual var subtitlesEnabled: Boolean
+    override var subtitlesEnabled: Boolean
         get() = _subtitlesEnabled
         set(value) {
             _subtitlesEnabled = value
         }
 
     private var _currentSubtitleTrack by mutableStateOf<SubtitleTrack?>(null)
-    actual var currentSubtitleTrack: SubtitleTrack?
+    override var currentSubtitleTrack: SubtitleTrack?
         get() = _currentSubtitleTrack
         set(value) {
             _currentSubtitleTrack = value
         }
 
     private val _availableSubtitleTracks = mutableListOf<SubtitleTrack>()
-    actual val availableSubtitleTracks: MutableList<SubtitleTrack>
+    override val availableSubtitleTracks: MutableList<SubtitleTrack>
         get() = _availableSubtitleTracks
 
-    actual var subtitleTextStyle: TextStyle = TextStyle(
+    override var subtitleTextStyle: TextStyle = TextStyle(
         color = Color.White,
         fontSize = 18.sp,
         fontWeight = FontWeight.Normal,
         textAlign = TextAlign.Center
     )
 
-    actual var subtitleBackgroundColor: Color = Color.Black.copy(alpha = 0.5f)
+    override var subtitleBackgroundColor: Color = Color.Black.copy(alpha = 0.5f)
 
     /**
      * Selects a subtitle track for display.
@@ -658,7 +658,7 @@ actual open class VideoPlayerState {
      *
      * @param track The subtitle track to select, or null to disable subtitles
      */
-    actual fun selectSubtitleTrack(track: SubtitleTrack?) {
+    override fun selectSubtitleTrack(track: SubtitleTrack?) {
         Logger.d { "selectSubtitleTrack called with track: $track" }
         if (track == null) {
             disableSubtitles()
@@ -676,7 +676,7 @@ actual open class VideoPlayerState {
     /**
      * Disables subtitle display.
      */
-    actual fun disableSubtitles() {
+    override fun disableSubtitles() {
         Logger.d { "disableSubtitles called" }
         // Update state
         currentSubtitleTrack = null
@@ -686,5 +686,3 @@ actual open class VideoPlayerState {
         // the native player for subtitle display
     }
 }
-
-internal actual fun createVideoPlayerState(isInPreview: Boolean): VideoPlayerState = VideoPlayerState()

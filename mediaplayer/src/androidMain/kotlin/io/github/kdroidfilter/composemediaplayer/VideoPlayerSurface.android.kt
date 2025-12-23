@@ -7,8 +7,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -95,7 +101,8 @@ private fun VideoPlayerSurfaceInternal(
         onDispose {
             try {
                 // Détacher la vue du player
-                playerState.attachPlayerView(null)
+                if (playerState is DefaultVideoPlayerState)
+                    playerState.attachPlayerView(null)
             } catch (e: Exception) {
                 androidVideoLogger.e { "Error detaching PlayerView on dispose: ${e.message}" }
             }
@@ -112,7 +119,9 @@ private fun VideoPlayerSurfaceInternal(
                 playerState.toggleFullscreen()
             }
         ) {
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)) {
                 VideoPlayerContent(
                     playerState = playerState,
                     modifier = Modifier.fillMaxHeight(),
@@ -147,7 +156,7 @@ private fun VideoPlayerContent(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        if (playerState.hasMedia && playerState.exoPlayer != null) {
+        if (playerState.hasMedia) {
             AndroidView(
                 modifier = contentScale.toCanvasModifier(
                     playerState.aspectRatio,
@@ -157,9 +166,18 @@ private fun VideoPlayerContent(
                 factory = { context ->
                     try {
                         // Créer PlayerView avec le type de surface approprié
+
                         createPlayerViewWithSurfaceType(context, surfaceType).apply {
-                            // Attacher le lecteur depuis l'état
-                            player = playerState.exoPlayer
+                            if (playerState is DefaultVideoPlayerState) {
+                                // Attacher cette vue à l'état du lecteur
+                                playerState.attachPlayerView(this)
+
+                                if (playerState.exoPlayer != null) {
+                                    // Attacher le lecteur depuis l'état
+                                    player = playerState.exoPlayer
+                                }
+                            }
+
                             useController = false
                             defaultArtwork = null
                             setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -171,8 +189,6 @@ private fun VideoPlayerContent(
                             // Désactiver la vue de sous-titres native car nous utilisons des sous-titres basés sur Compose
                             subtitleView?.visibility = android.view.View.GONE
 
-                            // Attacher cette vue à l'état du lecteur
-                            playerState.attachPlayerView(this)
                         }
                     } catch (e: Exception) {
                         androidVideoLogger.e { "Error creating PlayerView: ${e.message}" }
@@ -185,7 +201,7 @@ private fun VideoPlayerContent(
                 update = { playerView ->
                     try {
                         // Vérifier que le player est toujours valide avant la mise à jour
-                        if (playerState.exoPlayer != null && playerView.player != null) {
+                        if (playerState is DefaultVideoPlayerState && playerState.exoPlayer != null && playerView.player != null) {
                             // Mettre à jour le mode de redimensionnement lorsque contentScale change
                             playerView.resizeMode = mapContentScaleToResizeMode(contentScale)
                         }
@@ -257,7 +273,10 @@ private fun mapContentScaleToResizeMode(contentScale: ContentScale): Int {
 }
 
 @OptIn(UnstableApi::class)
-private fun createPlayerViewWithSurfaceType(context: Context, surfaceType: SurfaceType): PlayerView {
+private fun createPlayerViewWithSurfaceType(
+    context: Context,
+    surfaceType: SurfaceType
+): PlayerView {
     return try {
         // Essayer d'abord d'inflater les layouts personnalisés
         val layoutId = when (surfaceType) {
@@ -285,6 +304,7 @@ private fun createPlayerViewWithSurfaceType(context: Context, surfaceType: Surfa
                             }
                         }
                     }
+
                     SurfaceType.SurfaceView -> {
                         // SurfaceView est le défaut
                         androidVideoLogger.d { "Using SurfaceView" }
@@ -299,7 +319,7 @@ private fun createPlayerViewWithSurfaceType(context: Context, surfaceType: Surfa
         } catch (e2: Exception) {
             androidVideoLogger.e { "Error creating PlayerView programmatically: ${e2.message}" }
             // Dernier recours : créer une vue vide pour éviter le crash
-            throw RuntimeException("Unable to create PlayerView", e2)
+            throw e2
         }
     }
 }

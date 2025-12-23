@@ -85,8 +85,10 @@ internal fun HTMLVideoElement.addEventListeners(
     }
 
     loadingEvents.forEach { (event, isLoading) ->
-        addEventListener(event) {
-            scope.launch { playerState._isLoading = isLoading }
+        if (playerState is DefaultVideoPlayerState) {
+            addEventListener(event) {
+                scope.launch { playerState._isLoading = isLoading }
+            }
         }
     }
 }
@@ -377,22 +379,24 @@ internal fun setupVideoElement(
         }
     }
 
-    video.addEventListeners(
-        scope = scope,
-        playerState = playerState,
-        events = mapOf(
-            "timeupdate" to { event -> playerState.onTimeUpdateEvent(event) },
-            "ended" to { scope.launch { playerState.pause() } }
-        ),
-        loadingEvents = mapOf(
-            "seeking" to true,
-            "waiting" to true,
-            "playing" to false,
-            "seeked" to false,
-            "canplaythrough" to false,
-            "canplay" to false
+    if (playerState is DefaultVideoPlayerState) {
+        video.addEventListeners(
+            scope = scope,
+            playerState = playerState,
+            events = mapOf(
+                "timeupdate" to { event -> playerState.onTimeUpdateEvent(event) },
+                "ended" to { scope.launch { playerState.pause() } }
+            ),
+            loadingEvents = mapOf(
+                "seeking" to true,
+                "waiting" to true,
+                "playing" to false,
+                "seeked" to false,
+                "canplaythrough" to false,
+                "canplay" to false
+            )
         )
-    )
+    }
 
     val conditionalLoadingEvents = mapOf(
         "suspend" to { video.readyState >= 3 },
@@ -406,7 +410,7 @@ internal fun setupVideoElement(
             }
 
             scope.launch {
-                if (condition()) {
+                if (playerState is DefaultVideoPlayerState && condition()) {
                     playerState._isLoading = false
                 }
 
@@ -426,7 +430,7 @@ internal fun setupVideoElement(
             initAudioAnalyzer()
         }
 
-        if (enableAudioDetection && audioLevelJob?.isActive != true) {
+        if (playerState is DefaultVideoPlayerState && enableAudioDetection && audioLevelJob?.isActive != true) {
             audioLevelJob = scope.launch {
                 while (video.paused.not()) {
                     val (left, right) = if (!corsErrorDetected) {
@@ -448,7 +452,8 @@ internal fun setupVideoElement(
 
     video.addEventListener("error") {
         scope.launch {
-            playerState._isLoading = false
+            if (playerState is DefaultVideoPlayerState)
+                playerState._isLoading = false
             corsErrorDetected = true
 
             val error = video.error
@@ -462,7 +467,9 @@ internal fun setupVideoElement(
                     } else {
                         "Failed to load because no supported source was found"
                     }
-                    playerState.setError(VideoPlayerError.SourceError(errorMsg))
+                    if (playerState is DefaultVideoPlayerState) {
+                        playerState.setError(VideoPlayerError.SourceError(errorMsg))
+                    }
                 }
             }
         }
@@ -475,7 +482,7 @@ internal fun setupVideoElement(
     }
 }
 
-internal fun VideoPlayerState.onTimeUpdateEvent(event: Event) {
+internal fun DefaultVideoPlayerState.onTimeUpdateEvent(event: Event) {
     (event.target as? HTMLVideoElement)?.let {
         onTimeUpdate(it.currentTime.toFloat(), it.duration.toFloat())
     }
@@ -577,18 +584,20 @@ internal fun VideoPlayerEffects(
     }
 
     // Handle source change effect
-    LaunchedEffect(videoElement, playerState.sourceUri) {
-        videoElement?.let { video ->
-            val sourceUri = playerState.sourceUri ?: ""
-            if (sourceUri.isNotEmpty()) {
-                playerState.clearError()
-                video.src = sourceUri
-                video.load()
-                if (playerState.isPlaying) video.safePlay() else video.safePause()
+
+    if (playerState is DefaultVideoPlayerState) {
+        LaunchedEffect(videoElement, playerState.sourceUri) {
+            videoElement?.let { video ->
+                val sourceUri = playerState.sourceUri ?: ""
+                if (sourceUri.isNotEmpty()) {
+                    playerState.clearError()
+                    video.src = sourceUri
+                    video.load()
+                    if (playerState.isPlaying) video.safePlay() else video.safePause()
+                }
             }
         }
     }
-
     // Handle play/pause
     LaunchedEffect(videoElement, playerState.isPlaying) {
         videoElement?.let { video ->
@@ -634,13 +643,13 @@ internal fun VideoPlayerEffects(
 
     // Handle seeking
     LaunchedEffect(playerState.sliderPos) {
-        if (!playerState.userDragging && playerState.hasMedia) {
+        if (playerState is DefaultVideoPlayerState &&  !playerState.userDragging && playerState.hasMedia) {
             playerState.seekJob?.cancel()
 
             videoElement?.let { video ->
                 val duration = video.duration.toFloat()
                 if (duration > 0f) {
-                    val newTime = (playerState.sliderPos / VideoPlayerState.PERCENTAGE_MULTIPLIER) * duration
+                    val newTime = (playerState.sliderPos / DefaultVideoPlayerState.PERCENTAGE_MULTIPLIER) * duration
                     val currentTime = video.currentTime
 
                     if (abs(currentTime - newTime) > 0.5) {
@@ -683,56 +692,58 @@ internal fun VideoVolumeAndSpeedEffects(
     var pendingVolumeChange by remember { mutableStateOf<Double?>(null) }
     var pendingPlaybackSpeedChange by remember { mutableStateOf<Float?>(null) }
 
-    DisposableEffect(videoElement) {
-        val video = videoElement ?: return@DisposableEffect onDispose {}
+    if (playerState is DefaultVideoPlayerState) {
+        DisposableEffect(videoElement) {
+            val video = videoElement ?: return@DisposableEffect onDispose {}
 
-        playerState.applyVolumeCallback = { value ->
-            if (playerState._isLoading) {
-                pendingVolumeChange = value.toDouble()
+            playerState.applyVolumeCallback = { value ->
+                if (playerState._isLoading) {
+                    pendingVolumeChange = value.toDouble()
+                } else {
+                    video.volume = value.toDouble()
+                    pendingVolumeChange = null
+                }
+            }
+
+            if (!playerState._isLoading) {
+                video.volume = playerState.volume.toDouble()
             } else {
-                video.volume = value.toDouble()
-                pendingVolumeChange = null
+                pendingVolumeChange = playerState.volume.toDouble()
             }
-        }
 
-        if (!playerState._isLoading) {
-            video.volume = playerState.volume.toDouble()
-        } else {
-            pendingVolumeChange = playerState.volume.toDouble()
-        }
+            playerState.applyPlaybackSpeedCallback = { value ->
+                if (playerState._isLoading) {
+                    pendingPlaybackSpeedChange = value
+                } else {
+                    video.safeSetPlaybackRate(value)
+                    pendingPlaybackSpeedChange = null
+                }
+            }
 
-        playerState.applyPlaybackSpeedCallback = { value ->
-            if (playerState._isLoading) {
-                pendingPlaybackSpeedChange = value
+            if (!playerState._isLoading) {
+                video.safeSetPlaybackRate(playerState.playbackSpeed)
             } else {
-                video.safeSetPlaybackRate(value)
-                pendingPlaybackSpeedChange = null
+                pendingPlaybackSpeedChange = playerState.playbackSpeed
             }
-        }
 
-        if (!playerState._isLoading) {
-            video.safeSetPlaybackRate(playerState.playbackSpeed)
-        } else {
-            pendingPlaybackSpeedChange = playerState.playbackSpeed
-        }
-
-        val seekedListener: (Event) -> Unit = {
-            pendingVolumeChange?.let { volume ->
-                video.volume = volume
-                pendingVolumeChange = null
+            val seekedListener: (Event) -> Unit = {
+                pendingVolumeChange?.let { volume ->
+                    video.volume = volume
+                    pendingVolumeChange = null
+                }
+                pendingPlaybackSpeedChange?.let { speed ->
+                    video.safeSetPlaybackRate(speed)
+                    pendingPlaybackSpeedChange = null
+                }
             }
-            pendingPlaybackSpeedChange?.let { speed ->
-                video.safeSetPlaybackRate(speed)
-                pendingPlaybackSpeedChange = null
+
+            video.addEventListener("seeked", seekedListener)
+
+            onDispose {
+                video.removeEventListener("seeked", seekedListener)
+                playerState.applyVolumeCallback = null
+                playerState.applyPlaybackSpeedCallback = null
             }
-        }
-
-        video.addEventListener("seeked", seekedListener)
-
-        onDispose {
-            video.removeEventListener("seeked", seekedListener)
-            playerState.applyVolumeCallback = null
-            playerState.applyPlaybackSpeedCallback = null
         }
     }
 }
