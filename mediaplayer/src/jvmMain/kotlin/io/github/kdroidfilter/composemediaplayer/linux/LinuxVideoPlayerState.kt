@@ -25,6 +25,7 @@ import org.freedesktop.gstreamer.Format
 import org.freedesktop.gstreamer.event.SeekFlags
 import org.freedesktop.gstreamer.event.SeekType
 import org.freedesktop.gstreamer.message.MessageType
+import com.sun.jna.Pointer
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
@@ -32,6 +33,7 @@ import org.jetbrains.skia.ImageInfo
 import java.awt.EventQueue
 import java.io.File
 import java.net.URI
+import java.nio.ByteBuffer
 import java.util.EnumSet
 import javax.swing.Timer
 import kotlin.math.abs
@@ -70,6 +72,12 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
 
     private var frameWidth = 0
     private var frameHeight = 0
+
+    // Double-buffering for zero-copy frame rendering
+    private var skiaBitmapA: Bitmap? = null
+    private var skiaBitmapB: Bitmap? = null
+    private var nextSkiaBitmapA: Boolean = true
+    private var lastFrameHash: Int = Int.MIN_VALUE
 
     private var bufferingPercent by mutableStateOf(100)
     private var isUserPaused by mutableStateOf(false)
@@ -776,6 +784,7 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         _isSeeking = false
         hasReceivedFirstFrame = false
         _currentFrame = null
+        lastFrameHash = Int.MIN_VALUE
     }
 
     override fun seekTo(value: Float) {
@@ -813,10 +822,16 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
 
     // ---- Processing of a video sample ----
     /**
-     * Directly reads in RGBA and copies to a Skia Bitmap in the RGBA_8888 format
-     * (non-premultiplied). This avoids redundant conversions to maintain accurate colors and performance.
-     * 
-     * Optimized for better performance, especially in fullscreen mode.
+     * Zero-copy optimized frame processing using double-buffering and direct memory access.
+     *
+     * Optimizations applied:
+     * 1. Double-buffering: Reuses two Bitmap objects, alternating between them to avoid
+     *    allocating new bitmaps every frame while the UI draws from the previous one.
+     * 2. Frame hashing: Skips processing if the frame content hasn't changed (identical frames).
+     * 3. peekPixels(): Direct access to Skia bitmap memory, avoiding intermediate ByteArray allocation.
+     * 4. Single memory copy: GStreamer buffer → Skia bitmap pixels (true zero-copy beyond this necessary transfer).
+     *
+     * Memory flow: GStreamer native buffer → Skia bitmap pixels (1 copy via bulk ByteBuffer.put)
      */
     private fun processSample(sample: Sample) {
         try {
@@ -826,40 +841,66 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
             val width = structure.getInteger("width")
             val height = structure.getInteger("height")
 
+            if (width <= 0 || height <= 0) return
+
+            // Handle dimension changes
             if (width != frameWidth || height != frameHeight) {
                 frameWidth = width
                 frameHeight = height
+
+                // Reallocate bitmaps for new dimensions
+                skiaBitmapA?.close()
+                skiaBitmapB?.close()
+
+                val imageInfo = ImageInfo(width, height, ColorType.RGBA_8888, ColorAlphaType.UNPREMUL)
+                skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
+                skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
+                nextSkiaBitmapA = true
+                lastFrameHash = Int.MIN_VALUE
+
                 updateAspectRatio()
             }
 
             val buffer = sample.buffer ?: return
-            val byteBuffer = buffer.map(false) ?: return
-            byteBuffer.rewind()
+            val srcBuffer = buffer.map(false) ?: return
+            srcBuffer.rewind()
 
-            // Prepare a Skia Bitmap
-            val imageInfo = ImageInfo(
-                width,
-                height,
-                ColorType.RGBA_8888,
-                ColorAlphaType.UNPREMUL
-            )
+            val pixelCount = width * height
 
-            val bitmap = Bitmap()
-            bitmap.allocPixels(imageInfo)
+            // Calculate frame hash to detect identical frames
+            val newHash = calculateFrameHash(srcBuffer, pixelCount)
+            if (newHash == lastFrameHash) {
+                buffer.unmap()
+                return
+            }
+            lastFrameHash = newHash
 
-            // Get the byte array from the buffer directly
-            val totalBytes = width * height * 4
-            val byteArray = ByteArray(totalBytes)
+            // Select the target bitmap (double-buffering)
+            val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+            nextSkiaBitmapA = !nextSkiaBitmapA
 
-            // Bulk copy the bytes from the buffer to the array
-            // This is much more efficient than copying pixel by pixel
-            byteBuffer.get(byteArray, 0, totalBytes)
+            // Get direct access to bitmap pixels via peekPixels (zero-copy access)
+            val pixmap = targetBitmap.peekPixels() ?: run {
+                buffer.unmap()
+                return
+            }
 
-            // Install these pixels into the Bitmap
-            bitmap.installPixels(imageInfo, byteArray, width * 4)
+            val pixelsAddr = pixmap.addr
+            if (pixelsAddr == 0L) {
+                buffer.unmap()
+                return
+            }
 
-            // Convert the Skia Bitmap into a Compose ImageBitmap
-            val imageBitmap = bitmap.asComposeImageBitmap()
+            // Single memory copy: GStreamer buffer → Skia bitmap
+            val dstRowBytes = pixmap.rowBytes.toInt()
+            val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
+            val dstBuffer = Pointer(pixelsAddr).getByteBuffer(0, dstSizeBytes)
+
+            srcBuffer.rewind()
+            copyRgbaFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
+
+            // Convert to Compose ImageBitmap
+            val imageBitmap = targetBitmap.asComposeImageBitmap()
 
             // Update on the AWT thread
             EventQueue.invokeLater {
@@ -884,6 +925,14 @@ class LinuxVideoPlayerState : PlatformVideoPlayerState {
         playbin.stop()
         playbin.dispose()
         videoSink.dispose()
+
+        // Clean up double-buffering bitmaps
+        skiaBitmapA?.close()
+        skiaBitmapB?.close()
+        skiaBitmapA = null
+        skiaBitmapB = null
+        lastFrameHash = Int.MIN_VALUE
+
         // Don't call Gst.deinit() here as it would affect all instances
         // Each instance should only clean up its own resources
     }
