@@ -16,7 +16,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testCreateVideoPlayerState() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Verify the player state is initialized correctly
         assertNotNull(playerState)
@@ -40,7 +40,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testVolumeControl() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial volume
         assertEquals(1f, playerState.volume)
@@ -65,7 +65,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testLoopSetting() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial loop setting
         assertFalse(playerState.loop)
@@ -86,7 +86,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testFullscreenToggle() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial fullscreen state
         assertFalse(playerState.isFullscreen)
@@ -108,7 +108,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testErrorHandling() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test opening a non-existent file
         playerState.openUri("non_existent_file.mp4")
@@ -125,7 +125,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testSubtitleFunctionality() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Verify initial subtitle state
         assertFalse(playerState.subtitlesEnabled)

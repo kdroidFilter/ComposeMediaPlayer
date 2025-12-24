@@ -16,7 +16,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testCreateVideoPlayerState() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Verify the player state is initialized correctly
         assertNotNull(playerState)
@@ -40,7 +40,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testVolumeControl() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial volume
         assertEquals(1f, playerState.volume)
@@ -65,7 +65,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testLoopSetting() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial loop setting
         assertFalse(playerState.loop)
@@ -86,7 +86,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testFullscreenToggle() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial fullscreen state
         assertFalse(playerState.isFullscreen)
@@ -107,13 +107,14 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testErrorHandling() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
+        val webPlayerState = playerState as DefaultVideoPlayerState
 
         // Initially there should be no error
         assertEquals(null, playerState.error)
 
         // Test setting an error manually (since we can't easily trigger a real error in tests)
-        playerState.setError(VideoPlayerError.NetworkError("Test error"))
+        webPlayerState.setError(VideoPlayerError.NetworkError("Test error"))
 
         // There should be an error now
         assertNotNull(playerState.error)
@@ -131,7 +132,7 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testSubtitleFunctionality() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Initially subtitles should be disabled
         assertFalse(playerState.subtitlesEnabled)
@@ -168,7 +169,8 @@ class VideoPlayerStateTest {
      */
     @Test
     fun testPositionUpdates() {
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
+        val webPlayerState = playerState as DefaultVideoPlayerState
 
         // Test initial position
         assertEquals(0f, playerState.sliderPos)
@@ -176,7 +178,7 @@ class VideoPlayerStateTest {
         assertEquals("00:00", playerState.durationText)
 
         // Test updating position manually with forceUpdate to bypass rate limiting
-        playerState.updatePosition(30f, 120f, forceUpdate = true)
+        webPlayerState.updatePosition(30f, 120f, forceUpdate = true)
 
         // Verify position was updated
         assertEquals("00:30", playerState.positionText)

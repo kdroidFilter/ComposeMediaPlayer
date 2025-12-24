@@ -57,11 +57,10 @@ class VideoPlayerStateTest {
             return
         }
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Verify the player state is initialized correctly
         assertNotNull(playerState)
-        assertNotNull(playerState.delegate)
         assertFalse(playerState.hasMedia)
         assertFalse(playerState.isPlaying)
         assertEquals(0f, playerState.sliderPos)
@@ -88,7 +87,7 @@ class VideoPlayerStateTest {
             return
         }
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial volume
         assertEquals(1f, playerState.volume)
@@ -119,7 +118,7 @@ class VideoPlayerStateTest {
             return
         }
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial loop setting
         assertFalse(playerState.loop)
@@ -146,7 +145,7 @@ class VideoPlayerStateTest {
             return
         }
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial fullscreen state
         assertFalse(playerState.isFullscreen)
@@ -173,7 +172,7 @@ class VideoPlayerStateTest {
             return
         }
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Initially there should be no error
         assertEquals(null, playerState.error)
