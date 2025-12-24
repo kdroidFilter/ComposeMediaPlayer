@@ -2,31 +2,68 @@ package sample.app.singleplayer
 
 // Import the extracted composable functions
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
+import io.github.kdroidfilter.composemediaplayer.PreviewableVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.dialogs.FileKitType
 import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.name
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import sample.app.SubtitleManagementDialog
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SinglePlayerScreen() {
+    SinglePlayerScreenCore(rememberVideoPlayerState())
+}
+
+@Composable
+@Preview
+private fun SinglePlayerScreen_OnPaused_Preview() {
+    val playerState = PreviewableVideoPlayerState(isPlaying = false)
+    SinglePlayerScreenCore(playerState)
+}
+
+@Composable
+@Preview
+private fun SinglePlayerScreen_OnError_Preview() {
+    val playerState = PreviewableVideoPlayerState(
+        loop = false,
+        error = VideoPlayerError.CodecError("Unable to decode")
+    )
+    SinglePlayerScreenCore(playerState)
+}
+
+@Composable
+private fun SinglePlayerScreenCore(playerState: VideoPlayerState) {
     MaterialTheme {
         // Default video URL
         var videoUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
-        val playerState = rememberVideoPlayerState()
-        
+
         // State for initial player state (PLAY or PAUSE)
         var initialPlayerState by remember { mutableStateOf<InitialPlayerState>(InitialPlayerState.PLAY) }
 

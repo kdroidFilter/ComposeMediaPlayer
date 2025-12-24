@@ -1,7 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.util
 
 import androidx.compose.runtime.Stable
-import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import java.lang.ref.WeakReference
 
 /**
@@ -10,7 +10,7 @@ import java.lang.ref.WeakReference
  */
 @Stable
 object VideoPlayerStateRegistry {
-    private var registeredState: WeakReference<PlatformVideoPlayerState>? = null
+    private var registeredState: WeakReference<VideoPlayerState>? = null
 
     /**
      * Register a WindowsVideoPlayerState instance to be shared between windows.
@@ -18,7 +18,7 @@ object VideoPlayerStateRegistry {
      *
      * @param state The WindowsVideoPlayerState to register
      */
-    fun registerState(state: PlatformVideoPlayerState) {
+    fun registerState(state: VideoPlayerState) {
         registeredState = WeakReference(state)
     }
 
@@ -27,7 +27,7 @@ object VideoPlayerStateRegistry {
      *
      * @return The registered WindowsVideoPlayerState or null if none is registered
      */
-    fun getRegisteredState(): PlatformVideoPlayerState? {
+    fun getRegisteredState(): VideoPlayerState? {
         return registeredState?.get()
     }
 

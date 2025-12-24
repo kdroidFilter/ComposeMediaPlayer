@@ -6,7 +6,7 @@ filekit = "0.12.0"
 gst1JavaCore = "1.4.0"
 kermit = "2.0.8"
 kotlin = "2.3.0"
-agp = "8.12.3"
+agp = "8.13.2"
 kotlinx-coroutines = "1.10.2"
 kotlinxBrowserWasmJs = "0.5.0"
 kotlinxDatetime = "0.7.1-0.6.x-compat"
@@ -18,6 +18,8 @@ jna = "5.18.1"
 platformtoolsDarkmodedetector = "0.7.4"
 slf4jSimple = "2.0.17"
 
+# minSdk = 21 failed to compile because the project indirectly depends on the library [androidx.navigationevent:navigationevent-android:1.0.1] which requires minSdk = 23
+android-minSdk="23"
 
 [libraries]
 

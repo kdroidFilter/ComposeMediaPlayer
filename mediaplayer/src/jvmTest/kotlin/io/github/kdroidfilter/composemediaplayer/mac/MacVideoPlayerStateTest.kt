@@ -11,7 +11,7 @@ import kotlinx.coroutines.delay
 import com.sun.jna.Platform
 
 /**
- * Tests for the Mac implementation of PlatformVideoPlayerState
+ * Tests for the Mac implementation of VideoPlayerState
  * 
  * Note: These tests will only run on Mac platforms. On other platforms,
  * the tests will be skipped.

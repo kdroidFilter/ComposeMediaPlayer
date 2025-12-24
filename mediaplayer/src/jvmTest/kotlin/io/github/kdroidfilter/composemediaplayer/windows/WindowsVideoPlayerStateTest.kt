@@ -1,19 +1,18 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
-import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
+import com.sun.jna.Platform
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.delay
-import com.sun.jna.Platform
 
 /**
- * Tests for the Windows implementation of PlatformVideoPlayerState
+ * Tests for the Windows implementation of VideoPlayerState
  * 
  * Note: These tests will only run on Windows platforms. On other platforms,
  * the tests will be skipped.

@@ -1,11 +1,11 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import com.kdroid.androidcontextprovider.ContextProvider
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlin.test.assertFalse
-import com.kdroid.androidcontextprovider.ContextProvider
 
 /**
  * Tests for the Android implementation of VideoPlayerState
@@ -39,7 +39,7 @@ class VideoPlayerStateTest {
     fun testCreateVideoPlayerState() {
         if (skipIfContextProviderNotAvailable()) return
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Verify the player state is initialized correctly
         assertNotNull(playerState)
@@ -65,7 +65,7 @@ class VideoPlayerStateTest {
     fun testVolumeControl() {
         if (skipIfContextProviderNotAvailable()) return
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial volume
         assertEquals(1f, playerState.volume)
@@ -92,7 +92,7 @@ class VideoPlayerStateTest {
     fun testLoopSetting() {
         if (skipIfContextProviderNotAvailable()) return
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial loop setting
         assertFalse(playerState.loop)
@@ -115,7 +115,7 @@ class VideoPlayerStateTest {
     fun testFullscreenToggle() {
         if (skipIfContextProviderNotAvailable()) return
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Test initial fullscreen state
         assertFalse(playerState.isFullscreen)
@@ -138,7 +138,7 @@ class VideoPlayerStateTest {
     fun testErrorHandling() {
         if (skipIfContextProviderNotAvailable()) return
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Initially there should be no error
         assertEquals(null, playerState.error)
@@ -161,7 +161,7 @@ class VideoPlayerStateTest {
     fun testSubtitleFunctionality() {
         if (skipIfContextProviderNotAvailable()) return
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Initially subtitles should be disabled
         assertFalse(playerState.subtitlesEnabled)
@@ -200,7 +200,7 @@ class VideoPlayerStateTest {
     fun testMetadataFunctionality() {
         if (skipIfContextProviderNotAvailable()) return
 
-        val playerState = VideoPlayerState()
+        val playerState = createVideoPlayerState()
 
         // Verify metadata object is initialized
         assertNotNull(playerState.metadata)

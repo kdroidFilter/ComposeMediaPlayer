@@ -21,18 +21,35 @@ import com.sun.jna.ptr.IntByReference
 import com.sun.jna.ptr.LongByReference
 import com.sun.jna.ptr.PointerByReference
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
-import kotlinx.coroutines.*
+import io.github.vinceglb.filekit.PlatformFile
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
@@ -55,7 +72,7 @@ internal val windowsLogger = Logger.withTag("WindowsVideoPlayerState")
  * Windows implementation of the video player state.
  * Handles media playback using Media Foundation on Windows platform.
  */
-class WindowsVideoPlayerState : PlatformVideoPlayerState {
+class WindowsVideoPlayerState : VideoPlayerState {
     companion object {
         private val isMfBootstrapped = AtomicBoolean(false)
 
@@ -482,6 +499,13 @@ class WindowsVideoPlayerState : PlatformVideoPlayerState {
                 setError("Error while waiting for initialization: ${e.message}")
             }
         }
+    }
+
+    override fun openFile(
+        file: PlatformFile,
+        initializeplayerState: InitialPlayerState
+    ) {
+        openUri(file.file.path, initializeplayerState)
     }
 
     /**

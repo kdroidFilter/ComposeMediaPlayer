@@ -3,7 +3,12 @@ package io.github.kdroidfilter.composemediaplayer.common
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -13,8 +18,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.rememberWindowState
-import com.sun.jna.Platform
-import io.github.kdroidfilter.composemediaplayer.PlatformVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.VideoPlayerStateRegistry
 
 /**
@@ -26,8 +30,8 @@ import io.github.kdroidfilter.composemediaplayer.util.VideoPlayerStateRegistry
  */
 @Composable
 fun openFullscreenWindow(
-    playerState: PlatformVideoPlayerState,
-    renderSurface: @Composable (PlatformVideoPlayerState, Modifier, Boolean) -> Unit
+    playerState: VideoPlayerState,
+    renderSurface: @Composable (VideoPlayerState, Modifier, Boolean) -> Unit
 ) {
     // Register the player state to be accessible from the fullscreen window
     VideoPlayerStateRegistry.registerState(playerState)
@@ -41,7 +45,7 @@ fun openFullscreenWindow(
  */
 @Composable
 private fun FullscreenVideoPlayerWindow(
-    renderSurface: @Composable (PlatformVideoPlayerState, Modifier, Boolean) -> Unit
+    renderSurface: @Composable (VideoPlayerState, Modifier, Boolean) -> Unit
 ) {
     // Get the player state from the registry
     val playerState = remember {
