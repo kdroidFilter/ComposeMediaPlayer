@@ -35,7 +35,37 @@ import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 
 @OptIn(UnstableApi::class)
-actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState()
+actual fun createVideoPlayerState(): VideoPlayerState =
+    try {
+        DefaultVideoPlayerState()
+    } catch (e: IllegalStateException) {
+        PreviewableVideoPlayerState(
+            hasMedia = false,
+            isPlaying = false,
+            isLoading = false,
+            volume = 1f,
+            sliderPos = 0f,
+            userDragging = false,
+            loop = false,
+            playbackSpeed = 1f,
+            leftLevel = 0f,
+            rightLevel = 0f,
+            positionText = "00:00",
+            durationText = "00:00",
+            currentTime = 0.0,
+            isFullscreen = false,
+            aspectRatio = 16f / 9f,
+            error = VideoPlayerError.UnknownError(
+                "Android context is not available (preview or missing ContextProvider initialization)."
+            ),
+            metadata = VideoMetadata(),
+            subtitlesEnabled = false,
+            currentSubtitleTrack = null,
+            availableSubtitleTracks = mutableListOf(),
+            subtitleTextStyle = TextStyle.Default,
+            subtitleBackgroundColor = Color.Transparent
+        )
+    }
 
 /**
  * Logger for WebAssembly video player surface
