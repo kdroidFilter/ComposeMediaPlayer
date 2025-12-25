@@ -19,10 +19,6 @@
 - **Media3** for Android
 - **HTML5 Player** for WASMJS
 
-> [!IMPORTANT]
-> WASM (Compose Web) — Important:
-> The WASM target is broken starting with version 0.8.3. It needs a complete reimplementation using the new interop API introduced in Compose 1.9.0. Unfortunately, I don’t have time to rewrite it right now and, since the WASM target is still alpha, I’m leaving it as-is for the time being. If you’d like to support this library financially to help deliver proper WASM support, HLS support on Windows, and other essential video player features, please reach out. This is a substantial amount of work, and your support would make a real difference.
-
 ## Table of Contents
 - [Live Demo](#-live-demo)
 - [Features](#-features)
@@ -57,7 +53,7 @@
 
 ## 🚀 Live Demo
 
-The online demo is currently unavailable.
+Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/ComposeMediaPlayer/sample/)
 
 ## ✨ Features
 
@@ -98,6 +94,7 @@ dependencies {
 
 | Library Version | Kotlin Version | Compose Version |
 |-----------------|----------------|-----------------|
+| 0.8.6           | 2.3.0          | 1.9.3           |
 | 0.8.3           | 2.2.20         | 1.9.0           |
 | 0.7.11          | 2.2.0          | 1.8.2           |
 | 0.7.10          | 2.1.21         | 1.8.2           |
