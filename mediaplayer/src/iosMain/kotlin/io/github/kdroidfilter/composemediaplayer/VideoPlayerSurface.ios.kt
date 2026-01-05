@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -15,20 +14,26 @@ import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
+import kotlinx.cinterop.BetaInteropApi
+import kotlinx.cinterop.CValue
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.ObjCClass
+import kotlinx.cinterop.cValue
 import platform.AVFoundation.AVLayerVideoGravityResize
 import platform.AVFoundation.AVLayerVideoGravityResizeAspect
 import platform.AVFoundation.AVLayerVideoGravityResizeAspectFill
-import platform.AVKit.AVPlayerViewController
-import platform.UIKit.NSLayoutConstraint
+import platform.AVFoundation.AVPlayer
+import platform.AVFoundation.AVPlayerLayer
+import platform.CoreGraphics.CGRect
+import platform.Foundation.NSCoder
 import platform.UIKit.UIColor
 import platform.UIKit.UIView
-import platform.UIKit.removeFromParentViewController
+import platform.UIKit.UIViewMeta
 
 @OptIn(ExperimentalForeignApi::class)
 @Composable
 actual fun VideoPlayerSurface(
-    playerState: VideoPlayerState, 
+    playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
     overlay: @Composable () -> Unit
@@ -40,22 +45,13 @@ actual fun VideoPlayerSurface(
 @OptIn(ExperimentalForeignApi::class)
 @Composable
 fun VideoPlayerSurfaceImpl(
-    playerState: VideoPlayerState, 
+    playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
     isInFullscreenView: Boolean = false,
     pauseOnDispose: Boolean = true
 ) {
-    // Create and store the AVPlayerViewController
-    val avPlayerViewController = remember {
-        AVPlayerViewController().apply {
-            showsPlaybackControls = false
-            // Disable notification center controls (Now Playing)
-            updatesNowPlayingInfoCenter = false
-        }
-    }
-
     // Cleanup when deleting the view
     DisposableEffect(Unit) {
         onDispose {
@@ -67,18 +63,11 @@ fun VideoPlayerSurfaceImpl(
             } else {
                 Logger.d { "[VideoPlayerSurface] Not pausing on dispose (rotation or fullscreen transition)" }
             }
-            avPlayerViewController.removeFromParentViewController()
         }
     }
 
-    if (playerState is DefaultVideoPlayerState) {
-        // Update the player when it changes
-        DisposableEffect(playerState.player) {
-            Logger.d { "Video Player updated" }
-            avPlayerViewController.player = playerState.player
-            onDispose { }
-        }
-    }
+    val currentPlayer = (playerState as? DefaultVideoPlayerState)?.player
+
     if (playerState.hasMedia) {
         Box(
             modifier = modifier,
@@ -87,69 +76,44 @@ fun VideoPlayerSurfaceImpl(
 
             // Use the contentScale parameter to adjust the view's size and scaling behavior
             UIKitView(
-            modifier = contentScale.toCanvasModifier(
-                aspectRatio =
-                    if (playerState is DefaultVideoPlayerState)
-                        playerState.videoAspectRatio.toFloat()
-                    else 16.0f / 9.0f
-                ,
-                width = playerState.metadata.width,
-                height = playerState.metadata.height
-            ),
+                modifier = contentScale.toCanvasModifier(
+                    aspectRatio =
+                        if (playerState is DefaultVideoPlayerState)
+                            playerState.videoAspectRatio.toFloat()
+                        else 16.0f / 9.0f,
+                    width = playerState.metadata.width,
+                    height = playerState.metadata.height
+                ),
                 factory = {
-                    UIView().apply {
+                    PlayerUIView(frame = cValue<CGRect>()).apply {
+                        player = currentPlayer
                         backgroundColor = UIColor.blackColor
                         clipsToBounds = true
-
-                        avPlayerViewController.view.translatesAutoresizingMaskIntoConstraints = false
-                        addSubview(avPlayerViewController.view)
-
-                        NSLayoutConstraint.activateConstraints(
-                            listOf(
-                                avPlayerViewController.view.topAnchor.constraintEqualToAnchor(this.topAnchor),
-                                avPlayerViewController.view.leadingAnchor.constraintEqualToAnchor(this.leadingAnchor),
-                                avPlayerViewController.view.trailingAnchor.constraintEqualToAnchor(this.trailingAnchor),
-                                avPlayerViewController.view.bottomAnchor.constraintEqualToAnchor(this.bottomAnchor)
-                            )
-                        )
-
-                        // Set the videoGravity based on the ContentScale
-                        // Map ContentScale to AVLayerVideoGravity
-                        val videoGravity = when (contentScale) {
-                            ContentScale.Crop,
-                            ContentScale.FillHeight -> AVLayerVideoGravityResizeAspectFill
-                            ContentScale.FillWidth   -> AVLayerVideoGravityResizeAspectFill
-                            ContentScale.FillBounds  -> AVLayerVideoGravityResize
-                            ContentScale.Fit,
-                            ContentScale.Inside      -> AVLayerVideoGravityResizeAspect
-                            else                     -> AVLayerVideoGravityResizeAspect
-                        }
-
-                        // Set the videoGravity directly on the AVPlayerViewController
-                        avPlayerViewController.videoGravity = videoGravity
-
-                        Logger.d { "View configured with contentScale: $contentScale, videoGravity: $videoGravity" }
                     }
                 },
-                update = { containerView ->
+                update = { playerView ->
+                    playerView.player = currentPlayer
+
                     // Hide or show the view depending on the presence of media
-                    containerView.hidden = !playerState.hasMedia
+                    playerView.hidden = !playerState.hasMedia
 
                     // Update the videoGravity when contentScale changes
                     val videoGravity = when (contentScale) {
                         ContentScale.Crop,
                         ContentScale.FillHeight -> AVLayerVideoGravityResizeAspectFill   // ⬅️ changement
-                        ContentScale.FillWidth   -> AVLayerVideoGravityResizeAspectFill   // (même logique)
-                        ContentScale.FillBounds  -> AVLayerVideoGravityResize             // pas d’aspect-ratio
+                        ContentScale.FillWidth -> AVLayerVideoGravityResizeAspectFill   // (même logique)
+                        ContentScale.FillBounds -> AVLayerVideoGravityResize             // pas d’aspect-ratio
                         ContentScale.Fit,
-                        ContentScale.Inside      -> AVLayerVideoGravityResizeAspect
-                        else                     -> AVLayerVideoGravityResizeAspect
-                    }
-                    avPlayerViewController.videoGravity = videoGravity
+                        ContentScale.Inside -> AVLayerVideoGravityResizeAspect
 
-                    containerView.setNeedsLayout()
-                    containerView.layoutIfNeeded()
-                    avPlayerViewController.view.setFrame(containerView.bounds)
+                        else -> AVLayerVideoGravityResizeAspect
+                    }
+                    playerView.videoGravity = videoGravity
+
+                    Logger.d { "View configured with contentScale: $contentScale, videoGravity: $videoGravity" }
+                },
+                onRelease = { playerView ->
+                    playerView.player = null
                 }
             )
 
@@ -189,3 +153,26 @@ fun VideoPlayerSurfaceImpl(
         }
     }
 }
+
+@OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
+private class PlayerUIView : UIView {
+    companion object : UIViewMeta() {
+        override fun layerClass(): ObjCClass = AVPlayerLayer
+    }
+
+    constructor(frame: CValue<CGRect>) : super(frame)
+    constructor(coder: NSCoder) : super(coder)
+
+    var player: AVPlayer?
+        get() = (layer as? AVPlayerLayer)?.player
+        set(value) {
+            (layer as? AVPlayerLayer)?.player = value
+        }
+
+    var videoGravity: String?
+        get() = (layer as? AVPlayerLayer)?.videoGravity
+        set(value) {
+            (layer as? AVPlayerLayer)?.videoGravity = value
+        }
+}
+
