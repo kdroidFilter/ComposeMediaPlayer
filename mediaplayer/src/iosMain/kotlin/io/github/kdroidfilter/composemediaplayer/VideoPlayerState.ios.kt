@@ -24,6 +24,7 @@ import platform.AVFAudio.setActive
 import platform.AVFoundation.*
 import platform.CoreGraphics.CGFloat
 import platform.CoreMedia.CMTimeGetSeconds
+import platform.CoreMedia.CMTimeMake
 import platform.CoreMedia.CMTimeMakeWithSeconds
 import platform.Foundation.NSKeyValueChangeNewKey
 import platform.Foundation.NSKeyValueObservingOptionNew
@@ -33,10 +34,11 @@ import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSURL
 import platform.Foundation.addObserver
 import platform.Foundation.removeObserver
+import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDidEnterBackgroundNotification
 import platform.UIKit.UIApplicationWillEnterForegroundNotification
-import platform.UIKit.UIApplication
 import platform.darwin.DISPATCH_QUEUE_PRIORITY_DEFAULT
+import platform.darwin.NSEC_PER_SEC
 import platform.darwin.NSObject
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_global_queue
@@ -128,6 +130,9 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     
     // Flag to track if player was playing before going to background
     private var wasPlayingBeforeBackground: Boolean = false
+    
+    // Flag to track if the state has been disposed
+    private var isDisposed = false
 
     // Internal time values (in seconds)
     private var _currentTime: Double = 0.0
@@ -159,7 +164,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     private fun startPositionUpdates(player: AVPlayer) {
-        val interval = CMTimeMakeWithSeconds(1.0 / 60.0, 600) // approx. 60 fps
+        val interval = CMTimeMakeWithSeconds(1.0 / 60.0, NSEC_PER_SEC.toInt()) // approx. 60 fps
         timeObserverToken = player.addPeriodicTimeObserverForInterval(
             interval = interval,
             queue = dispatch_get_main_queue(),
@@ -452,6 +457,12 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
             // Update UI on the main thread
             dispatch_async(dispatch_get_main_queue()) {
+                // Check if disposed
+                if (isDisposed) {
+                    Logger.d { "player disposed, canceling initialization" }
+                    return@dispatch_async
+                }
+
                 // Clean up any existing player before creating the new one
                 cleanupCurrentPlayer()
 
@@ -532,10 +543,17 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             _isLoading = true
 
             val targetTime = _duration * (value / 1000.0)
-            val seekTime = CMTimeMakeWithSeconds(targetTime, 600)
+            val seekTime = CMTimeMakeWithSeconds(targetTime, NSEC_PER_SEC.toInt())
             val wasPlaying = _isPlaying
 
-            currentPlayer.seekToTime(seekTime) { finished ->
+            // Create a zero time value for tolerance to ensure precise seeking
+            val zeroTime = CMTimeMake(0, 1)
+
+            currentPlayer.seekToTime(
+                time = seekTime,
+                toleranceBefore = zeroTime,
+                toleranceAfter = zeroTime
+            ) { finished ->
                 if (finished) {
                     dispatch_async(dispatch_get_main_queue()) {
                         _isLoading = false
@@ -547,7 +565,6 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             }
         }
     }
-
 
     override fun clearError() {
         Logger.d { "clearError called" }
@@ -563,6 +580,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
     override fun dispose() {
         Logger.d { "dispose called" }
+        isDisposed = true
         cleanupCurrentPlayer()
         _hasMedia = false
         _isPlaying = false

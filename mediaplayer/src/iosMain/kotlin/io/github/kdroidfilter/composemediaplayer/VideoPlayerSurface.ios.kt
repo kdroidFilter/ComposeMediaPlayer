@@ -68,19 +68,14 @@ fun VideoPlayerSurfaceImpl(
 
     val currentPlayer = (playerState as? DefaultVideoPlayerState)?.player
 
-    if (playerState.hasMedia) {
-        Box(
-            modifier = modifier,
-            contentAlignment = Alignment.Center
-        ) {
-
-            // Use the contentScale parameter to adjust the view's size and scaling behavior
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        if (playerState.hasMedia) {
             UIKitView(
                 modifier = contentScale.toCanvasModifier(
-                    aspectRatio =
-                        if (playerState is DefaultVideoPlayerState)
-                            playerState.videoAspectRatio.toFloat()
-                        else 16.0f / 9.0f,
+                    aspectRatio = playerState.aspectRatio,
                     width = playerState.metadata.width,
                     height = playerState.metadata.height
                 ),
@@ -136,12 +131,12 @@ fun VideoPlayerSurfaceImpl(
                     backgroundColor = playerState.subtitleBackgroundColor
                 )
             }
+        }
 
-            // Render the overlay content on top of the video with fillMaxSize modifier
-            // to ensure it takes the full height of the parent Box
-            Box(modifier = Modifier.fillMaxSize()) {
-                overlay()
-            }
+        // Render the overlay content on top of the video with fillMaxSize modifier
+        // to ensure it takes the full height of the parent Box
+        Box(modifier = Modifier.fillMaxSize()) {
+            overlay()
         }
     }
 
