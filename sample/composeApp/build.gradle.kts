@@ -73,6 +73,7 @@ kotlin {
             implementation(libs.compose.ui.tooling.preview)
             implementation(libs.compose.material.icons.extended)
             implementation(project(":mediaplayer"))
+            implementation(project(":audioplayer"))
             implementation(libs.filekit.dialogs.compose)
         }
 
@@ -137,5 +138,4 @@ nucleus.application {
         )
     }
 }
-
 

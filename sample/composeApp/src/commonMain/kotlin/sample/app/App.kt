@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -36,6 +37,7 @@ private enum class Screen(val label: String, val icon: ImageVector) {
     Player("Player", Icons.Default.PlayCircle),
     Gallery("Gallery", Icons.AutoMirrored.Filled.List),
     Feed("Feed", Icons.AutoMirrored.Filled.Article),
+    Audio("Audio", Icons.Default.MusicNote),
 }
 
 @Composable
@@ -103,5 +105,6 @@ private fun ScreenContent(screen: Screen, modifier: Modifier, playerState: Video
         Screen.Player -> PlayerScreen(modifier, playerState)
         Screen.Gallery -> GalleryScreen(modifier)
         Screen.Feed -> FeedScreen(modifier)
+        Screen.Audio -> AudioPlayerScreen(modifier)
     }
 }

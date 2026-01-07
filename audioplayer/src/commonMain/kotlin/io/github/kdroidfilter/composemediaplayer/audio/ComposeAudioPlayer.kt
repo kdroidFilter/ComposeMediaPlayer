@@ -145,25 +145,6 @@ fun ComposeAudioPlayer.isPlaying(): Boolean = currentPlayerState() in listOf(Com
 
 
 /**
- * Provides a stateful instance of [ComposeAudioPlayer] that is remembered across recompositions.
- *
- * The state is managed such that it is automatically released when the composable leaves the composition,
- * ensuring proper cleanup of resources.
- *
- * @return A remembered instance of [ComposeAudioPlayer], which represents a minimalistic audio player.
- */
-@Composable
-fun rememberAudioPlayerState(): ComposeAudioPlayer {
-    val player = remember { ComposeAudioPlayer() }
-    DisposableEffect(Unit) {
-        onDispose {
-            player.release()
-        }
-    }
-    return player
-}
-
-/**
  * Creates and remembers an instance of [ComposeAudioPlayerLiveState] that monitors and updates the state,
  * volume, position, and duration of a [ComposeAudioPlayer]. The player state is updated periodically
  * and cleans up resources when no longer needed.
@@ -172,7 +153,7 @@ fun rememberAudioPlayerState(): ComposeAudioPlayer {
  * playback position, and duration.
  */
 @Composable
-fun rememberGadulkaLiveState(): ComposeAudioPlayerLiveState {
+fun rememberAudioPlayerLiveState(): ComposeAudioPlayerLiveState {
     val player = remember { ComposeAudioPlayer() }
     var state by remember { mutableStateOf(ComposeAudioPlayerState.IDLE) }
     var volume by remember { mutableStateOf(0f) }
