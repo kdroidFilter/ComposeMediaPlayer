@@ -67,6 +67,7 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.components.uiToolingPreview)
             implementation(project(":mediaplayer"))
+            implementation(project(":audioplayer"))
             implementation(compose.materialIconsExtended)
             implementation(libs.filekit.dialogs.compose)
             implementation(libs.platformtools.darkmodedetector)
@@ -147,4 +148,3 @@ tasks.register<Exec>("runIos") {
 dependencies {
     debugImplementation(compose.uiTooling)
 }
-

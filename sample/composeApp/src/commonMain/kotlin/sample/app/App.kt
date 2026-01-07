@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +42,12 @@ fun App() {
                         selected = currentScreen == Screen.VideoAttachmentPlayer,
                         onClick = { currentScreen = Screen.VideoAttachmentPlayer }
                     )
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.MusicNote, contentDescription = "Audio Player") },
+                        label = { Text("Audio Player") },
+                        selected = currentScreen == Screen.AudioPlayer,
+                        onClick = { currentScreen = Screen.AudioPlayer }
+                    )
                 }
             }
         ) { paddingValues ->
@@ -54,6 +61,7 @@ fun App() {
                     Screen.SinglePlayer -> SinglePlayerScreen()
                     Screen.MultiPlayer -> MultiPlayerScreen()
                     Screen.VideoAttachmentPlayer -> VideoAttachmentPlayerScreen()
+                    Screen.AudioPlayer -> AudioPlayerScreen()
                 }
             }
         }
