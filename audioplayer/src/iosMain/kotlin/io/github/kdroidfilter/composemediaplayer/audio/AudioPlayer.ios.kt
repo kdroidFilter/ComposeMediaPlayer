@@ -19,7 +19,7 @@ import platform.Foundation.NSURL
 import platform.darwin.NSEC_PER_SEC
 
 @Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-actual class ComposeAudioPlayer actual constructor() {
+actual class AudioPlayer actual constructor() {
     private var player: AVPlayer? = null
     private var playerObserver: CupertinoAVPlayerObserver? = null
     private var errorListener: ErrorListener? = null
@@ -48,7 +48,7 @@ actual class ComposeAudioPlayer actual constructor() {
     actual fun play() {
         // https://developer.apple.com/documentation/avfoundation/avplayer/play()
         if (player?.currentItem != null) {
-            if (currentPlayerState() == ComposeAudioPlayerState.IDLE)
+            if (currentPlayerState() == AudioPlayerState.IDLE)
                 seekTo(0)
             player?.play()
             lastVolume?.let { player?.volume = it }
@@ -67,7 +67,7 @@ actual class ComposeAudioPlayer actual constructor() {
     actual fun stop() {
         player?.pause()
         player?.replaceCurrentItemWithPlayerItem(null)
-        _state = ComposeAudioPlayerState.IDLE
+        _state = AudioPlayerState.IDLE
     }
 
     actual fun pause() {
@@ -129,11 +129,11 @@ actual class ComposeAudioPlayer actual constructor() {
         player?.seekToTime(duration)
     }
 
-    actual fun currentPlayerState(): ComposeAudioPlayerState? {
+    actual fun currentPlayerState(): AudioPlayerState? {
         return _state
     }
 
-    private var _state: ComposeAudioPlayerState? = null
+    private var _state: AudioPlayerState? = null
 
 
     private fun setup() {
@@ -151,18 +151,18 @@ actual class ComposeAudioPlayer actual constructor() {
                 val waitingToPlayAtRate =
                     player?.timeControlStatus == AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate
                 _state = when {
-                    rate > 0 -> ComposeAudioPlayerState.PLAYING
-                    !hasItem -> ComposeAudioPlayerState.IDLE
-                    avStatus == AVPlayerItemStatusFailed -> ComposeAudioPlayerState.IDLE
-                    !bufferingEnding || bufferIsEmpty || waitingToPlayAtRate -> ComposeAudioPlayerState.BUFFERING
-                    else -> ComposeAudioPlayerState.PAUSED
+                    rate > 0 -> AudioPlayerState.PLAYING
+                    !hasItem -> AudioPlayerState.IDLE
+                    avStatus == AVPlayerItemStatusFailed -> AudioPlayerState.IDLE
+                    !bufferingEnding || bufferIsEmpty || waitingToPlayAtRate -> AudioPlayerState.BUFFERING
+                    else -> AudioPlayerState.PAUSED
                 }
             },
             onAVPlayerEnded = {
-                _state = ComposeAudioPlayerState.IDLE
+                _state = AudioPlayerState.IDLE
             },
             onAVPlayerStalled = {
-                _state = ComposeAudioPlayerState.BUFFERING
+                _state = AudioPlayerState.BUFFERING
             },
             onAVPlayerError = {
                 errorListener?.onError(it)

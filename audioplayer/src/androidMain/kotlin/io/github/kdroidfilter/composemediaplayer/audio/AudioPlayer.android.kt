@@ -16,7 +16,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.kdroid.androidcontextprovider.ContextProvider
 
 @Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-actual class ComposeAudioPlayer actual constructor() {
+actual class AudioPlayer actual constructor() {
 
     private var mediaPlayer = ExoPlayer.Builder(ContextProvider.getContext()).build()
     private var errorListener: ErrorListener? = null
@@ -42,7 +42,7 @@ actual class ComposeAudioPlayer actual constructor() {
     @OptIn(UnstableApi::class)
     actual fun play() {
         if(mediaPlayer.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)) {
-            if (currentPlayerState() == ComposeAudioPlayerState.IDLE)
+            if (currentPlayerState() == AudioPlayerState.IDLE)
                 seekTo(0)
             mediaPlayer.play()
         }
@@ -75,7 +75,7 @@ actual class ComposeAudioPlayer actual constructor() {
     }
 
     @UnstableApi
-    actual fun currentPlayerState(): ComposeAudioPlayerState? {
+    actual fun currentPlayerState(): AudioPlayerState? {
         if (mediaPlayer.isReleased) {
             return null
         }
@@ -83,12 +83,12 @@ actual class ComposeAudioPlayer actual constructor() {
         val state = mediaPlayer.playbackState
         val playWhenReady = mediaPlayer.playWhenReady
         return when {
-            state == Player.STATE_READY && playWhenReady -> ComposeAudioPlayerState.PLAYING
-            state == Player.STATE_READY && !playWhenReady -> ComposeAudioPlayerState.PAUSED
-            state == Player.STATE_BUFFERING -> ComposeAudioPlayerState.BUFFERING
-            state == Player.STATE_IDLE -> ComposeAudioPlayerState.IDLE
-            state == Player.STATE_ENDED -> ComposeAudioPlayerState.IDLE
-            else -> ComposeAudioPlayerState.IDLE
+            state == Player.STATE_READY && playWhenReady -> AudioPlayerState.PLAYING
+            state == Player.STATE_READY && !playWhenReady -> AudioPlayerState.PAUSED
+            state == Player.STATE_BUFFERING -> AudioPlayerState.BUFFERING
+            state == Player.STATE_IDLE -> AudioPlayerState.IDLE
+            state == Player.STATE_ENDED -> AudioPlayerState.IDLE
+            else -> AudioPlayerState.IDLE
         }
     }
 

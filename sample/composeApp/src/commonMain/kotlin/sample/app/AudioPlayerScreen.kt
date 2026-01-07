@@ -27,7 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.unit.dp
-import io.github.kdroidfilter.composemediaplayer.audio.ComposeAudioPlayerState
+import io.github.kdroidfilter.composemediaplayer.audio.AudioPlayerState
 import io.github.kdroidfilter.composemediaplayer.audio.ErrorListener
 import io.github.kdroidfilter.composemediaplayer.audio.rememberAudioPlayerLiveState
 import io.github.kdroidfilter.composemediaplayer.util.getUri
@@ -122,7 +122,7 @@ private fun AudioPlayerScreenCore() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    val isIdle = audioState.state == ComposeAudioPlayerState.IDLE
+                    val isIdle = audioState.state == AudioPlayerState.IDLE
                     when (selectedSource) {
                         AudioSource.Local -> {
                             val uri = selectedFile?.getUri()
@@ -152,13 +152,13 @@ private fun AudioPlayerScreenCore() {
             }
             Button(
                 onClick = { audioState.player.pause() },
-                enabled = audioState.state == ComposeAudioPlayerState.PLAYING
+                enabled = audioState.state == AudioPlayerState.PLAYING
             ) {
                 Text("Pause")
             }
             Button(
                 onClick = { audioState.player.stop() },
-                enabled = audioState.state != ComposeAudioPlayerState.IDLE
+                enabled = audioState.state != AudioPlayerState.IDLE
             ) {
                 Text("Stop")
             }

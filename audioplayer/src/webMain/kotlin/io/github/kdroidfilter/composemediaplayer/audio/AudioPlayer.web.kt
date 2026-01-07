@@ -15,10 +15,10 @@ import kotlin.uuid.Uuid
 
 @Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
 @OptIn(ExperimentalUuidApi::class)
-actual class ComposeAudioPlayer actual constructor() {
+actual class AudioPlayer actual constructor() {
 
     private val htmlId = Uuid.random().toString()
-    private var _state: ComposeAudioPlayerState? = ComposeAudioPlayerState.IDLE
+    private var _state: AudioPlayerState? = AudioPlayerState.IDLE
     private val events = mutableListOf<() -> Unit>()
     private var lastVolume: Double? = null
     private var lastRate: Double? = null
@@ -27,12 +27,12 @@ actual class ComposeAudioPlayer actual constructor() {
     private fun attachEventListeners(el: HTMLAudioElement) {
         detachEventListeners()
 
-        val onPlaying: (Event) -> Unit = { _state = ComposeAudioPlayerState.PLAYING }
-        val onPlay: (Event) -> Unit = { _state = ComposeAudioPlayerState.PLAYING }
-        val onPause: (Event) -> Unit = { _state = ComposeAudioPlayerState.PAUSED }
-        val onEnded: (Event) -> Unit = { _state = ComposeAudioPlayerState.IDLE }
-        val onWaiting: (Event) -> Unit = { _state = ComposeAudioPlayerState.BUFFERING }
-        val onStalled: (Event) -> Unit = { _state = ComposeAudioPlayerState.BUFFERING }
+        val onPlaying: (Event) -> Unit = { _state = AudioPlayerState.PLAYING }
+        val onPlay: (Event) -> Unit = { _state = AudioPlayerState.PLAYING }
+        val onPause: (Event) -> Unit = { _state = AudioPlayerState.PAUSED }
+        val onEnded: (Event) -> Unit = { _state = AudioPlayerState.IDLE }
+        val onWaiting: (Event) -> Unit = { _state = AudioPlayerState.BUFFERING }
+        val onStalled: (Event) -> Unit = { _state = AudioPlayerState.BUFFERING }
         val onError: (Event) -> Unit = { errorListener?.onError(null) }
 
         el.addEventListener("playing", onPlaying)
@@ -82,12 +82,12 @@ actual class ComposeAudioPlayer actual constructor() {
     actual fun stop() {
         getPlayerElement()?.pause()
         getPlayerElement()?.currentTime = 0.0
-        _state = ComposeAudioPlayerState.IDLE
+        _state = AudioPlayerState.IDLE
     }
 
     actual fun pause() {
         getPlayerElement()?.pause()
-        _state = ComposeAudioPlayerState.PAUSED
+        _state = AudioPlayerState.PAUSED
     }
 
     /**
@@ -123,7 +123,7 @@ actual class ComposeAudioPlayer actual constructor() {
         return null
     }
 
-    actual fun currentPlayerState(): ComposeAudioPlayerState? {
+    actual fun currentPlayerState(): AudioPlayerState? {
         // https://developer.mozilla.org/en-US/docs/Web/HTML/Element/audio#events
         return _state
     }

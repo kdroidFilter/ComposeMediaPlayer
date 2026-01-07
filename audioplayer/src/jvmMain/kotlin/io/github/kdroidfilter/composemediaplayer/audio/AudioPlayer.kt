@@ -12,12 +12,12 @@ import java.net.URI
 import java.nio.file.Paths
 
 @Suppress(names = ["EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING"])
-actual class ComposeAudioPlayer actual constructor() {
+actual class AudioPlayer actual constructor() {
     private var player: RodioPlayer? = RodioPlayer()
     private var errorListener: ErrorListener? = null
     private var lastVolume: Float? = null
     @Volatile
-    private var state: ComposeAudioPlayerState? = ComposeAudioPlayerState.IDLE
+    private var state: AudioPlayerState? = AudioPlayerState.IDLE
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var playbackJob: Job? = null
@@ -25,10 +25,10 @@ actual class ComposeAudioPlayer actual constructor() {
     private val callback = object : PlaybackCallback {
         override fun onEvent(event: PlaybackEvent) {
             state = when (event) {
-                PlaybackEvent.CONNECTING -> ComposeAudioPlayerState.BUFFERING
-                PlaybackEvent.PLAYING -> ComposeAudioPlayerState.PLAYING
-                PlaybackEvent.PAUSED -> ComposeAudioPlayerState.PAUSED
-                PlaybackEvent.STOPPED -> ComposeAudioPlayerState.IDLE
+                PlaybackEvent.CONNECTING -> AudioPlayerState.BUFFERING
+                PlaybackEvent.PLAYING -> AudioPlayerState.PLAYING
+                PlaybackEvent.PAUSED -> AudioPlayerState.PAUSED
+                PlaybackEvent.STOPPED -> AudioPlayerState.IDLE
             }
         }
 
@@ -36,7 +36,7 @@ actual class ComposeAudioPlayer actual constructor() {
         }
 
         override fun onError(message: String) {
-            state = ComposeAudioPlayerState.IDLE
+            state = AudioPlayerState.IDLE
             errorListener?.onError(message)
         }
     }
@@ -57,7 +57,7 @@ actual class ComposeAudioPlayer actual constructor() {
                 }
                 lastVolume?.let { localPlayer.setVolume(it) }
             }.onFailure { error ->
-                state = ComposeAudioPlayerState.IDLE
+                state = AudioPlayerState.IDLE
                 errorListener?.onError(error.message)
             }
         }
@@ -66,7 +66,7 @@ actual class ComposeAudioPlayer actual constructor() {
     actual fun play() {
         val localPlayer = player ?: return
         val current = currentPlayerState()
-        if (current == null || current == ComposeAudioPlayerState.IDLE) return
+        if (current == null || current == AudioPlayerState.IDLE) return
         runCatching { localPlayer.play() }
             .onFailure { errorListener?.onError(it.message) }
     }
@@ -75,14 +75,14 @@ actual class ComposeAudioPlayer actual constructor() {
         val localPlayer = player ?: return
         runCatching { localPlayer.stop() }
             .onFailure { errorListener?.onError(it.message) }
-        state = ComposeAudioPlayerState.IDLE
+        state = AudioPlayerState.IDLE
     }
 
     actual fun pause() {
         val localPlayer = player ?: return
         runCatching { localPlayer.pause() }
             .onFailure { errorListener?.onError(it.message) }
-        state = ComposeAudioPlayerState.PAUSED
+        state = AudioPlayerState.PAUSED
     }
 
     actual fun release() {
@@ -107,15 +107,15 @@ actual class ComposeAudioPlayer actual constructor() {
         return runCatching { localPlayer.getDurationMs() }.getOrNull()
     }
 
-    actual fun currentPlayerState(): ComposeAudioPlayerState? {
+    actual fun currentPlayerState(): AudioPlayerState? {
         val localPlayer = player ?: return null
         val snapshot = state ?: return null
-        if (snapshot == ComposeAudioPlayerState.BUFFERING) return snapshot
+        if (snapshot == AudioPlayerState.BUFFERING) return snapshot
         val isEmpty = runCatching { localPlayer.isEmpty() }.getOrDefault(true)
-        if (isEmpty) return ComposeAudioPlayerState.IDLE
+        if (isEmpty) return AudioPlayerState.IDLE
         val isPaused = runCatching { localPlayer.isPaused() }.getOrDefault(false)
-        if (isPaused) return ComposeAudioPlayerState.PAUSED
-        return ComposeAudioPlayerState.PLAYING
+        if (isPaused) return AudioPlayerState.PAUSED
+        return AudioPlayerState.PLAYING
     }
 
     actual fun currentVolume(): Float? {
@@ -152,7 +152,7 @@ actual class ComposeAudioPlayer actual constructor() {
             runCatching { newPlayer.setVolume(volume) }
         }
         player = newPlayer
-        state = ComposeAudioPlayerState.IDLE
+        state = AudioPlayerState.IDLE
         return newPlayer
     }
 

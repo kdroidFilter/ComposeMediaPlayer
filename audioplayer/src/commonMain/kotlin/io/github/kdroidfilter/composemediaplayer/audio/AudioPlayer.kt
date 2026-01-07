@@ -21,7 +21,7 @@ player.release()
 ```
  */
 @Suppress("EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING")
-expect class ComposeAudioPlayer() {
+expect class AudioPlayer() {
     /**
      * Start playback of the audio resource at the provided [url].
      *
@@ -92,7 +92,7 @@ expect class ComposeAudioPlayer() {
      *
      * @return The current state like [PLAYING], [BUFFERING], [IDLE], [PAUASED].
      */
-    fun currentPlayerState(): ComposeAudioPlayerState?
+    fun currentPlayerState(): AudioPlayerState?
 
     /**
      * Retrieves the current volume level of the player.
@@ -141,12 +141,12 @@ expect class ComposeAudioPlayer() {
  *
  * @return `true` if the player is in the PLAYING or BUFFERING state, otherwise `false`.
  */
-fun ComposeAudioPlayer.isPlaying(): Boolean = currentPlayerState() in listOf(ComposeAudioPlayerState.PLAYING, ComposeAudioPlayerState.BUFFERING)
+fun AudioPlayer.isPlaying(): Boolean = currentPlayerState() in listOf(AudioPlayerState.PLAYING, AudioPlayerState.BUFFERING)
 
 
 /**
  * Creates and remembers an instance of [ComposeAudioPlayerLiveState] that monitors and updates the state,
- * volume, position, and duration of a [ComposeAudioPlayer]. The player state is updated periodically
+ * volume, position, and duration of a [AudioPlayer]. The player state is updated periodically
  * and cleans up resources when no longer needed.
  *
  * @return A [ComposeAudioPlayerLiveState] object containing the player instance, its current state, volume,
@@ -154,8 +154,8 @@ fun ComposeAudioPlayer.isPlaying(): Boolean = currentPlayerState() in listOf(Com
  */
 @Composable
 fun rememberAudioPlayerLiveState(): ComposeAudioPlayerLiveState {
-    val player = remember { ComposeAudioPlayer() }
-    var state by remember { mutableStateOf(ComposeAudioPlayerState.IDLE) }
+    val player = remember { AudioPlayer() }
+    var state by remember { mutableStateOf(AudioPlayerState.IDLE) }
     var volume by remember { mutableStateOf(0f) }
     var position by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
@@ -163,7 +163,7 @@ fun rememberAudioPlayerLiveState(): ComposeAudioPlayerLiveState {
     LaunchedEffect(Unit) {
         while (true) {
             // Fetch or update the data
-            state = player.currentPlayerState() ?: ComposeAudioPlayerState.IDLE
+            state = player.currentPlayerState() ?: AudioPlayerState.IDLE
             volume = player.currentVolume() ?: 0f
             position = player.currentPosition() ?: 0L
             duration = player.currentDuration() ?: 0L
@@ -188,8 +188,8 @@ fun rememberAudioPlayerLiveState(): ComposeAudioPlayerLiveState {
 
 
 data class ComposeAudioPlayerLiveState(
-    val player: ComposeAudioPlayer,
-    val state: ComposeAudioPlayerState,
+    val player: AudioPlayer,
+    val state: AudioPlayerState,
     val volume: Float,
     val position: Long,
     val duration: Long
