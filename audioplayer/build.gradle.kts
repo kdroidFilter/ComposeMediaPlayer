@@ -61,6 +61,8 @@ kotlin {
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.slf4j.simple)
+            implementation(libs.rodio)
+
         }
 
         jvmTest.dependencies {
