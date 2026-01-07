@@ -5,7 +5,7 @@
 
 package io.github.kdroidfilter.composemediaplayer.audio
 
-enum class ComposeAudioPlayerState {
+enum class AudioPlayerState {
     PLAYING,
     PAUSED,
     BUFFERING,
