@@ -114,6 +114,9 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     var player: AVPlayer? by mutableStateOf(null)
         private set
 
+    var playerLayer: AVPlayerLayer? by mutableStateOf(null)
+        internal set
+
     // Periodic observer for position updates (≈60 fps)
     private var timeObserverToken: Any? = null
 

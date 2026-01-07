@@ -84,6 +84,8 @@ fun VideoPlayerSurfaceImpl(
                         player = currentPlayer
                         backgroundColor = UIColor.blackColor
                         clipsToBounds = true
+
+                        (playerState as? DefaultVideoPlayerState)?.playerLayer = layer as? AVPlayerLayer
                     }
                 },
                 update = { playerView ->
