@@ -45,9 +45,16 @@ kotlin {
         binaries.executable()
     }
 
-    iosX64()
-    iosArm64()
-    iosSimulatorArm64()
+    listOf(
+        iosArm64(),
+        iosSimulatorArm64(),
+        iosX64(),
+    ).forEach { target ->
+        target.compilations.getByName("main") {
+            // The default file path is src/nativeInterop/cinterop/<interop-name>.def
+            val nskeyvalueobserving by cinterops.creating
+        }
+    }
 
 
     cocoapods {

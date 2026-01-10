@@ -14,18 +14,34 @@ import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.PlatformFile
+import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
+import platform.AVFAudio.AVAudioSession
+import platform.AVFAudio.AVAudioSessionCategoryPlayback
+import platform.AVFAudio.AVAudioSessionModeMoviePlayback
+import platform.AVFAudio.setActive
 import platform.AVFoundation.*
 import platform.CoreGraphics.CGFloat
 import platform.CoreMedia.CMTimeGetSeconds
+import platform.CoreMedia.CMTimeMake
 import platform.CoreMedia.CMTimeMakeWithSeconds
+import platform.Foundation.NSKeyValueChangeNewKey
+import platform.Foundation.NSKeyValueObservingOptionNew
+import platform.Foundation.NSKeyValueObservingOptions
+import platform.Foundation.NSKeyValueObservingProtocol
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSURL
+import platform.Foundation.addObserver
+import platform.Foundation.removeObserver
+import platform.UIKit.UIApplication
 import platform.UIKit.UIApplicationDidEnterBackgroundNotification
 import platform.UIKit.UIApplicationWillEnterForegroundNotification
-import platform.UIKit.UIApplication
+import platform.darwin.DISPATCH_QUEUE_PRIORITY_DEFAULT
+import platform.darwin.NSEC_PER_SEC
+import platform.darwin.NSObject
 import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_global_queue
 import platform.darwin.dispatch_get_main_queue
 
 actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState()
@@ -53,36 +69,6 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         set(value) {
             _loop = value
             Logger.d { "Loop setting changed to: $value" }
-
-            // If we have an active player, update its loop behavior
-            player?.let { player ->
-                // In iOS, we need to recreate the end observer with the new loop setting
-                // First, remove the existing observer
-                endObserver?.let {
-                    NSNotificationCenter.defaultCenter.removeObserver(it)
-                    endObserver = null
-                }
-
-                // Then create a new observer with the updated loop setting
-                endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
-                    name = AVPlayerItemDidPlayToEndTimeNotification,
-                    `object` = player.currentItem,
-                    queue = null
-                ) { _ ->
-                    if (userInitiatedPause) return@addObserverForName
-                    if (_duration > 0 && (_duration - _currentTime) > 0.1) {
-                        return@addObserverForName
-                    }
-                    if (_loop) {
-                        player.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
-                        player.rate = _playbackSpeed
-                        player.play()
-                    } else {
-                        player.pause()
-                        _isPlaying = false
-                    }
-                }
-            }
         }
 
     // Playback speed control
@@ -91,7 +77,10 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         get() = _playbackSpeed
         set(value) {
             _playbackSpeed = value.coerceIn(0.5f, 2.0f)
-            player?.rate = _playbackSpeed
+            // Only update player rate if we are playing to avoid auto-play
+            if (_isPlaying) {
+                player?.rate = _playbackSpeed
+            }
         }
 
     // Playback states
@@ -125,32 +114,33 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     var player: AVPlayer? by mutableStateOf(null)
         private set
 
+    var playerLayer: AVPlayerLayer? by mutableStateOf(null)
+        internal set
+
     // Periodic observer for position updates (≈60 fps)
     private var timeObserverToken: Any? = null
 
-    // Keep track of which player instance added the time observer
-    private var timeObserverPlayer: AVPlayer? = null
+    // KVO Observers
+    private var timeControlStatusObserver: NSObject? = null
+    private var statusObserver: NSObject? = null
 
     // End-of-playback notification observer
     private var endObserver: Any? = null
 
-    // Stalled playback notification observer
-    private var stalledObserver: Any? = null
-    
     // App lifecycle notification observers
     private var backgroundObserver: Any? = null
     private var foregroundObserver: Any? = null
     
     // Flag to track if player was playing before going to background
     private var wasPlayingBeforeBackground: Boolean = false
+    
+    // Flag to track if the state has been disposed
+    private var isDisposed = false
 
     // Internal time values (in seconds)
     private var _currentTime: Double = 0.0
     private var _duration: Double = 0.0
     override val currentTime: Double get() = _currentTime
-
-    // Flag to indicate user-initiated pause
-    private var userInitiatedPause: Boolean = false
 
     // Audio levels (not yet implemented)
     override val leftLevel: Float = 0f
@@ -166,81 +156,124 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     // Video metadata
     private var _metadata = VideoMetadata(audioChannels = 2)
 
-    private fun startPositionUpdates() {
-        stopPositionUpdates()
-
-        // Only add observer if we have a valid player
-        player?.let { currentPlayer ->
-            val interval = CMTimeMakeWithSeconds(1.0 / 60.0, 600) // approx. 60 fps
-            timeObserverToken = currentPlayer.addPeriodicTimeObserverForInterval(
-                interval = interval,
-                queue = dispatch_get_main_queue(),
-                usingBlock = { time ->
-                    val currentSeconds = CMTimeGetSeconds(time)
-                    val durationSeconds = currentPlayer.currentItem?.duration?.let { CMTimeGetSeconds(it) } ?: 0.0
-                    _currentTime = currentSeconds
-                    _duration = durationSeconds
-
-                    // Update duration in metadata
-                    if (durationSeconds > 0 && !durationSeconds.isNaN()) {
-                        _metadata.duration = (durationSeconds * 1000).toLong()
-                    }
-
-                    if (!userDragging && durationSeconds > 0 && !currentSeconds.isNaN() && !durationSeconds.isNaN()) {
-                        sliderPos = ((currentSeconds / durationSeconds) * 1000).toFloat()
-                    }
-                    _positionText = if (currentSeconds.isNaN()) "00:00" else formatTime(currentSeconds.toFloat())
-                    _durationText = if (durationSeconds.isNaN()) "00:00" else formatTime(durationSeconds.toFloat())
-
-                    currentPlayer.currentItem?.presentationSize?.useContents {
-                        // Only update if dimensions are valid (greater than 0)
-                        if (width > 0 && height > 0) {
-                            // Try to use real aspect ratio if available, fallback to 16:9
-                            val realAspect = width / height
-                            _videoAspectRatio = realAspect
-
-                            // Update width and height in metadata if they're not already set or if they're zero
-                            if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
-                                _metadata.width = width.toInt()
-                                _metadata.height = height.toInt()
-                                Logger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
-                            }
-                        }
-                    }
-
-                    currentPlayer.currentItem?.let { item ->
-                        val isBufferEmpty = item.playbackBufferEmpty
-                        val isLikelyToKeepUp = item.playbackLikelyToKeepUp
-                        _isLoading = isBufferEmpty || !isLikelyToKeepUp
-                    } ?: run {
-                        _isLoading = false
-                    }
-                }
-            )
-
-            // Store which player instance added this observer
-            timeObserverPlayer = currentPlayer
+    private fun configureAudioSession() {
+        val session = AVAudioSession.sharedInstance()
+        try {
+            session.setCategory(AVAudioSessionCategoryPlayback, mode = AVAudioSessionModeMoviePlayback, options = 0u, error = null)
+            session.setActive(true, error = null)
+        } catch (e: Exception) {
+            Logger.e { "Failed to configure audio session: ${e.message}" }
         }
     }
 
-    private fun stopPositionUpdates() {
-        // Only remove observer if we have both token and the same player instance
-        timeObserverToken?.let { token ->
-            timeObserverPlayer?.let { observerPlayer ->
-                // Check if the current player is the same instance that added the observer
-                if (player === observerPlayer) {
-                    observerPlayer.removeTimeObserver(token)
+    private fun startPositionUpdates(player: AVPlayer) {
+        val interval = CMTimeMakeWithSeconds(1.0 / 60.0, NSEC_PER_SEC.toInt()) // approx. 60 fps
+        timeObserverToken = player.addPeriodicTimeObserverForInterval(
+            interval = interval,
+            queue = dispatch_get_main_queue(),
+            usingBlock = { time ->
+                val currentSeconds = CMTimeGetSeconds(time)
+                val durationSeconds = player.currentItem?.duration?.let { CMTimeGetSeconds(it) } ?: 0.0
+                _currentTime = currentSeconds
+                _duration = durationSeconds
+
+                // Update duration in metadata
+                if (durationSeconds > 0 && !durationSeconds.isNaN()) {
+                    _metadata.duration = (durationSeconds * 1000).toLong()
+                }
+
+                if (!(userDragging || isLoading) && durationSeconds > 0 && !currentSeconds.isNaN() && !durationSeconds.isNaN()) {
+                    sliderPos = ((currentSeconds / durationSeconds) * 1000).toFloat()
+                }
+                _positionText = if (currentSeconds.isNaN()) "00:00" else formatTime(currentSeconds.toFloat())
+                _durationText = if (durationSeconds.isNaN()) "00:00" else formatTime(durationSeconds.toFloat())
+
+                player.currentItem?.presentationSize?.useContents {
+                    // Only update if dimensions are valid (greater than 0)
+                    if (width > 0 && height > 0) {
+                        // Try to use real aspect ratio if available, fallback to 16:9
+                        val realAspect = width / height
+                        _videoAspectRatio = realAspect
+
+                        // Update width and height in metadata if they're not already set or if they're zero
+                        if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
+                            _metadata.width = width.toInt()
+                            _metadata.height = height.toInt()
+                            Logger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
+                        }
+                    }
                 }
             }
-            timeObserverToken = null
-            timeObserverPlayer = null
+        )
+    }
+
+    private fun setupObservers(player: AVPlayer, item: AVPlayerItem) {
+        // KVO for timeControlStatus (Playing, Paused, Loading)
+        timeControlStatusObserver = player.observe("timeControlStatus") { _ ->
+            when (player.timeControlStatus) {
+                AVPlayerTimeControlStatusPlaying -> {
+                    _isPlaying = true
+                    _isLoading = false
+                }
+                AVPlayerTimeControlStatusPaused -> {
+                    if (player.reasonForWaitingToPlay == null) {
+                        _isPlaying = false
+                    }
+                    _isLoading = false
+                }
+                AVPlayerTimeControlStatusWaitingToPlayAtSpecifiedRate -> {
+                    _isLoading = true
+                }
+            }
         }
+
+        // KVO for status (Ready, Failed)
+        statusObserver = item.observe("status") { _ ->
+            when (item.status) {
+                AVPlayerItemStatusReadyToPlay -> {
+                    _isLoading = false
+                    Logger.d { "Player Item Ready" }
+                }
+                AVPlayerItemStatusFailed -> {
+                    _isLoading = false
+                    _isPlaying = false
+                    Logger.e { "Player Item Failed: ${item.error?.localizedDescription}" }
+                }
+            }
+        }
+
+        // Periodic Time Observer
+        startPositionUpdates(player)
+
+        // Notification for End of Playback
+        endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
+            name = AVPlayerItemDidPlayToEndTimeNotification,
+            `object` = item,
+            queue = null
+        ) { _ ->
+            if (_loop) {
+                player.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
+                player.playImmediatelyAtRate(_playbackSpeed)
+            } else {
+                player.pause()
+                _isPlaying = false
+            }
+        }
+
+        setupAppLifecycleObservers()
+    }
+
+    private fun stopPositionUpdates() {
+        timeObserverToken?.let {
+            player?.removeTimeObserver(it)
+        }
+        timeObserverToken = null
     }
 
     private fun setupAppLifecycleObservers() {
         // Remove any existing observers first
         removeAppLifecycleObservers()
-        
+
         // Add observer for when app goes to background (screen lock)
         backgroundObserver = NSNotificationCenter.defaultCenter.addObserverForName(
             name = UIApplicationDidEnterBackgroundNotification,
@@ -273,9 +306,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
                 player?.let { player ->
                     // Only resume if the player is overridely paused
                     if (player.rate == 0.0f) {
-                        player.rate = _playbackSpeed
-                        player.play()
-                        _isPlaying = true
+                        player.playImmediatelyAtRate(_playbackSpeed)
                     }
                 }
             }
@@ -297,16 +328,22 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     private fun removeObservers() {
+        // Remove KVOs
+        timeControlStatusObserver?.let {
+            player?.removeObserver(it, forKeyPath = "timeControlStatus")
+            timeControlStatusObserver = null
+        }
+
+        statusObserver?.let {
+            player?.currentItem?.removeObserver(it, forKeyPath = "status")
+            statusObserver = null
+        }
+
         endObserver?.let {
             NSNotificationCenter.defaultCenter.removeObserver(it)
             endObserver = null
         }
 
-        stalledObserver?.let {
-            NSNotificationCenter.defaultCenter.removeObserver(it)
-            stalledObserver = null
-        }
-        
         removeAppLifecycleObservers()
     }
 
@@ -319,7 +356,6 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         player?.pause()
         player?.replaceCurrentItemWithPlayerItem(null)
         player = null
-        timeObserverPlayer = null
     }
 
     /**
@@ -345,6 +381,9 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         // Clean up the current player completely before creating a new one
         cleanupCurrentPlayer()
 
+        // Configure audio session
+        configureAudioSession()
+
         // Reset playback speed to 1.0f when opening a new video
         _playbackSpeed = 1.0f
 
@@ -354,19 +393,11 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         // Reset metadata to default values
         _metadata = VideoMetadata(audioChannels = 2)
 
-        // Create a temporary player with minimal setup to show something immediately
-        val tempPlayerItem = AVPlayerItem(nsUrl)
-        player = AVPlayer(playerItem = tempPlayerItem).apply {
-            volume = this@DefaultVideoPlayerState.volume
-            rate = 0.0f // Explicitly set rate to 0 to prevent auto-play
-            pause() // Explicitly pause to ensure it doesn't auto-play
-            allowsExternalPlayback = false // Disable AirPlay
-        }
-        _hasMedia = true
+        _hasMedia = false
         // Don't set _isPlaying to true yet, as we haven't decided whether to play or pause
 
         // Process the asset on a background thread to avoid blocking the UI
-        dispatch_async(platform.darwin.dispatch_get_global_queue(platform.darwin.DISPATCH_QUEUE_PRIORITY_DEFAULT.toLong(), 0u)) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT.toLong(), 0u)) {
             // Create an AVAsset to extract metadata
             val asset = AVURLAsset.URLAssetWithURL(nsUrl, null)
 
@@ -419,22 +450,22 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
             // Create player item from asset to get more accurate metadata
             val playerItem = AVPlayerItem(asset)
-            var durationSeconds = 0.0
-
-            // Try to get duration
-            durationSeconds = CMTimeGetSeconds(playerItem.duration)
+            val durationSeconds  = CMTimeGetSeconds(playerItem.duration)
             if (durationSeconds > 0 && !durationSeconds.isNaN()) {
                 _metadata.duration = (durationSeconds * 1000).toLong()
             }
 
             // Try to extract title from the file name
-            val fileName = nsUrl.lastPathComponent
-            if (fileName != null) {
-                _metadata.title = fileName
-            }
+            nsUrl.lastPathComponent?.let { _metadata.title = it }
 
             // Update UI on the main thread
             dispatch_async(dispatch_get_main_queue()) {
+                // Check if disposed
+                if (isDisposed) {
+                    Logger.d { "player disposed, canceling initialization" }
+                    return@dispatch_async
+                }
+
                 // Clean up any existing player before creating the new one
                 cleanupCurrentPlayer()
 
@@ -446,44 +477,22 @@ open class DefaultVideoPlayerState: VideoPlayerState {
                 }
 
                 // Create the final player with the fully loaded asset
-                player = AVPlayer(playerItem = playerItem).apply {
+                val newPlayer = AVPlayer(playerItem = playerItem).apply {
                     volume = this@DefaultVideoPlayerState.volume
                     // Don't set rate here, as it can cause auto-play
                     actionAtItemEnd = AVPlayerActionAtItemEndNone
 
-                    // Configure AVPlayer to prevent automatic pausing during configuration changes
-                    // like rotation or entering fullscreen mode
-                    automaticallyWaitsToMinimizeStalling = false
-                    
+                    // For HLS auto-playing needs to be true
+                    automaticallyWaitsToMinimizeStalling = true
+
                     // Disable AirPlay
                     allowsExternalPlayback = false
                 }
 
-                // Set up the end observer with the current loop setting
-                // This will be updated whenever the loop property changes
-                endObserver = NSNotificationCenter.defaultCenter.addObserverForName(
-                    name = AVPlayerItemDidPlayToEndTimeNotification,
-                    `object` = player?.currentItem,
-                    queue = null
-                ) { _ ->
-                    if (userInitiatedPause) return@addObserverForName
-                    if (_duration > 0 && (_duration - _currentTime) > 0.1) {
-                        return@addObserverForName
-                    }
-                    if (_loop) {
-                        player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
-                        player?.rate = _playbackSpeed
-                        player?.play()
-                    } else {
-                        player?.pause()
-                        _isPlaying = false
-                    }
-                }
+                player = newPlayer
+                _hasMedia = true
 
-                startPositionUpdates()
-                
-                // Set up app lifecycle observers
-                setupAppLifecycleObservers()
+                setupObservers(newPlayer, playerItem)
 
                 // Control initial playback state based on the parameter
                 if (initializeplayerState == InitialPlayerState.PLAY) {
@@ -491,14 +500,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
                     play()
                 } else {
                     // For PAUSE state, ensure the player is paused
-                    player?.pause()
-                    // Explicitly set rate to 0 to prevent auto-play
-                    player?.rate = 0.0f
-                    // Update state variables
-                    _isPlaying = false
-                    _hasMedia = true
-                    // Set loading to false since we're not playing
-                    _isLoading = false
+                    newPlayer.pause()
                 }
             }
         }
@@ -506,54 +508,23 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
     override fun play() {
         Logger.d { "play called" }
-        userInitiatedPause = false
         if (player == null) {
             Logger.d { "play: player is null" }
             return
         }
-        // Set loading to true when play is called
-        _isLoading = true
-        player?.volume = volume
-        player?.rate = _playbackSpeed
-
-        // Ensure the player won't pause during configuration changes like rotation
-        player?.automaticallyWaitsToMinimizeStalling = false
-        
-        // Set up app lifecycle observers
-        setupAppLifecycleObservers()
-
-        player?.play()
-        _isPlaying = true
-        _hasMedia = true
-
-        // Add a listener to detect when the player is ready to play
-        player?.currentItem?.let { item ->
-            if (item.playbackLikelyToKeepUp) {
-                _isLoading = false
-            } else {
-                // If not ready yet, add a notification observer for when it becomes ready
-                stalledObserver = NSNotificationCenter.defaultCenter.addObserverForName(
-                    name = AVPlayerItemPlaybackStalledNotification,
-                    `object` = item,
-                    queue = null
-                ) { _ ->
-                    // Check if playback is likely to keep up now
-                    if (item.playbackLikelyToKeepUp) {
-                        _isLoading = false
-                    }
-                }
-            }
-        }
+        // Configure audio session
+        configureAudioSession()
+        player?.playImmediatelyAtRate(_playbackSpeed)
+        // KVO will update isPlaying
     }
 
     override fun pause() {
         Logger.d { "pause called" }
-        userInitiatedPause = true
         // Ensure the pause call is on the main thread:
         dispatch_async(dispatch_get_main_queue()) {
             player?.pause()
         }
-        _isPlaying = false
+        // KVO will update isPlaying
     }
 
     override fun stop() {
@@ -561,6 +532,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         player?.pause()
         player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
         _isPlaying = false
+        _isLoading = false
         _hasMedia = false
 
         // Reset metadata
@@ -568,29 +540,34 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     override fun seekTo(value: Float) {
+        val currentPlayer = player ?: return
         if (_duration > 0) {
             // Set loading state to true to indicate seeking is happening
             _isLoading = true
 
             val targetTime = _duration * (value / 1000.0)
+            val seekTime = CMTimeMakeWithSeconds(targetTime, NSEC_PER_SEC.toInt())
+            val wasPlaying = _isPlaying
 
-            // First, perform a seek with a lower timescale (like in macOS)
-            player?.seekToTime(CMTimeMakeWithSeconds(targetTime, 1))
+            // Create a zero time value for tolerance to ensure precise seeking
+            val zeroTime = CMTimeMake(0, 1)
 
-            // Then immediately perform another seek with a higher timescale
-            // This ensures at least one of the seeks will work properly
-            player?.seekToTime(CMTimeMakeWithSeconds(targetTime, 600))
-
-            // Ensure playback speed is maintained after seeking
-            player?.rate = _playbackSpeed
-
-            // Reset loading state after a short delay
-            dispatch_async(dispatch_get_main_queue()) {
-                _isLoading = false
+            currentPlayer.seekToTime(
+                time = seekTime,
+                toleranceBefore = zeroTime,
+                toleranceAfter = zeroTime
+            ) { finished ->
+                if (finished) {
+                    dispatch_async(dispatch_get_main_queue()) {
+                        _isLoading = false
+                        if (wasPlaying) {
+                            currentPlayer.playImmediatelyAtRate(_playbackSpeed)
+                        }
+                    }
+                }
             }
         }
     }
-
 
     override fun clearError() {
         Logger.d { "clearError called" }
@@ -606,6 +583,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
     override fun dispose() {
         Logger.d { "dispose called" }
+        isDisposed = true
         cleanupCurrentPlayer()
         _hasMedia = false
         _isPlaying = false
@@ -685,4 +663,34 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         // iOS uses Compose-based subtitles, so we don't need to configure
         // the native player for subtitle display
     }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private class KVOObserver(
+    private val block: (Any?) -> Unit
+) : NSObject(), NSKeyValueObservingProtocol {
+    override fun observeValueForKeyPath(
+        keyPath: String?,
+        ofObject: Any?,
+        change: Map<Any?, *>?,
+        context: COpaquePointer?
+    ) {
+        block(change?.get(NSKeyValueChangeNewKey))
+    }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+private fun NSObject.observe(
+    keyPath: String,
+    options: NSKeyValueObservingOptions = NSKeyValueObservingOptionNew,
+    block: (Any?) -> Unit
+): NSObject {
+    val observer = KVOObserver(block)
+    this.addObserver(
+        observer,
+        forKeyPath = keyPath,
+        options = options,
+        context = null
+    )
+    return observer
 }
