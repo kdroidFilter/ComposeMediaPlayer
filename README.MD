@@ -1,10 +1,5 @@
 # 🎥 Compose Media Player
 
-### Supported by
-[![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
-
-
-
 <img src="/assets/banner.jpg" style="border-radius: 10px;"/>
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.kdroidfilter/composemediaplayer.svg)](https://search.maven.org/artifact/io.github.kdroidfilter/composemediaplayer)
@@ -15,6 +10,9 @@
 [![Documentation](https://img.shields.io/badge/docs-Dokka-blue.svg)](https://kdroidfilter.github.io/ComposeMediaPlayer/)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/kdroidfilter/ComposeMediaPlayer/publish-documentation-and-sample.yml?branch=master)](https://github.com/kdroidfilter/ComposeMediaPlayer/actions/workflows/publish-documentation-and-sample.yml)
 [![GitHub last commit](https://img.shields.io/github/last-commit/kdroidfilter/ComposeMediaPlayer)](https://github.com/kdroidfilter/ComposeMediaPlayer/commits/master)
+
+### Supported by
+[![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
 
 **Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations. The library leverages:
 
