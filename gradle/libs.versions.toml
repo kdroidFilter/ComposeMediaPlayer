@@ -15,7 +15,7 @@ androidx-activityCompose = "1.12.2"
 androidx-core = "1.17.0"
 media3Exoplayer = "1.9.0"
 jna = "5.18.1"
-platformtoolsDarkmodedetector = "0.7.4"
+platformtoolsDarkmodedetector = "0.7.5"
 slf4jSimple = "2.0.17"
 
 # minSdk = 21 failed to compile because the project indirectly depends on the library [androidx.navigationevent:navigationevent-android:1.0.1] which requires minSdk = 23
