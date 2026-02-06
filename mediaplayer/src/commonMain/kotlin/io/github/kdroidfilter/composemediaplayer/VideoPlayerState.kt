@@ -103,6 +103,27 @@ interface VideoPlayerState {
      * Opens a video file or URL for playback.
      */
     fun openUri(uri: String, initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY)
+    
+    /**
+     * Opens a video URL with DRM configuration for protected content.
+     * 
+     * On web platforms, this will initialize EME (Encrypted Media Extensions) with the
+     * specified DRM configuration. On other platforms, DRM may not be supported and
+     * the drmConfiguration parameter will be ignored.
+     * 
+     * @param uri The media URI to open
+     * @param drmConfiguration The DRM configuration (license URL, headers, etc.)
+     * @param initializeplayerState Controls whether playback should start automatically
+     */
+    fun openUri(
+        uri: String,
+        drmConfiguration: DrmConfiguration?,
+        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY
+    ) {
+        // Default implementation ignores DRM config - platforms override as needed
+        openUri(uri, initializeplayerState)
+    }
+    
     fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY)
 
     // Error handling

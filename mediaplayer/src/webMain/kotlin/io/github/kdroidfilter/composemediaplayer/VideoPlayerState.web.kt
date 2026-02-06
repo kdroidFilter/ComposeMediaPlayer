@@ -51,6 +51,10 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     // Source URI of the current media
     private var _sourceUri by mutableStateOf<String?>(null)
     val sourceUri: String? get() = _sourceUri
+    
+    // DRM configuration for protected content
+    private var _drmConfiguration by mutableStateOf<DrmConfiguration?>(null)
+    val drmConfiguration: DrmConfiguration? get() = _drmConfiguration
 
     // Playback state properties
     private var _isPlaying by mutableStateOf(false)
@@ -232,12 +236,31 @@ open class DefaultVideoPlayerState: VideoPlayerState {
      * @param initializeplayerState Controls whether playback should start automatically after opening
      */
     override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+        openUri(uri, null, initializeplayerState)
+    }
+    
+    /**
+     * Opens a media source from the given URI with optional DRM configuration.
+     * 
+     * On web platforms, this will initialize EME (Encrypted Media Extensions) with the
+     * specified DRM configuration when provided.
+     *
+     * @param uri The URI of the media to open
+     * @param drmConfiguration The DRM configuration for protected content, or null for unprotected content
+     * @param initializeplayerState Controls whether playback should start automatically after opening
+     */
+    override fun openUri(
+        uri: String,
+        drmConfiguration: DrmConfiguration?,
+        initializeplayerState: InitialPlayerState
+    ) {
         playerScope.coroutineContext.cancelChildren()
 
         // Store the URI for potential replay after stop
         lastUri = uri
 
         _sourceUri = uri
+        _drmConfiguration = drmConfiguration
         _hasMedia = true
         _isLoading = true  // Set initial loading state
         _error = null
@@ -299,6 +322,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     override fun stop() {
         _isPlaying = false
         _sourceUri = null
+        _drmConfiguration = null
         _hasMedia = false
         _isLoading = false
         sliderPos = 0.0f

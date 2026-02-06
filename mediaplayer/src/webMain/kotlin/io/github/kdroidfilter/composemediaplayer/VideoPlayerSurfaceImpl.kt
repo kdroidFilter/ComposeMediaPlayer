@@ -1,3 +1,5 @@
+@file:OptIn(kotlin.js.ExperimentalWasmJsInterop::class)
+
 package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.foundation.background
@@ -15,6 +17,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Severity
+import io.github.kdroidfilter.composemediaplayer.jsinterop.DrmHelper
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
@@ -22,11 +25,14 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.await
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
+import kotlin.js.JsAny
+import kotlin.js.toJsString
 import kotlin.math.abs
 
 internal val webVideoLogger = Logger.withTag("WebVideoPlayerSurface").apply { Logger.setMinSeverity(Severity.Warn) }
@@ -583,18 +589,62 @@ internal fun VideoPlayerEffects(
         }
     }
 
-    // Handle source change effect
-
+    // Handle source change effect with DRM support
     if (playerState is DefaultVideoPlayerState) {
-        LaunchedEffect(videoElement, playerState.sourceUri) {
+        // Track DRM handler for cleanup
+        var drmCleanup by remember { mutableStateOf<(() -> Unit)?>(null) }
+        
+        LaunchedEffect(videoElement, playerState.sourceUri, playerState.drmConfiguration) {
             videoElement?.let { video ->
                 val sourceUri = playerState.sourceUri ?: ""
                 if (sourceUri.isNotEmpty()) {
                     playerState.clearError()
-                    video.src = sourceUri
-                    video.load()
-                    if (playerState.isPlaying) video.safePlay() else video.safePause()
+                    
+                    // Clean up previous DRM session if any
+                    drmCleanup?.invoke()
+                    drmCleanup = null
+                    
+                    // Check if this is DASH content with DRM
+                    val drmConfig = playerState.drmConfiguration
+                    val isDashWithDrm = drmConfig != null && isDrmHelperAvailable() && 
+                        DrmHelper.isDashUrl(sourceUri.toJsString())
+                    
+                    // Initialize DRM if configuration is provided
+                    if (drmConfig != null) {
+                        webVideoLogger.d { "Initializing DRM for ${drmConfig.drmType.name}" }
+                        try {
+                            // Call JavaScript DrmHelper to initialize DRM
+                            // For DASH, this also sets up dash.js which handles the source
+                            val result = initializeDrm(video, drmConfig, sourceUri)
+                            if (result != null) {
+                                drmCleanup = result
+                                webVideoLogger.i { "DRM initialized successfully" }
+                            } else {
+                                webVideoLogger.w { "DRM initialization returned null, playback may fail" }
+                            }
+                        } catch (e: Exception) {
+                            webVideoLogger.e(e) { "DRM initialization failed: ${e.message}" }
+                            playerState.setError(VideoPlayerError.SourceError("DRM error: ${e.message}"))
+                        }
+                    }
+                    
+                    // For DASH with DRM, dash.js handles the source, so don't set video.src
+                    if (!isDashWithDrm) {
+                        video.src = sourceUri
+                        video.load()
+                    }
+                    // dash.js auto-plays, for non-dash respect player state
+                    if (!isDashWithDrm) {
+                        if (playerState.isPlaying) video.safePlay() else video.safePause()
+                    }
                 }
+            }
+        }
+        
+        // Clean up DRM on dispose
+        DisposableEffect(Unit) {
+            onDispose {
+                drmCleanup?.invoke()
             }
         }
     }
@@ -746,4 +796,119 @@ internal fun VideoVolumeAndSpeedEffects(
             }
         }
     }
+}
+
+// =====================================================
+// DRM Helper Functions
+// =====================================================
+
+/**
+ * Initialize DRM for the video element.
+ * For DASH URLs (.mpd), uses dash.js for both parsing and DRM.
+ * For other URLs, uses native EME API.
+ * 
+ * @param video The HTMLVideoElement to attach DRM to
+ * @param config The DRM configuration
+ * @param sourceUri The source URL (to detect DASH)
+ * @return A cleanup function to call when disposing, or null if DRM setup failed
+ */
+internal suspend fun initializeDrm(
+    video: HTMLVideoElement,
+    config: DrmConfiguration,
+    sourceUri: String
+): (() -> Unit)? {
+    return try {
+        // Check if DrmHelper is available
+        if (!isDrmHelperAvailable()) {
+            webVideoLogger.w { "DrmHelper not available - drm-helper.js may not be loaded" }
+            return null
+        }
+        
+        val licenseUrl = config.licenseUrl.toJsString()
+        val headers = buildLicenseHeadersObject(config.licenseHeaders)
+        
+        // Check if this is a DASH URL
+        val isDash = DrmHelper.isDashUrl(sourceUri.toJsString())
+        
+        if (isDash) {
+            // Use dash.js for DASH content - handles both parsing and DRM
+            webVideoLogger.d { "Using dash.js for DASH content with ${config.drmType.name} DRM" }
+            
+            val result = DrmHelper.setupDash(
+                video,
+                sourceUri.toJsString(),
+                config.drmType.name.toJsString(),
+                licenseUrl,
+                headers
+            )
+            
+            if (result != null) {
+                webVideoLogger.i("dash.js DRM setup completed successfully")
+                val cleanupFn = result.cleanup
+                // Return cleanup function - also prevents setting video.src directly
+                return { cleanupFn() }
+            } else {
+                webVideoLogger.e { "dash.js not loaded or setup failed" }
+                return null
+            }
+        } else {
+            // Use native EME for non-DASH content
+            val keySystem = config.drmType.keySystem.toJsString()
+            webVideoLogger.d { "Calling DrmHelper.setup for ${config.drmType.keySystem}" }
+            
+            val result: io.github.kdroidfilter.composemediaplayer.jsinterop.DrmSetupResult = 
+                DrmHelper.setup(video, keySystem, licenseUrl, headers).await()
+            
+            webVideoLogger.i("EME DRM setup completed successfully")
+            
+            // Return cleanup function
+            val cleanupFn = result.cleanup
+            { cleanupFn() }
+        }
+        
+    } catch (e: Exception) {
+        webVideoLogger.e(e) { "DRM initialization error: ${e.message}" }
+        null
+    }
+}
+
+/**
+ * Check if DrmHelper JavaScript object is available.
+ */
+private fun isDrmHelperAvailable(): Boolean {
+    return try {
+        DrmHelper.isSupported()
+        true
+    } catch (e: Exception) {
+        false
+    }
+}
+
+/**
+ * Build license headers object for JavaScript.
+ */
+private fun buildLicenseHeadersObject(headers: Map<String, String>): JsAny? {
+    if (headers.isEmpty()) {
+        return null
+    }
+    
+    // For WASM, we need to create JS object via DrmHelper.parseJson
+    // (can't call JSON.parse directly from WASM)
+    val jsonEntries = headers.entries.joinToString(",") { (key, value) ->
+        "\"${escapeJsonString(key)}\":\"${escapeJsonString(value)}\""
+    }
+    val jsonString = "{$jsonEntries}"
+    
+    return DrmHelper.parseJson(jsonString.toJsString())
+}
+
+/**
+ * Escape special characters for JSON string.
+ */
+private fun escapeJsonString(s: String): String {
+    return s.replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
 }
