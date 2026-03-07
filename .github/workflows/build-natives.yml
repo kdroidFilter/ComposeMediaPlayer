@@ -12,7 +12,8 @@ jobs:
 
       - name: Build Windows native DLLs
         shell: cmd
-        run: call mediaplayer\src\jvmMain\native\windows\build.bat
+        working-directory: mediaplayer/src/jvmMain/native/windows
+        run: call build.bat
 
       - name: Verify Windows natives
         shell: bash
