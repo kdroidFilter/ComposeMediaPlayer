@@ -197,6 +197,12 @@ val buildNativeWindows by tasks.registering(Exec::class) {
     commandLine("cmd", "/c", nativeDir.file("build.bat").asFile.absolutePath)
 }
 
+tasks.register("buildNativeLibraries") {
+    group = "build"
+    description = "Builds all native libraries (macOS + Windows)"
+    dependsOn(buildNativeMacOs, buildNativeWindows)
+}
+
 tasks.configureEach {
     if (name == "jvmProcessResources" || name == "sourcesJar") {
         dependsOn(buildNativeMacOs, buildNativeWindows)
