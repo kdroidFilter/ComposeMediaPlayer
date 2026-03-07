@@ -11,11 +11,19 @@ import com.sun.jna.ptr.PointerByReference
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 
 internal object MediaFoundationLib {
+    /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the DLL. */
+    private const val EXPECTED_NATIVE_VERSION = 1
+
     /**
-     * Register the native library for JNA direct mapping
+     * Register the native library for JNA direct mapping and verify the API version.
      */
     init {
         Native.register("NativeVideoPlayer")
+        val nativeVersion = GetNativeVersion()
+        require(nativeVersion == EXPECTED_NATIVE_VERSION) {
+            "NativeVideoPlayer DLL version mismatch: expected $EXPECTED_NATIVE_VERSION but got $nativeVersion. " +
+                "Please rebuild the native DLL or update the Kotlin bindings."
+        }
     }
 
     /**
@@ -95,6 +103,7 @@ internal object MediaFoundationLib {
     }
 
     // === Direct mapped native methods ===
+    @JvmStatic external fun GetNativeVersion(): Int
     @JvmStatic external fun InitMediaFoundation(): Int
     @JvmStatic external fun CreateVideoPlayerInstance(ppInstance: PointerByReference): Int
     @JvmStatic external fun DestroyVideoPlayerInstance(pInstance: Pointer)

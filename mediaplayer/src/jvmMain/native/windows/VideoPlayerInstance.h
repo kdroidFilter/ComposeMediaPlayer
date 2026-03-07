@@ -7,6 +7,7 @@
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <endpointvolume.h>
+#include <atomic>
 
 /**
  * @brief Structure to encapsulate the state of a video player instance.
@@ -53,7 +54,7 @@ struct VideoPlayerInstance {
     CRITICAL_SECTION csClockSync{};
     BOOL bSeekInProgress = FALSE;
 
-    // Playback control
-    float instanceVolume = 1.0f; // Volume specific to this instance (1.0 = 100%)
-    float playbackSpeed = 1.0f;  // Playback speed (1.0 = 100%)
+    // Playback control (atomic for lock-free access from the audio thread)
+    std::atomic<float> instanceVolume{1.0f}; // Volume specific to this instance (1.0 = 100%)
+    std::atomic<float> playbackSpeed{1.0f};  // Playback speed (1.0 = 100%)
 };
