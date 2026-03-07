@@ -15,16 +15,14 @@ Pods/
 *.jks
 *.gpg
 *yarn.lock
-/winlib/cmake-build-arm64
-/winlib/cmake-build-x64
-/winlib/.idea
-/mediaplayer/src/jvmMain/resources/darwin-x86-64/NativeVideoPlayer.abi.json
-/mediaplayer/src/jvmMain/resources/darwin-x86-64/NativeVideoPlayer.swiftdoc
-/mediaplayer/src/jvmMain/resources/darwin-x86-64/NativeVideoPlayer.swiftmodule
-/mediaplayer/src/jvmMain/resources/darwin-x86-64/NativeVideoPlayer.swiftsourceinfo
-/mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.abi.json
-/mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.swiftdoc
-/mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.swiftmodule
-/mediaplayer/src/jvmMain/resources/darwin-aarch64/NativeVideoPlayer.swiftsourceinfo
+# Native compiled binaries (built in CI)
+/mediaplayer/src/jvmMain/resources/win32-x86-64/
+/mediaplayer/src/jvmMain/resources/win32-arm64/
+/mediaplayer/src/jvmMain/resources/darwin-aarch64/
+/mediaplayer/src/jvmMain/resources/darwin-x86-64/
+
+# Native build artifacts
+/mediaplayer/src/jvmMain/native/windows/build-x64/
+/mediaplayer/src/jvmMain/native/windows/build-arm64/
 *.log
 /sample/composeApp/debug/

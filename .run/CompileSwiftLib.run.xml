@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="CompileSwiftLib" type="ShConfigurationType">
-    <option name="SCRIPT_TEXT" value="swiftc -emit-library -emit-module -module-name NativeVideoPlayer -target arm64-apple-macosx14.0 -o mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift -O -whole-module-optimization &amp;&amp; swiftc -emit-library -emit-module -module-name NativeVideoPlayer -target x86_64-apple-macosx14.0 -o mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift -O -whole-module-optimization" />
+    <option name="SCRIPT_TEXT" value="bash mediaplayer/src/jvmMain/native/macos/build.sh" />
     <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
     <option name="SCRIPT_PATH" value="" />
     <option name="SCRIPT_OPTIONS" value="" />

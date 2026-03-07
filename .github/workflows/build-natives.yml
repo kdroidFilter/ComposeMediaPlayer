@@ -1,0 +1,62 @@
+name: Build Native Libraries
+
+on:
+  workflow_call:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Build Windows native DLLs
+        shell: cmd
+        working-directory: mediaplayer/src/jvmMain/native/windows
+        run: call build.bat
+
+      - name: Verify Windows natives
+        shell: bash
+        run: |
+          for f in \
+            mediaplayer/src/jvmMain/resources/win32-x86-64/NativeVideoPlayer.dll \
+            mediaplayer/src/jvmMain/resources/win32-arm64/NativeVideoPlayer.dll; do
+            if [ ! -f "$f" ]; then echo "MISSING: $f" >&2; exit 1; fi
+            echo "OK: $f ($(wc -c < "$f") bytes)"
+          done
+
+      - name: Upload Windows DLLs
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-natives
+          path: |
+            mediaplayer/src/jvmMain/resources/win32-x86-64/
+            mediaplayer/src/jvmMain/resources/win32-arm64/
+          retention-days: 1
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Build macOS native dylibs
+        run: bash mediaplayer/src/jvmMain/native/macos/build.sh
+
+      - name: Verify macOS natives
+        run: |
+          for f in \
+            mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib \
+            mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib; do
+            if [ ! -f "$f" ]; then echo "MISSING: $f" >&2; exit 1; fi
+            echo "OK: $f ($(wc -c < "$f") bytes)"
+          done
+
+      - name: Upload macOS dylibs
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-natives
+          path: |
+            mediaplayer/src/jvmMain/resources/darwin-aarch64/
+            mediaplayer/src/jvmMain/resources/darwin-x86-64/
+          retention-days: 1
