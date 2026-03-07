@@ -1,6 +1,7 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
 import com.vanniktech.maven.publish.SonatypeHost
+import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.dokka.gradle.DokkaTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
@@ -159,39 +160,50 @@ android {
     }
 }
 
-val buildMacArm: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacArm") {
-    onlyIf { System.getProperty("os.name").startsWith("Mac") }
-    workingDir(rootDir)
-    commandLine(
-        "swiftc", "-emit-library", "-emit-module", "-module-name", "NativeVideoPlayer",
-        "-target", "arm64-apple-macosx14.0",
-        "-o", "mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib",
-        "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift",
-        "-O", "-whole-module-optimization"
-    )
+val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources")
+
+val buildNativeMacOs by tasks.registering(Exec::class) {
+    description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
+    group = "build"
+    val hasPrebuilt = nativeResourceDir
+        .dir("darwin-aarch64")
+        .file("libNativeVideoPlayer.dylib")
+        .asFile
+        .exists()
+    enabled = Os.isFamily(Os.FAMILY_MAC) && !hasPrebuilt
+
+    val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/macos")
+    inputs.dir(nativeDir)
+    outputs.dir(nativeResourceDir)
+    workingDir(nativeDir)
+    commandLine("bash", "build.sh")
 }
 
-val buildMacX64: TaskProvider<Exec> = tasks.register<Exec>("buildNativeMacX64") {
-    onlyIf { System.getProperty("os.name").startsWith("Mac") }
-    workingDir(rootDir)
-    commandLine(
-        "swiftc", "-emit-library", "-emit-module", "-module-name", "NativeVideoPlayer",
-        "-target", "x86_64-apple-macosx14.0",
-        "-o", "mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib",
-        "mediaplayer/src/jvmMain/kotlin/io/github/kdroidfilter/composemediaplayer/mac/native/NativeVideoPlayer.swift",
-        "-O", "-whole-module-optimization"
-    )
+val buildNativeWindows by tasks.registering(Exec::class) {
+    description = "Compiles the C++ native library into Windows DLLs (x64 + ARM64)"
+    group = "build"
+    val hasPrebuilt = nativeResourceDir
+        .dir("win32-x86-64")
+        .file("NativeVideoPlayer.dll")
+        .asFile
+        .exists()
+    enabled = Os.isFamily(Os.FAMILY_WINDOWS) && !hasPrebuilt
+
+    val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/windows")
+    inputs.dir(nativeDir)
+    outputs.dir(nativeResourceDir)
+    workingDir(nativeDir)
+    commandLine("cmd", "/c", nativeDir.file("build.bat").asFile.absolutePath)
 }
 
-val buildWin: TaskProvider<Exec> = tasks.register<Exec>("buildNativeWin") {
-    onlyIf { System.getProperty("os.name").startsWith("Windows") }
-    workingDir(rootDir.resolve("winlib"))
-    commandLine("cmd", "/c", "build.bat")
+tasks.processResources {
+    dependsOn(buildNativeMacOs, buildNativeWindows)
 }
 
-// tâche d’agrégation
-tasks.register("buildNativeLibraries") {
-    dependsOn(buildMacArm, buildMacX64, buildWin)
+tasks.configureEach {
+    if (name == "sourcesJar") {
+        dependsOn(buildNativeMacOs, buildNativeWindows)
+    }
 }
 
 
