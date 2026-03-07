@@ -1,6 +1,5 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
-import com.vanniktech.maven.publish.SonatypeHost
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.dokka.gradle.DokkaTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
@@ -33,6 +32,7 @@ tasks.withType<DokkaTask>().configureEach {
 
 kotlin {
     jvmToolchain(17)
+    @Suppress("DEPRECATION")
     androidTarget { publishLibraryVariants("release") }
     jvm()
     js {
@@ -242,7 +242,6 @@ mavenPublishing {
         }
     }
 
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
-
+    publishToMavenCentral()
     signAllPublications()
 }

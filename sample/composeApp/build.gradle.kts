@@ -15,6 +15,7 @@ plugins {
 kotlin {
     jvmToolchain(17)
 
+    @Suppress("DEPRECATION")
     androidTarget()
     jvm()
     js(IR) {
