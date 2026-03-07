@@ -67,7 +67,8 @@ kotlin {
         framework {
             baseName = "ComposeMediaPlayer"
             isStatic = false
-            transitiveExport = false // This is default.
+            @OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
+            transitiveExport = false
         }
 
         // Maps custom Xcode configuration to NativeBuildType
@@ -196,12 +197,8 @@ val buildNativeWindows by tasks.registering(Exec::class) {
     commandLine("cmd", "/c", nativeDir.file("build.bat").asFile.absolutePath)
 }
 
-tasks.processResources {
-    dependsOn(buildNativeMacOs, buildNativeWindows)
-}
-
 tasks.configureEach {
-    if (name == "sourcesJar") {
+    if (name == "jvmProcessResources" || name == "sourcesJar") {
         dependsOn(buildNativeMacOs, buildNativeWindows)
     }
 }
