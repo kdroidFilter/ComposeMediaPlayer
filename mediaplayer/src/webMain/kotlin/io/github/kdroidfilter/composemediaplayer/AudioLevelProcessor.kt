@@ -1,11 +1,10 @@
 package io.github.kdroidfilter.composemediaplayer
 
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.jsinterop.AnalyserNode
 import io.github.kdroidfilter.composemediaplayer.jsinterop.AudioContext
 import io.github.kdroidfilter.composemediaplayer.jsinterop.ChannelSplitterNode
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaElementAudioSourceNode
+import io.github.kdroidfilter.composemediaplayer.util.buildLocalLogger
 import org.khronos.webgl.Uint8Array
 import org.khronos.webgl.get
 import org.w3c.dom.HTMLVideoElement
@@ -13,8 +12,7 @@ import org.w3c.dom.HTMLVideoElement
 /**
  * Logger for WebAssembly audio level processor
  */
-internal val wasmAudioLogger = Logger.withTag("WasmAudioProcessor")
-    .apply { Logger.setMinSeverity(Severity.Warn) }
+internal val wasmAudioLogger = buildLocalLogger("WasmAudioProcessor")
 
 internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
 

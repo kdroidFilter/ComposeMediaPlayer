@@ -13,11 +13,10 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
+import io.github.kdroidfilter.composemediaplayer.util.buildLocalLogger
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
@@ -29,7 +28,7 @@ import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
 import kotlin.math.abs
 
-internal val webVideoLogger = Logger.withTag("WebVideoPlayerSurface").apply { Logger.setMinSeverity(Severity.Warn) }
+internal val webVideoLogger = buildLocalLogger("WebVideoPlayerSurface")
 
 // Cache mime type mappings for better performance
 internal val EXTENSION_TO_MIME_TYPE = mapOf(

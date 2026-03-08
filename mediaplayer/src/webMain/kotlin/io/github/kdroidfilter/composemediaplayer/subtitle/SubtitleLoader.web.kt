@@ -1,7 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.subtitle
 
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Severity
+import io.github.kdroidfilter.composemediaplayer.util.buildLocalLogger
 import kotlinx.browser.window
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.w3c.dom.url.URL
@@ -15,9 +14,7 @@ import kotlin.coroutines.resume
  * @param src The source URI of the subtitle file
  * @return The content of the subtitle file as a string
  */
-private val webSubtitleLogger = Logger.withTag("WebSubtitleLoader").apply {
-    Logger.setMinSeverity(Severity.Warn)
-}
+private val webSubtitleLogger = buildLocalLogger("WebSubtitleLoader")
 
 actual suspend fun loadSubtitleContent(src: String): String = suspendCancellableCoroutine { continuation ->
     try {

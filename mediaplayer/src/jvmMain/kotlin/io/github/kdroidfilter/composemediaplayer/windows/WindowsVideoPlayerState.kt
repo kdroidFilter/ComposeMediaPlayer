@@ -11,14 +11,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Logger.Companion.setMinSeverity
-import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.util.buildLocalLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.CancellationException
@@ -58,8 +56,7 @@ import kotlin.math.min
 /**
  * Logger for Windows video player implementation
  */
-internal val windowsLogger = Logger.withTag("WindowsVideoPlayerState")
-    .apply { setMinSeverity(Severity.Warn) }
+internal val windowsLogger = buildLocalLogger("WindowsVideoPlayerState")
 
 /**
  * Windows implementation of the video player state.

@@ -8,15 +8,13 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Logger.Companion.setMinSeverity
-import co.touchlab.kermit.Severity
 import com.sun.jna.Pointer
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import io.github.kdroidfilter.composemediaplayer.util.buildLocalLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import io.github.vinceglb.filekit.utils.toFile
@@ -35,9 +33,7 @@ import kotlin.math.abs
 import kotlin.math.log10
 
 // Initialize logger using Kermit
-internal val macLogger = Logger.withTag("MacVideoPlayerState")
-    .apply { setMinSeverity(Severity.Warn) }
-
+internal val macLogger = buildLocalLogger("MacVideoPlayerState")
 /**
  * MacVideoPlayerState handles the native Mac video player state.
  *
