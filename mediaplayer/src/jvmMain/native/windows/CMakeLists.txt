@@ -33,6 +33,8 @@ add_library(NativeVideoPlayer SHARED
         MediaFoundationManager.h
         AudioManager.cpp
         AudioManager.h
+        HLSPlayer.cpp
+        HLSPlayer.h
         jni_bridge.cpp
 )
 

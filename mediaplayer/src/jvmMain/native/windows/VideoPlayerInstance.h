@@ -9,6 +9,9 @@
 #include <endpointvolume.h>
 #include <atomic>
 
+// Forward declaration
+class HLSPlayer;
+
 /**
  * @brief Structure to encapsulate the state of a video player instance.
  */
@@ -59,4 +62,9 @@ struct VideoPlayerInstance {
     // Playback control (atomic for lock-free access from the audio thread)
     std::atomic<float> instanceVolume{1.0f}; // Volume specific to this instance (1.0 = 100%)
     std::atomic<float> playbackSpeed{1.0f};  // Playback speed (1.0 = 100%)
+
+    // Network / HLS streaming
+    BOOL bIsNetworkSource = FALSE;  // TRUE when URL is http:// or https://
+    BOOL bIsLiveStream = FALSE;     // TRUE when duration is unknown (live HLS)
+    HLSPlayer* pHLSPlayer = nullptr; // Non-null when playing HLS via IMFMediaEngine
 };

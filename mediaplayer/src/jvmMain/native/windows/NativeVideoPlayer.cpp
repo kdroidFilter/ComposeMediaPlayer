@@ -4,10 +4,13 @@
 #include "Utils.h"
 #include "MediaFoundationManager.h"
 #include "AudioManager.h"
+#include "HLSPlayer.h"
 #include <algorithm>
 #include <cstring>
 #include <mfapi.h>
 #include <mferror.h>
+#include <string>
+#include <cctype>
 
 // For IMF2DBuffer and IMF2DBuffer2 interfaces
 #include <evr.h>
@@ -15,6 +18,70 @@
 using namespace VideoPlayerUtils;
 using namespace MediaFoundation;
 using namespace AudioManager;
+
+// ---------------------------------------------------------------------------
+// Helper: detect HTTP/HTTPS URLs (network streaming sources incl. HLS)
+// ---------------------------------------------------------------------------
+static bool IsNetworkUrl(const wchar_t* url) {
+    return (_wcsnicmp(url, L"http://", 7) == 0 || _wcsnicmp(url, L"https://", 8) == 0);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: detect HLS URLs (.m3u8 anywhere in URL, case-insensitive)
+// ---------------------------------------------------------------------------
+static bool IsHLSUrl(const wchar_t* url) {
+    if (!url) return false;
+    std::wstring lower(url);
+    for (auto& ch : lower) ch = static_cast<wchar_t>(towlower(ch));
+    return lower.find(L".m3u8") != std::wstring::npos;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: open HLS media via IMFMediaEngine
+// ---------------------------------------------------------------------------
+static HRESULT OpenMediaHLS(VideoPlayerInstance* pInstance, const wchar_t* url, BOOL startPlayback) {
+    auto* hlsPlayer = new (std::nothrow) HLSPlayer();
+    if (!hlsPlayer) return E_OUTOFMEMORY;
+
+    HRESULT hr = hlsPlayer->Initialize(MediaFoundation::GetD3DDevice(),
+                                        MediaFoundation::GetDXGIDeviceManager());
+    if (FAILED(hr)) {
+        delete hlsPlayer;
+        return hr;
+    }
+
+    hr = hlsPlayer->Open(url);
+    if (FAILED(hr)) {
+        hlsPlayer->Close();
+        delete hlsPlayer;
+        return hr;
+    }
+
+    pInstance->pHLSPlayer      = hlsPlayer;
+    pInstance->bIsNetworkSource = TRUE;
+
+    // Dimensions
+    hlsPlayer->GetVideoSize(&pInstance->videoWidth, &pInstance->videoHeight);
+    pInstance->nativeWidth  = pInstance->videoWidth;
+    pInstance->nativeHeight = pInstance->videoHeight;
+
+    // Duration (0 → live stream)
+    LONGLONG duration = 0;
+    hlsPlayer->GetDuration(&duration);
+    pInstance->bIsLiveStream = (duration == 0) ? TRUE : FALSE;
+
+    // Audio is handled internally by the engine
+    pInstance->bHasAudio = TRUE;
+
+    if (startPlayback) {
+        hlsPlayer->SetPlaying(TRUE);
+        pInstance->llPlaybackStartTime = GetCurrentTimeMs();
+        pInstance->llTotalPauseTime = 0;
+        pInstance->llPauseStart     = 0;
+    }
+
+    return S_OK;
+}
 
 // Error code definitions from header
 #define OP_E_NOT_INITIALIZED     ((HRESULT)0x80000001L)
@@ -123,6 +190,33 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* pInstance, IMFSample** ppS
                 if (pSample) pSample->Release();
                 return S_FALSE;
             }
+
+            // HLS adaptive bitrate: handle media type changes (resolution switch)
+            if (dwFlags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED) {
+                // Re-apply desired output format after native format change
+                IMFMediaType* pNewType = nullptr;
+                if (SUCCEEDED(MFCreateMediaType(&pNewType))) {
+                    pNewType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+                    pNewType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+                    pInstance->pSourceReader->SetCurrentMediaType(
+                        MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pNewType);
+                    SafeRelease(pNewType);
+                }
+            }
+            if (dwFlags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
+                IMFMediaType* pCurrent = nullptr;
+                if (SUCCEEDED(pInstance->pSourceReader->GetCurrentMediaType(
+                        MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrent))) {
+                    UINT32 newW = 0, newH = 0;
+                    MFGetAttributeSize(pCurrent, MF_MT_FRAME_SIZE, &newW, &newH);
+                    if (newW > 0 && newH > 0) {
+                        pInstance->videoWidth = newW;
+                        pInstance->videoHeight = newH;
+                    }
+                    SafeRelease(pCurrent);
+                }
+            }
+
             if (!pSample) return S_OK; // decoder starved
 
             if (pInstance->pCachedSample) {
@@ -152,6 +246,32 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* pInstance, IMFSample** ppS
             if (pSample) pSample->Release();
             return S_FALSE;
         }
+
+        // HLS adaptive bitrate: handle media type changes (resolution switch)
+        if (dwFlags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED) {
+            IMFMediaType* pNewType = nullptr;
+            if (SUCCEEDED(MFCreateMediaType(&pNewType))) {
+                pNewType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+                pNewType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+                pInstance->pSourceReader->SetCurrentMediaType(
+                    MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pNewType);
+                SafeRelease(pNewType);
+            }
+        }
+        if (dwFlags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
+            IMFMediaType* pCurrent = nullptr;
+            if (SUCCEEDED(pInstance->pSourceReader->GetCurrentMediaType(
+                    MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrent))) {
+                UINT32 newW = 0, newH = 0;
+                MFGetAttributeSize(pCurrent, MF_MT_FRAME_SIZE, &newW, &newH);
+                if (newW > 0 && newH > 0) {
+                    pInstance->videoWidth = newW;
+                    pInstance->videoHeight = newH;
+                }
+                SafeRelease(pCurrent);
+            }
+        }
+
         if (!pSample) return S_OK; // decoder starved
 
         // Release any cached sample from a previous pause — not needed during playback
@@ -288,10 +408,20 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
 
     HRESULT hr = S_OK;
 
+    // Detect network sources (HTTP/HTTPS — includes HLS .m3u8 streams)
+    const bool isNetwork = IsNetworkUrl(url);
+    pInstance->bIsNetworkSource = isNetwork ? TRUE : FALSE;
+    pInstance->bIsLiveStream = FALSE;
+
+    // HLS streams (.m3u8): use IMFMediaEngine which has native HLS support
+    if (isNetwork && IsHLSUrl(url)) {
+        return OpenMediaHLS(pInstance, url, startPlayback);
+    }
+
     // 1. Configure and open media source with both audio and video streams
     // ------------------------------------------------------------------
     IMFAttributes* pAttributes = nullptr;
-    hr = MFCreateAttributes(&pAttributes, 5);
+    hr = MFCreateAttributes(&pAttributes, 6);
     if (FAILED(hr))
         return hr;
 
@@ -300,10 +430,21 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
     pAttributes->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, GetDXGIDeviceManager());
     pAttributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
 
+    // For network/HLS sources: hint the pipeline to reduce buffering latency
+    if (isNetwork) {
+        pAttributes->SetUINT32(MF_LOW_LATENCY, TRUE);
+    }
+
     hr = MFCreateSourceReaderFromURL(url, pAttributes, &pInstance->pSourceReader);
     SafeRelease(pAttributes);
-    if (FAILED(hr))
+    if (FAILED(hr)) {
+        // Fallback: for network sources that fail with "unsupported byte stream",
+        // try the IMFMediaEngine path (handles HLS and other streaming formats)
+        if (isNetwork && hr == static_cast<HRESULT>(0xC00D36C4)) {
+            return OpenMediaHLS(pInstance, url, startPlayback);
+        }
         return hr;
+    }
 
     // 2. Configure video stream (RGB32)
     // ------------------------------------------
@@ -384,7 +525,13 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
         }
 
         // Create a separate audio source reader for the audio thread
-        hr = MFCreateSourceReaderFromURL(url, nullptr, &pInstance->pSourceReaderAudio);
+        IMFAttributes* pAudioAttrs = nullptr;
+        if (isNetwork) {
+            MFCreateAttributes(&pAudioAttrs, 1);
+            if (pAudioAttrs) pAudioAttrs->SetUINT32(MF_LOW_LATENCY, TRUE);
+        }
+        hr = MFCreateSourceReaderFromURL(url, pAudioAttrs, &pInstance->pSourceReaderAudio);
+        SafeRelease(pAudioAttrs);
         if (SUCCEEDED(hr)) {
             hr = pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
             if (SUCCEEDED(hr))
@@ -493,7 +640,15 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
 // ReadVideoFrame — locks a frame buffer and returns a pointer to the caller
 // ---------------------------------------------------------------------------
 NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYTE** pData, DWORD* pDataSize) {
-    if (!pInstance || !pInstance->pSourceReader || !pData || !pDataSize)
+    if (!pInstance || !pData || !pDataSize)
+        return OP_E_NOT_INITIALIZED;
+
+    // HLS path — delegate to IMFMediaEngine
+    if (pInstance->pHLSPlayer) {
+        return pInstance->pHLSPlayer->ReadFrame(pData, pDataSize);
+    }
+
+    if (!pInstance->pSourceReader)
         return OP_E_NOT_INITIALIZED;
 
     if (pInstance->pLockedBuffer)
@@ -571,6 +726,10 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYT
 NATIVEVIDEOPLAYER_API HRESULT UnlockVideoFrame(VideoPlayerInstance* pInstance) {
     if (!pInstance)
         return E_INVALIDARG;
+    if (pInstance->pHLSPlayer) {
+        pInstance->pHLSPlayer->UnlockFrame();
+        return S_OK;
+    }
     if (pInstance->pLockedBuffer) {
         pInstance->pLockedBuffer->Unlock();
         pInstance->pLockedBuffer->Release();
@@ -724,19 +883,33 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(
 NATIVEVIDEOPLAYER_API BOOL IsEOF(const VideoPlayerInstance* pInstance) {
     if (!pInstance)
         return FALSE;
+    if (pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->IsEOF();
     return pInstance->bEOF;
 }
 
 NATIVEVIDEOPLAYER_API void GetVideoSize(const VideoPlayerInstance* pInstance, UINT32* pWidth, UINT32* pHeight) {
     if (!pInstance)
         return;
+    if (pInstance->pHLSPlayer) {
+        pInstance->pHLSPlayer->GetVideoSize(pWidth, pHeight);
+        return;
+    }
     if (pWidth)  *pWidth = pInstance->videoWidth;
     if (pHeight) *pHeight = pInstance->videoHeight;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetVideoFrameRate(const VideoPlayerInstance* pInstance, UINT* pNum, UINT* pDenom) {
-    if (!pInstance || !pInstance->pSourceReader || !pNum || !pDenom)
-        return OP_E_NOT_INITIALIZED;
+    if (!pInstance || !pNum || !pDenom) return OP_E_NOT_INITIALIZED;
+
+    // HLS: frame rate is variable, default to 30fps
+    if (pInstance->pHLSPlayer) {
+        *pNum   = 30;
+        *pDenom = 1;
+        return S_OK;
+    }
+
+    if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
 
     IMFMediaType* pType = nullptr;
     HRESULT hr = pInstance->pSourceReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
@@ -748,7 +921,12 @@ NATIVEVIDEOPLAYER_API HRESULT GetVideoFrameRate(const VideoPlayerInstance* pInst
 }
 
 NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG llPositionIn100Ns) {
-    if (!pInstance || !pInstance->pSourceReader)
+    if (!pInstance) return OP_E_NOT_INITIALIZED;
+
+    if (pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->Seek(llPositionIn100Ns);
+
+    if (!pInstance->pSourceReader)
         return OP_E_NOT_INITIALIZED;
 
     EnterCriticalSection(&pInstance->csClockSync);
@@ -866,8 +1044,15 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetMediaDuration(const VideoPlayerInstance* pInstance, LONGLONG* pDuration) {
-    if (!pInstance || !pInstance->pSourceReader || !pDuration)
+    if (!pInstance || !pDuration) return OP_E_NOT_INITIALIZED;
+
+    if (pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->GetDuration(pDuration);
+
+    if (!pInstance->pSourceReader)
         return OP_E_NOT_INITIALIZED;
+
+    *pDuration = 0;
 
     IMFMediaSource* pMediaSource = nullptr;
     IMFPresentationDescriptor* pPresentationDescriptor = nullptr;
@@ -875,17 +1060,25 @@ NATIVEVIDEOPLAYER_API HRESULT GetMediaDuration(const VideoPlayerInstance* pInsta
     if (SUCCEEDED(hr)) {
         hr = pMediaSource->CreatePresentationDescriptor(&pPresentationDescriptor);
         if (SUCCEEDED(hr)) {
-            hr = pPresentationDescriptor->GetUINT64(MF_PD_DURATION, reinterpret_cast<UINT64*>(pDuration));
+            HRESULT hrDur = pPresentationDescriptor->GetUINT64(MF_PD_DURATION, reinterpret_cast<UINT64*>(pDuration));
+            if (FAILED(hrDur)) {
+                // Duration unavailable — live HLS stream or network source
+                *pDuration = 0;
+            }
             pPresentationDescriptor->Release();
         }
         pMediaSource->Release();
     }
-    return hr;
+    // Return S_OK even when duration is 0 (live stream) — caller checks the value
+    return S_OK;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetMediaPosition(const VideoPlayerInstance* pInstance, LONGLONG* pPosition) {
     if (!pInstance || !pPosition)
         return OP_E_NOT_INITIALIZED;
+
+    if (pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->GetPosition(pPosition);
 
     *pPosition = pInstance->llCurrentPosition;
     return S_OK;
@@ -894,6 +1087,9 @@ NATIVEVIDEOPLAYER_API HRESULT GetMediaPosition(const VideoPlayerInstance* pInsta
 NATIVEVIDEOPLAYER_API HRESULT SetPlaybackState(VideoPlayerInstance* pInstance, BOOL bPlaying, BOOL bStop) {
     if (!pInstance)
         return OP_E_NOT_INITIALIZED;
+
+    if (pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->SetPlaying(bPlaying, bStop);
 
     HRESULT hr = S_OK;
 
@@ -991,6 +1187,13 @@ NATIVEVIDEOPLAYER_API void CloseMedia(VideoPlayerInstance* pInstance) {
     if (!pInstance)
         return;
 
+    // Shut down HLS player first (before releasing D3D resources)
+    if (pInstance->pHLSPlayer) {
+        pInstance->pHLSPlayer->Close();
+        delete pInstance->pHLSPlayer;
+        pInstance->pHLSPlayer = nullptr;
+    }
+
     StopAudioThread(pInstance);
 
     if (pInstance->pLockedBuffer) {
@@ -1042,26 +1245,41 @@ NATIVEVIDEOPLAYER_API void CloseMedia(VideoPlayerInstance* pInstance) {
     pInstance->llCurrentPosition = 0;
     pInstance->bSeekInProgress = FALSE;
     pInstance->playbackSpeed = 1.0f;
+    pInstance->bIsNetworkSource = FALSE;
+    pInstance->bIsLiveStream = FALSE;
 
     #undef SAFE_RELEASE
     #undef SAFE_CLOSE_HANDLE
 }
 
 NATIVEVIDEOPLAYER_API HRESULT SetAudioVolume(VideoPlayerInstance* pInstance, float volume) {
+    if (pInstance && pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->SetVolume(volume);
     return SetVolume(pInstance, volume);
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetAudioVolume(const VideoPlayerInstance* pInstance, float* volume) {
+    if (pInstance && pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->GetVolume(volume);
     return GetVolume(pInstance, volume);
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetAudioLevels(const VideoPlayerInstance* pInstance, float* pLeftLevel, float* pRightLevel) {
+    // IMFMediaEngine doesn't expose per-channel audio levels
+    if (pInstance && pInstance->pHLSPlayer) {
+        if (pLeftLevel)  *pLeftLevel  = 0.0f;
+        if (pRightLevel) *pRightLevel = 0.0f;
+        return S_OK;
+    }
     return AudioManager::GetAudioLevels(pInstance, pLeftLevel, pRightLevel);
 }
 
 NATIVEVIDEOPLAYER_API HRESULT SetPlaybackSpeed(VideoPlayerInstance* pInstance, float speed) {
     if (!pInstance)
         return OP_E_NOT_INITIALIZED;
+
+    if (pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->SetPlaybackSpeed(speed);
 
     speed = std::max(0.5f, std::min(speed, 2.0f));
     pInstance->playbackSpeed = speed;
@@ -1085,6 +1303,9 @@ NATIVEVIDEOPLAYER_API HRESULT GetPlaybackSpeed(const VideoPlayerInstance* pInsta
     if (!pInstance || !pSpeed)
         return OP_E_INVALID_PARAMETER;
 
+    if (pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->GetPlaybackSpeed(pSpeed);
+
     *pSpeed = pInstance->playbackSpeed;
     return S_OK;
 }
@@ -1095,6 +1316,23 @@ NATIVEVIDEOPLAYER_API HRESULT GetPlaybackSpeed(const VideoPlayerInstance* pInsta
 NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInstance, VideoMetadata* pMetadata) {
     if (!pInstance || !pMetadata)
         return OP_E_INVALID_PARAMETER;
+
+    // HLS path: build basic metadata from engine properties
+    if (pInstance->pHLSPlayer) {
+        ZeroMemory(pMetadata, sizeof(VideoMetadata));
+        pInstance->pHLSPlayer->GetVideoSize(&pMetadata->width, &pMetadata->height);
+        pMetadata->hasWidth = pMetadata->width > 0;
+        pMetadata->hasHeight = pMetadata->height > 0;
+        LONGLONG dur = 0;
+        if (SUCCEEDED(pInstance->pHLSPlayer->GetDuration(&dur)) && dur > 0) {
+            pMetadata->duration = dur;
+            pMetadata->hasDuration = TRUE;
+        }
+        wcscpy_s(pMetadata->mimeType, L"application/x-mpegURL");
+        pMetadata->hasMimeType = TRUE;
+        return S_OK;
+    }
+
     if (!pInstance->pSourceReader)
         return OP_E_NOT_INITIALIZED;
 
@@ -1304,7 +1542,17 @@ NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInsta
 // SetOutputSize — reconfigure the source reader to produce scaled frames
 // ---------------------------------------------------------------------------
 NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT32 targetWidth, UINT32 targetHeight) {
-    if (!pInstance || !pInstance->pSourceReader)
+    if (!pInstance) return OP_E_NOT_INITIALIZED;
+
+    if (pInstance->pHLSPlayer) {
+        HRESULT hr = pInstance->pHLSPlayer->SetOutputSize(targetWidth, targetHeight);
+        if (SUCCEEDED(hr)) {
+            pInstance->pHLSPlayer->GetVideoSize(&pInstance->videoWidth, &pInstance->videoHeight);
+        }
+        return hr;
+    }
+
+    if (!pInstance->pSourceReader)
         return OP_E_NOT_INITIALIZED;
 
     // 0,0 means "reset to native resolution"

@@ -564,13 +564,16 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         }
                     }
 
-                    // Get the media duration
+                    // Get the media duration (may be 0 for live HLS streams)
                     val durArr = LongArray(1)
                     val hrDuration = player.GetMediaDuration(instance, durArr)
                     if (hrDuration < 0) {
-                        setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
-                        player.CloseMedia(instance)
-                        return@withLock
+                        // Only fail for non-network sources; network/HLS may lack duration
+                        if (!uri.startsWith("http", ignoreCase = true)) {
+                            setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
+                            player.CloseMedia(instance)
+                            return@withLock
+                        }
                     }
                     _duration = durArr[0] / 10000000.0
 
@@ -684,7 +687,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
             if (instance == 0L) break
 
             if (player.IsEOF(instance)) {
-                if (loop) {
+                if (_duration <= 0.0) {
+                    // Live HLS stream — EOF means the live window ended,
+                    // wait and continue (new segments may become available)
+                    delay(1000)
+                    continue
+                } else if (loop) {
                     try {
                         userPaused = false  // Reset userPaused when looping
                         initialFrameRead.set(false)  // Reset initialFrameRead flag
@@ -722,6 +730,16 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 if (hrArr[0] < 0 || srcBuffer == null) {
                     yield()
                     continue
+                }
+
+                // Re-query video size — HLS adaptive bitrate may change resolution
+                val sizeArr = IntArray(2)
+                player.GetVideoSize(instance, sizeArr)
+                if (sizeArr[0] > 0 && sizeArr[1] > 0 &&
+                    (sizeArr[0] != videoWidth || sizeArr[1] != videoHeight)
+                ) {
+                    videoWidth = sizeArr[0]
+                    videoHeight = sizeArr[1]
                 }
 
                 val width = videoWidth
@@ -856,7 +874,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 }
 
                 _currentTime = frameData.timestamp
-                _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
+                _progress = if (_duration > 0.0) {
+                    (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
+                } else {
+                    0f // Live stream — no meaningful progress
+                }
                 isLoading = false
 
                 delay(1)
@@ -985,6 +1007,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
     override fun seekTo(value: Float) {
         if (isDisposing.get()) return
+        if (_duration <= 0.0) return // Live stream — seeking not supported
 
         executeMediaOperation(
             operation = "seek",
@@ -1023,7 +1046,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     val posArr2 = LongArray(1)
                     if (player.GetMediaPosition(instance, posArr2) >= 0) {
                         _currentTime = posArr2[0] / 10000000.0
-                        _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
+                        _progress = if (_duration > 0.0) {
+                            (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
+                        } else 0f
                     }
 
                     if (!isDisposing.get()) {
