@@ -920,7 +920,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
         userPaused = false
         initialFrameRead.set(false)
 
-        setPlaybackState(true, "Error while starting playback")
+        if (!_isPlaying) {
+            setPlaybackState(true, "Error while starting playback")
+        }
 
         if (_hasMedia && (videoJob == null || videoJob?.isActive == false)) {
             videoJob = scope.launch {
@@ -1057,10 +1059,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
     fun onResized(width: Int = 0, height: Int = 0) {
         if (isDisposing.get()) return
 
-        if (width > 0 && height > 0) {
-            surfaceWidth = width
-            surfaceHeight = height
-        }
+        if (width <= 0 || height <= 0) return
+
+        if (width == surfaceWidth && height == surfaceHeight) return
+
+        surfaceWidth = width
+        surfaceHeight = height
 
         // Mark resizing in progress and debounce rapid events
         isResizing.set(true)
@@ -1068,9 +1072,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
         resizeJob = scope.launch {
             delay(120)
             try {
-                // Apply output scaling to match the display surface
-                // Keep isResizing true while reconfiguring the decoder to prevent
-                // produceFrames from calling ReadVideoFrame concurrently with SetOutputSize
                 applyOutputScaling()
             } finally {
                 isResizing.set(false)
@@ -1190,16 +1191,25 @@ class WindowsVideoPlayerState : VideoPlayerState {
         return _isPlaying
     }
 
+    /** Tracks how many consecutive iterations we've been waiting for resize */
+    private var resizeWaitCount = 0
+
     /**
-     * Waits if the player is currently resizing
-     * Uses a longer delay for 4K videos to reduce memory pressure
+     * Waits if the player is currently resizing.
+     * Has a safety timeout to prevent infinite blocking.
      *
      * @return True if resizing is in progress and we waited, false otherwise
      */
     private suspend fun waitIfResizing(): Boolean {
         if (isResizing.get()) {
+            resizeWaitCount++
+            if (resizeWaitCount > 200) { // ~1.6s max wait
+                windowsLogger.w { "waitIfResizing: timeout after ${resizeWaitCount} iterations, forcing isResizing=false" }
+                isResizing.set(false)
+                resizeWaitCount = 0
+                return false
+            }
             try {
-                // Keep the pipeline responsive during resize while avoiding busy-wait
                 yield()
                 delay(8)
             } catch (e: CancellationException) {
@@ -1207,6 +1217,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
             }
             return true
         }
+        resizeWaitCount = 0
         return false
     }
 

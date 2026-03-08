@@ -4,7 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -40,16 +39,6 @@ fun WindowsVideoPlayerSurface(
     overlay: @Composable () -> Unit = {},
     isInFullscreenWindow: Boolean = false,
 ) {
-    // Keep track of when this instance is first composed with this player state
-    val isFirstComposition = remember(playerState) { true }
-
-    // Only trigger resizing on first composition with this player state
-    LaunchedEffect(playerState) {
-        if (isFirstComposition) {
-            playerState.onResized()
-        }
-    }
-
     Box(
         modifier = modifier.onSizeChanged { size ->
             playerState.onResized(size.width, size.height)
