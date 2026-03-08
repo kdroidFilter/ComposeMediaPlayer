@@ -548,10 +548,15 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYT
         return hr;
     }
 
-    // Note: MFVideoFormat_RGB32 is X8R8G8B8 — alpha byte is undefined.
-    // The Kotlin side creates Skia bitmaps with ColorAlphaType.OPAQUE,
-    // which instructs Skia to treat all pixels as fully opaque regardless
-    // of the alpha byte value. No per-pixel fixup is needed.
+    // Force alpha byte to 0xFF — MFVideoFormat_RGB32 (X8R8G8B8) leaves the
+    // high byte undefined, which causes washed-out colours when Skia
+    // composites the frame against the window background.
+    {
+        const DWORD pixelCount = cbCurr / 4;
+        DWORD* px = reinterpret_cast<DWORD*>(pBytes);
+        for (DWORD i = 0; i < pixelCount; ++i)
+            px[i] |= 0xFF000000;
+    }
 
     pInstance->pLockedBuffer = pBuffer;
     pInstance->pLockedBytes = pBytes;
