@@ -51,8 +51,8 @@ fun WindowsVideoPlayerSurface(
     }
 
     Box(
-        modifier = modifier.onSizeChanged {
-            playerState.onResized()
+        modifier = modifier.onSizeChanged { size ->
+            playerState.onResized(size.width, size.height)
         },
         contentAlignment = Alignment.Center
     ) {

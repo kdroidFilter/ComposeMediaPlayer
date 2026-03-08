@@ -3,6 +3,9 @@ project(NativeVideoPlayer LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Find JNI
+find_package(JNI REQUIRED)
+
 # Check target architecture
 if(CMAKE_GENERATOR_PLATFORM STREQUAL "x64" OR CMAKE_GENERATOR_PLATFORM STREQUAL "")
     set(TARGET_ARCH "x64")
@@ -30,7 +33,11 @@ add_library(NativeVideoPlayer SHARED
         MediaFoundationManager.h
         AudioManager.cpp
         AudioManager.h
+        jni_bridge.cpp
 )
+
+# JNI include directories
+target_include_directories(NativeVideoPlayer PRIVATE ${JNI_INCLUDE_DIRS})
 
 # Compilation definitions
 target_compile_definitions(NativeVideoPlayer PRIVATE

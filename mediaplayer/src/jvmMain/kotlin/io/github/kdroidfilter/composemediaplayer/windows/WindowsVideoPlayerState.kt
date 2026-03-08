@@ -14,12 +14,6 @@ import androidx.compose.ui.unit.sp
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.Logger.Companion.setMinSeverity
 import co.touchlab.kermit.Severity
-import com.sun.jna.Pointer
-import com.sun.jna.WString
-import com.sun.jna.ptr.FloatByReference
-import com.sun.jna.ptr.IntByReference
-import com.sun.jna.ptr.LongByReference
-import com.sun.jna.ptr.PointerByReference
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -48,7 +42,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
@@ -77,7 +70,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
         private val isMfBootstrapped = AtomicBoolean(false)
 
         /** Map to store volume settings for each player instance */
-        private val instanceVolumes = ConcurrentHashMap<Pointer, Float>()
+        private val instanceVolumes = ConcurrentHashMap<Long, Float>()
 
         /**
          * Initialize Media Foundation only once for all instances.
@@ -116,7 +109,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private var userPaused = false
 
     /** Video player instance handle */
-    private var videoPlayerInstance: Pointer? = null
+    private var videoPlayerInstance: Long = 0L
 
     /** Deferred completed when initialization is ready */
     private val initReady = CompletableDeferred<Unit>()
@@ -139,7 +132,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 _volume = newVolume
                 scope.launch {
                     mediaOperationMutex.withLock {
-                        videoPlayerInstance?.let { instance ->
+                        videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
                             // Store the volume setting for this instance
                             instanceVolumes[instance] = newVolume
 
@@ -181,7 +174,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 _playbackSpeed = newSpeed
                 scope.launch {
                     mediaOperationMutex.withLock {
-                        videoPlayerInstance?.let { instance ->
+                        videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
                             val hr = player.SetPlaybackSpeed(instance, newSpeed)
                             if (hr < 0) {
                                 setError("Error updating playback speed (hr=0x${hr.toString(16)})")
@@ -239,7 +232,10 @@ class WindowsVideoPlayerState : VideoPlayerState {
     // Video properties
     var videoWidth by mutableStateOf(0)
     var videoHeight by mutableStateOf(0)
-    private var frameBufferSize = 1
+
+    // Surface display size (pixels) — used to scale native output resolution
+    private var surfaceWidth = 0
+    private var surfaceHeight = 0
 
     // Synchronization
     private val mediaOperationMutex = Mutex()
@@ -269,10 +265,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private var skiaBitmapWidth: Int = 0
     private var skiaBitmapHeight: Int = 0
 
-    // Legacy buffer - kept for fallback but no longer used in optimized path
-    private var sharedFrameBuffer: ByteArray? = null
-    private var frameBitmapRecycler: Bitmap? = null
-
     // Variable to store the last opened URI
     private var lastUri: String? = null
 
@@ -280,15 +272,15 @@ class WindowsVideoPlayerState : VideoPlayerState {
         // Kick off native initialization immediately
         scope.launch {
             try {
-                val instance = MediaFoundationLib.createInstance()
-                if (instance == null) {
+                val handle = MediaFoundationLib.createInstance()
+                if (handle == 0L) {
                     setError("Failed to create video player instance")
                     return@launch
                 }
-                videoPlayerInstance = instance
+                videoPlayerInstance = handle
 
                 // Store default volume so that later instances inherit it
-                instanceVolumes[instance] = _volume
+                instanceVolumes[handle] = _volume
                 initReady.complete(Unit)
             } catch (e: Exception) {
                 initReady.completeExceptionally(e)
@@ -320,7 +312,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     // Stop playing if active
                     _isPlaying = false
                     val instance = videoPlayerInstance
-                    if (instance != null) {
+                    if (instance != 0L) {
                         try {
                             // Stop playback before releasing resources
                             val hr = player.SetPlaybackState(instance, false, true)
@@ -348,7 +340,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                             windowsLogger.e { "Exception destroying instance: ${e.message}" }
                         }
 
-                        videoPlayerInstance = null
+                        videoPlayerInstance = 0L
                     }
 
                     // Clear all resources
@@ -375,15 +367,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
             val currentFrame = _currentFrame
             if (currentFrame != null &&
                 currentFrame !== skiaBitmapA &&
-                currentFrame !== skiaBitmapB &&
-                currentFrame !== frameBitmapRecycler
+                currentFrame !== skiaBitmapB
             ) {
                 currentFrame.close()
             }
             _currentFrame = null
             currentFrameState.value = null
-            frameBitmapRecycler?.close()
-            frameBitmapRecycler = null
 
             // Clean up double-buffering bitmaps
             skiaBitmapA?.close()
@@ -396,9 +385,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
             lastFrameHash = Int.MIN_VALUE
         }
 
-        // Clear any shared buffer allocated for frames
-        sharedFrameBuffer = null
-        frameBufferSize = 0
 
         // Reset all state
         _currentTime = 0.0
@@ -431,16 +417,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
             val currentFrame = _currentFrame
             if (currentFrame != null &&
                 currentFrame !== skiaBitmapA &&
-                currentFrame !== skiaBitmapB &&
-                currentFrame !== frameBitmapRecycler
+                currentFrame !== skiaBitmapB
             ) {
                 currentFrame.close()
             }
             _currentFrame = null
-            // Reset the currentFrameState
             currentFrameState.value = null
-            frameBitmapRecycler?.close()  // Recycle the bitmap if any
-            frameBitmapRecycler = null
 
             // Clean up double-buffering bitmaps
             skiaBitmapA?.close()
@@ -453,9 +435,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
             lastFrameHash = Int.MIN_VALUE
         }
 
-        // Clear any shared buffer allocated for frames
-        sharedFrameBuffer = null
-        frameBufferSize = 0  // Reset frame buffer size
 
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
@@ -527,7 +506,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     // Stop playback and release existing resources
                     val wasPlaying = _isPlaying
                     val instance = videoPlayerInstance
-                    if (instance == null) {
+                    if (instance == 0L) {
                         setError("Video player instance is null")
                         return@withLock
                     }
@@ -558,44 +537,49 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         return@withLock
                     }
 
-                    // Open the media with appropriate initial playback state
-                    // Pass startPlayback=false to the native library when InitialPlayerState.PAUSE is specified
-                    // This prevents the native library from starting to read the video immediately
-                    // and fixes the issue where the video would start playing even when paused on Windows
+                    // Always open media in paused state to avoid starting the native
+                    // playback clock before we've finished setup (SetOutputSize, metadata, etc.).
+                    // We explicitly call SetPlaybackState(true) later, right before starting
+                    // the frame-reading coroutine, so the wall-clock is in sync with frame production.
                     val startPlayback = initializeplayerState == InitialPlayerState.PLAY
-                    val hrOpen = player.OpenMedia(instance, WString(uri), startPlayback)
+                    val hrOpen = player.OpenMedia(instance, uri, false)
                     if (hrOpen < 0) {
                         setError("Failed to open media (hr=0x${hrOpen.toString(16)}): $uri")
                         return@withLock
                     }
 
                     // Get the video dimensions
-                    val wRef = IntByReference()
-                    val hRef = IntByReference()
-                    player.GetVideoSize(instance, wRef, hRef)
-                    if (wRef.value <= 0 || hRef.value <= 0) {
+                    val sizeArr = IntArray(2)
+                    player.GetVideoSize(instance, sizeArr)
+                    if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
                         setError("Failed to retrieve video size")
                         player.CloseMedia(instance)
                         return@withLock
                     }
-                    videoWidth = wRef.value
-                    videoHeight = hRef.value
+                    videoWidth = sizeArr[0]
+                    videoHeight = sizeArr[1]
 
-                    // Calculate the buffer size for frames
-                    frameBufferSize = videoWidth * videoHeight * 4
-
-                    // Allocate the shared buffer
-                    sharedFrameBuffer = ByteArray(frameBufferSize)
+                    // Scale output to match display surface (saves memory for 4K+ video)
+                    if (surfaceWidth > 0 && surfaceHeight > 0) {
+                        val hrScale = player.SetOutputSize(instance, surfaceWidth, surfaceHeight)
+                        if (hrScale >= 0) {
+                            player.GetVideoSize(instance, sizeArr)
+                            if (sizeArr[0] > 0 && sizeArr[1] > 0) {
+                                videoWidth = sizeArr[0]
+                                videoHeight = sizeArr[1]
+                            }
+                        }
+                    }
 
                     // Get the media duration
-                    val durationRef = LongByReference()
-                    val hrDuration = player.GetMediaDuration(instance, durationRef)
+                    val durArr = LongArray(1)
+                    val hrDuration = player.GetMediaDuration(instance, durArr)
                     if (hrDuration < 0) {
                         setError("Failed to retrieve duration (hr=0x${hrDuration.toString(16)})")
                         player.CloseMedia(instance)
                         return@withLock
                     }
-                    _duration = durationRef.value / 10000000.0
+                    _duration = durArr[0] / 10000000.0
 
                     // Retrieve metadata using the native function
                     val retrievedMetadata = MediaFoundationLib.getVideoMetadata(instance)
@@ -613,14 +597,37 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     // Set _hasMedia to true only if everything succeeded
                     _hasMedia = true
 
-                    // Explicitly seek to the beginning of the video
-                    val hrSeek = player.SeekMedia(instance, 0)
-                    if (hrSeek < 0) {
-                        windowsLogger.e { "Failed to seek to beginning (hr=0x${hrSeek.toString(16)})" }
-                    }
-
-                    // Only start jobs if not disposing
                     if (!isDisposing.get()) {
+                        // Restore the volume setting BEFORE starting playback
+                        val storedVolume = instanceVolumes[instance]
+                        if (storedVolume != null) {
+                            val volArr = FloatArray(1)
+                            val hr = player.GetAudioVolume(instance, volArr)
+                            if (hr >= 0 && storedVolume != volArr[0]) {
+                                val setHr = player.SetAudioVolume(instance, storedVolume)
+                                if (setHr < 0) {
+                                    windowsLogger.e { "Error restoring volume (hr=0x${setHr.toString(16)})" }
+                                }
+                            }
+                        }
+
+                        if (!startPlayback) {
+                            userPaused = true
+                            initialFrameRead.set(false)
+                            isLoading = false
+                        }
+
+                        // Start native playback as late as possible — this sets
+                        // the wall-clock origin (llPlaybackStartTime) to NOW,
+                        // minimising the gap before produceFrames reads its first frame.
+                        if (startPlayback) {
+                            val hrPlay = player.SetPlaybackState(instance, true, false)
+                            if (hrPlay < 0) {
+                                windowsLogger.e { "Failed to start playback (hr=0x${hrPlay.toString(16)})" }
+                            }
+                        }
+                        _isPlaying = startPlayback
+
                         // Start video processing
                         videoJob = scope.launch {
                             launch { produceFrames() }
@@ -633,43 +640,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
                                 updateAudioLevels()
                                 delay(50)
                             }
-                        }
-                    }
-
-                    // Restore the volume setting for this instance
-                    val storedVolume = instanceVolumes[instance]
-                    if (storedVolume != null) {
-                        val volumeRef = FloatByReference()
-                        val hr = player.GetAudioVolume(instance, volumeRef)
-                        if (hr >= 0 && storedVolume != volumeRef.value) {
-                            val setHr = player.SetAudioVolume(instance, storedVolume)
-                            if (setHr < 0) {
-                                windowsLogger.e { "Error restoring volume (hr=0x${setHr.toString(16)})" }
-                            }
-                        }
-                    }
-
-                    delay(100)
-                    if (!isDisposing.get()) {
-                        // Set the Kotlin state to match the native player state
-                        _isPlaying = initializeplayerState == InitialPlayerState.PLAY
-                        _hasMedia = true
-                        
-                        // If we're in PAUSE state, make sure userPaused is set to true
-                        // This is critical for correct behavior when InitialPlayerState.PAUSE is specified
-                        // The waitForPlaybackState method has logic that tries to
-                        // restart playback if it's not playing and userPaused is false
-                        // By setting userPaused to true, we prevent this automatic restart behavior
-                        // when the user explicitly wants to start in a paused state
-                        if (initializeplayerState == InitialPlayerState.PAUSE) {
-                            userPaused = true
-                            // Reset initialFrameRead flag to ensure we read one frame for display
-                            initialFrameRead.set(false)
-                            
-                            // Explicitly set isLoading to false when in PAUSE state
-                            // This ensures the UI doesn't show loading state indefinitely
-                            // when the player is initialized with PAUSE state
-                            isLoading = false
                         }
                     }
 
@@ -690,13 +660,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
         if (isDisposing.get()) return
 
         mediaOperationMutex.withLock {
-            videoPlayerInstance?.let { instance ->
-                val leftRef = FloatByReference()
-                val rightRef = FloatByReference()
-                val hr = player.GetAudioLevels(instance, leftRef, rightRef)
+            videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
+                val levelsArr = FloatArray(2)
+                val hr = player.GetAudioLevels(instance, levelsArr)
                 if (hr >= 0) {
-                    _leftLevel = leftRef.value
-                    _rightLevel = rightRef.value
+                    _leftLevel = levelsArr[0]
+                    _rightLevel = levelsArr[1]
                 }
             }
         }
@@ -713,7 +682,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
      */
     private suspend fun produceFrames() {
         while (scope.isActive && _hasMedia && !isDisposing.get()) {
-            val instance = videoPlayerInstance ?: break
+            val instance = videoPlayerInstance
+            if (instance == 0L) break
 
             if (player.IsEOF(instance)) {
                 if (loop) {
@@ -748,11 +718,10 @@ class WindowsVideoPlayerState : VideoPlayerState {
             }
 
             try {
-                val ptrRef = PointerByReference()
-                val sizeRef = IntByReference()
-                val readResult = player.ReadVideoFrame(instance, ptrRef, sizeRef)
+                val hrArr = IntArray(1)
+                val srcBuffer = player.ReadVideoFrame(instance, hrArr)
 
-                if (readResult < 0 || ptrRef.value == null || sizeRef.value <= 0) {
+                if (hrArr[0] < 0 || srcBuffer == null) {
                     yield()
                     continue
                 }
@@ -766,13 +735,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     continue
                 }
 
-                // Get the native frame buffer
-                val srcBuffer = ptrRef.value.getByteBuffer(0, sizeRef.value.toLong())
-                if (srcBuffer == null) {
-                    player.UnlockVideoFrame(instance)
-                    yield()
-                    continue
-                }
                 srcBuffer.rewind()
 
                 val pixelCount = width * height
@@ -825,7 +787,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // Single memory copy: native buffer → Skia bitmap
                 val dstRowBytes = pixmap.rowBytes
                 val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
-                val dstBuffer = Pointer(pixelsAddr).getByteBuffer(0, dstSizeBytes)
+                val dstBuffer = MediaFoundationLib.nWrapPointer(pixelsAddr, dstSizeBytes)
+                    ?: run {
+                        player.UnlockVideoFrame(instance)
+                        yield()
+                        continue
+                    }
 
                 srcBuffer.rewind()
                 copyBgraFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
@@ -833,9 +800,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 player.UnlockVideoFrame(instance)
 
                 // Get frame timestamp
-                val posRef = LongByReference()
-                val frameTime = if (player.GetMediaPosition(instance, posRef) >= 0) {
-                    posRef.value / 10000000.0
+                val posArr = LongArray(1)
+                val frameTime = if (player.GetMediaPosition(instance, posArr) >= 0) {
+                    posArr[0] / 10000000.0
                 } else {
                     0.0
                 }
@@ -862,32 +829,16 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * and should not be closed here.
      */
     private suspend fun consumeFrames() {
-        // Timeout mechanism to prevent getting stuck in loading state
         var frameReceived = false
         var loadingTimeout = 0
 
         while (scope.isActive && _hasMedia && !isDisposing.get()) {
-            try {
-                // Wait for playback state, allowing initial frame when paused
-                // If the return value is false, we should wait and not process frames
-                if (!waitForPlaybackState(allowInitialFrame = true)) {
-                    delay(100)  // Add a small delay to prevent busy waiting
-                    continue
-                }
-            } catch (e: CancellationException) {
-                break
-            }
-
-            if (waitIfResizing()) {
-                continue
-            }
+            if (waitIfResizing()) continue
 
             try {
                 val frameData = frameChannel.tryReceive().getOrNull() ?: run {
-                    // If we're still loading and haven't received a frame yet, increment timeout counter
                     if (isLoading && !frameReceived) {
                         loadingTimeout++
-                        // After ~3 seconds (16ms * 200) of no frames while loading, force isLoading to false
                         if (loadingTimeout > 200) {
                             windowsLogger.w { "No frames received for 3 seconds, forcing isLoading to false" }
                             isLoading = false
@@ -898,21 +849,17 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     return@run null
                 } ?: continue
 
-                // Reset timeout counter and mark that we've received a frame
                 loadingTimeout = 0
                 frameReceived = true
 
-                // With double-buffering, we don't close old bitmaps - they're reused
-                // Just update the reference and create a new ImageBitmap view
                 bitmapLock.write {
                     _currentFrame = frameData.bitmap
-                    // Update the currentFrameState with the new frame
                     currentFrameState.value = frameData.bitmap.asComposeImageBitmap()
                 }
 
                 _currentTime = frameData.timestamp
                 _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
-                isLoading = false  // Once frames start arriving, set isLoading to false
+                isLoading = false
 
                 delay(1)
 
@@ -928,61 +875,59 @@ class WindowsVideoPlayerState : VideoPlayerState {
     }
 
     /**
-     * Starts or resumes playback
-     * If no media is loaded but a previous URI exists, it will try to open and play it
+     * Starts or resumes playback.
+     * If media is not loaded yet (openUri in progress), waits for it to finish
+     * instead of triggering a second open which would race with the first.
      */
     override fun play() {
         if (isDisposing.get()) return
 
-        if (!readyForPlayback()) {
-            lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
-                scope.launch {
-                    openUri(uri)
-                    delay(100)
-                    if (readyForPlayback()) {
-                        executeMediaOperation(
-                            operation = "play after init",
-                            precondition = true
-                        ) {
-                            setPlaybackState(true, "Error while starting playback after initialization")
-                        }
-                    }
-                }
+        if (readyForPlayback()) {
+            // Fast path: media is loaded, just resume
+            executeMediaOperation(operation = "play") {
+                resumePlayback()
             }
             return
         }
 
-        executeMediaOperation(
-            operation = "play",
-            precondition = true
-        ) {
-            userPaused = false
-            // Reset initialFrameRead flag when switching to play state
-            // This ensures that if we pause again, we'll read a new initial frame
-            initialFrameRead.set(false)
-            
-            setPlaybackState(true, "Error while starting playback")
-            if (_hasMedia && (videoJob == null || videoJob?.isActive == false)) {
-                videoJob = scope.launch {
-                    launch { produceFrames() }
-                    launch { consumeFrames() }
+        // Slow path: wait for any in-progress openUri to complete, then resume
+        scope.launch {
+            try {
+                withTimeout(10_000) { initReady.await() }
+                // Wait for _hasMedia to become true (set by openUriInternal)
+                withTimeout(10_000) {
+                    snapshotFlow { _hasMedia }.filter { it }.first()
                 }
-            }
-
-            // Restore the volume setting for this instance
-            val instance = videoPlayerInstance
-            if (instance != null) {
-                val storedVolume = instanceVolumes[instance]
-                if (storedVolume != null) {
-                    val volumeRef = FloatByReference()
-                    val hr = player.GetAudioVolume(instance, volumeRef)
-                    if (hr >= 0 && storedVolume != volumeRef.value) {
-                        val setHr = player.SetAudioVolume(instance, storedVolume)
-                        if (setHr < 0) {
-                            windowsLogger.e { "Error restoring volume during play (hr=0x${setHr.toString(16)})" }
-                        }
+            } catch (_: Exception) {
+                // Timeout or cancellation — if we still have a URI, try a fresh open
+                if (!_hasMedia) {
+                    lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
+                        openUriInternal(uri, InitialPlayerState.PLAY)
                     }
                 }
+                return@launch
+            }
+
+            // Media is loaded — resume playback
+            mediaOperationMutex.withLock {
+                if (!isDisposing.get()) resumePlayback()
+            }
+        }
+    }
+
+    /**
+     * Resumes playback — must be called under mediaOperationMutex.
+     */
+    private fun resumePlayback() {
+        userPaused = false
+        initialFrameRead.set(false)
+
+        setPlaybackState(true, "Error while starting playback")
+
+        if (_hasMedia && (videoJob == null || videoJob?.isActive == false)) {
+            videoJob = scope.launch {
+                launch { produceFrames() }
+                launch { consumeFrames() }
             }
         }
     }
@@ -1032,7 +977,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
             // Reset initialFrameRead flag to ensure we read a new frame when playing again
             initialFrameRead.set(false)
             
-            videoPlayerInstance?.let { instance ->
+            videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
                 player.CloseMedia(instance)
             }
         }
@@ -1043,10 +988,10 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
         executeMediaOperation(
             operation = "seek",
-            precondition = _hasMedia && videoPlayerInstance != null
+            precondition = _hasMedia && videoPlayerInstance != 0L
         ) {
             val instance = videoPlayerInstance
-            if (instance != null) {
+            if (instance != 0L) {
                 try {
                     isLoading = true
                     // If the video was playing before seeking, we should reset userPaused
@@ -1075,9 +1020,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         }
                     }
 
-                    val posRef = LongByReference()
-                    if (player.GetMediaPosition(instance, posRef) >= 0) {
-                        _currentTime = posRef.value / 10000000.0
+                    val posArr2 = LongArray(1)
+                    if (player.GetMediaPosition(instance, posArr2) >= 0) {
+                        _currentTime = posArr2[0] / 10000000.0
                         _progress = (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
                     }
 
@@ -1111,17 +1056,56 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * Temporarily pauses frame processing to avoid artifacts during resize
      * For 4K videos, we need a longer delay to prevent memory pressure
      */
-    fun onResized() {
+    fun onResized(width: Int = 0, height: Int = 0) {
         if (isDisposing.get()) return
 
-        // Mark resizing in progress and debounce rapid events without heavy operations
+        if (width > 0 && height > 0) {
+            surfaceWidth = width
+            surfaceHeight = height
+        }
+
+        // Mark resizing in progress and debounce rapid events
         isResizing.set(true)
-        // Cancel any pending end-of-resize job and schedule a shorter debounce
         resizeJob?.cancel()
         resizeJob = scope.launch {
-            // Short debounce to smooth out successive resize events
             delay(120)
-            isResizing.set(false)
+            try {
+                // Apply output scaling to match the display surface
+                // Keep isResizing true while reconfiguring the decoder to prevent
+                // produceFrames from calling ReadVideoFrame concurrently with SetOutputSize
+                applyOutputScaling()
+            } finally {
+                isResizing.set(false)
+            }
+        }
+    }
+
+    /**
+     * Asks Media Foundation to produce frames at the display surface size
+     * instead of full native resolution. Saves significant memory for 4K+ video.
+     */
+    private suspend fun applyOutputScaling() {
+        if (isDisposing.get() || !_hasMedia) return
+        val sw = surfaceWidth
+        val sh = surfaceHeight
+        if (sw <= 0 || sh <= 0) return
+
+        val instance = videoPlayerInstance
+        if (instance == 0L) return
+
+        mediaOperationMutex.withLock {
+            val hr = player.SetOutputSize(instance, sw, sh)
+            if (hr >= 0) {
+                // Update dimensions from native side
+                val sizeArr = IntArray(2)
+                player.GetVideoSize(instance, sizeArr)
+                if (sizeArr[0] > 0 && sizeArr[1] > 0) {
+                    videoWidth = sizeArr[0]
+                    videoHeight = sizeArr[1]
+                    // Reset bitmaps so they are reallocated at the new size
+                    lastFrameHash = Int.MIN_VALUE
+                }
+            }
         }
     }
 
@@ -1154,7 +1138,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * @return True if the operation succeeded, false otherwise
      */
     private fun setPlaybackState(playing: Boolean, errorMessage: String, bStop: Boolean = false): Boolean {
-        return videoPlayerInstance?.let { instance ->
+        return videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
             for (attempt in 1..3) {
                 val res = player.SetPlaybackState(instance, playing, bStop)
                 if (res >= 0) {
@@ -1191,54 +1175,20 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * @return True if the method should continue processing frames, false if it should wait
      */
     private suspend fun waitForPlaybackState(allowInitialFrame: Boolean = false): Boolean {
-        // If playing, continue processing frames
-        if (_isPlaying) {
-            return true
-        }
-        
-        // If paused but we need an initial frame and haven't read one yet, allow one frame
+        if (_isPlaying) return true
+
+        // When paused, allow the producer to read exactly one frame for display
         if (userPaused && allowInitialFrame && !initialFrameRead.getAndSet(true)) {
             return true
         }
-        
+
+        if (isLoading) isLoading = false
+
         try {
-            // If we're not playing and user has intentionally paused, wait indefinitely
-            // This prevents reading frames and advancing position when paused
-            if (userPaused) {
-                // Set isLoading to false to ensure UI doesn't show loading state indefinitely
-                if (isLoading) {
-                    isLoading = false
-                }
-                
-                // Wait until the player starts playing
-                snapshotFlow { _isPlaying }.filter { it }.first()
-                return true
-            }
-            
-            // If we're not playing but not intentionally paused, wait with timeout
-            withTimeoutOrNull(5000) {
-                snapshotFlow { _isPlaying }.filter { it }.first()
-            } ?: run {
-                // Only attempt to restart playback if the user hasn't intentionally paused
-                if (_hasMedia && videoPlayerInstance != null && !userPaused && !isDisposing.get()) {
-                    setPlaybackState(true, "Error while restarting playback after timeout")
-                    delay(100)
-                    if (!_isPlaying) {
-                        yield()
-                    }
-                } else {
-                    // If user paused, just yield to allow other coroutines to run
-                    yield()
-                }
-            }
+            snapshotFlow { _isPlaying }.filter { it }.first()
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            windowsLogger.e { "Error in waitForPlaybackState: ${e.message}" }
-            yield()
         }
-        
-        // Continue processing frames if playing, otherwise wait
         return _isPlaying
     }
 
@@ -1268,7 +1218,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * @return True if the player is initialized and has media loaded, false otherwise
      */
     private fun readyForPlayback(): Boolean {
-        return initReady.isCompleted && videoPlayerInstance != null && _hasMedia && !isDisposing.get()
+        return initReady.isCompleted && videoPlayerInstance != 0L && _hasMedia && !isDisposing.get()
     }
 
     /**

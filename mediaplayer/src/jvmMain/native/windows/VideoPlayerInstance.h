@@ -21,6 +21,8 @@ struct VideoPlayerInstance {
     DWORD lockedCurrSize = 0;
     UINT32 videoWidth = 0;
     UINT32 videoHeight = 0;
+    UINT32 nativeWidth = 0;   // Original video resolution (before scaling)
+    UINT32 nativeHeight = 0;
     BOOL bEOF = FALSE;
     
     // Frame caching for paused state

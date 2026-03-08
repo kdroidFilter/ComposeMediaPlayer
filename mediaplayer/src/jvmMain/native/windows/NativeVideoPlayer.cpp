@@ -154,13 +154,12 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* pInstance, IMFSample** ppS
         }
         if (!pSample) return S_OK; // decoder starved
 
-        // Update cache
+        // Release any cached sample from a previous pause — not needed during playback
         if (pInstance->pCachedSample) {
             pInstance->pCachedSample->Release();
             pInstance->pCachedSample = nullptr;
         }
-        pSample->AddRef();
-        pInstance->pCachedSample = pSample;
+        pInstance->bHasInitialFrame = FALSE;
         pInstance->llCurrentPosition = llTimestamp;
     }
 
@@ -314,12 +313,13 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
     if (FAILED(hr))
         return hr;
 
-    // Retrieve video dimensions
+    // Retrieve video dimensions (this is the native resolution of the video)
     IMFMediaType* pCurrent = nullptr;
     hr = pInstance->pSourceReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrent);
     if (SUCCEEDED(hr)) {
         hr = MFGetAttributeSize(pCurrent, MF_MT_FRAME_SIZE, &pInstance->videoWidth, &pInstance->videoHeight);
-
+        pInstance->nativeWidth  = pInstance->videoWidth;
+        pInstance->nativeHeight = pInstance->videoHeight;
         SafeRelease(pCurrent);
     }
 
@@ -1283,6 +1283,88 @@ NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInsta
         pMetadata->audioSampleRate = pInstance->pSourceAudioFormat->nSamplesPerSec;
         pMetadata->hasAudioSampleRate = TRUE;
     }
+
+    return S_OK;
+}
+
+// ---------------------------------------------------------------------------
+// SetOutputSize — reconfigure the source reader to produce scaled frames
+// ---------------------------------------------------------------------------
+NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT32 targetWidth, UINT32 targetHeight) {
+    if (!pInstance || !pInstance->pSourceReader)
+        return OP_E_NOT_INITIALIZED;
+
+    // 0,0 means "reset to native resolution"
+    if (targetWidth == 0 || targetHeight == 0) {
+        targetWidth  = pInstance->nativeWidth;
+        targetHeight = pInstance->nativeHeight;
+    }
+
+    // Don't scale UP beyond the native resolution
+    if (targetWidth > pInstance->nativeWidth || targetHeight > pInstance->nativeHeight) {
+        targetWidth  = pInstance->nativeWidth;
+        targetHeight = pInstance->nativeHeight;
+    }
+
+    // Preserve aspect ratio: fit inside the target bounding box
+    if (pInstance->nativeWidth > 0 && pInstance->nativeHeight > 0) {
+        double srcAspect = static_cast<double>(pInstance->nativeWidth) / pInstance->nativeHeight;
+        double dstAspect = static_cast<double>(targetWidth) / targetHeight;
+        if (srcAspect > dstAspect) {
+            // Width-limited
+            targetHeight = static_cast<UINT32>(targetWidth / srcAspect);
+        } else {
+            // Height-limited
+            targetWidth = static_cast<UINT32>(targetHeight * srcAspect);
+        }
+    }
+
+    // MF requires even dimensions
+    targetWidth  = (targetWidth  + 1) & ~1u;
+    targetHeight = (targetHeight + 1) & ~1u;
+
+    // Skip if already at this size
+    if (targetWidth == pInstance->videoWidth && targetHeight == pInstance->videoHeight)
+        return S_OK;
+
+    // Minimum size guard
+    if (targetWidth < 2 || targetHeight < 2)
+        return E_INVALIDARG;
+
+    // Reconfigure the output media type with the new frame size
+    IMFMediaType* pType = nullptr;
+    HRESULT hr = MFCreateMediaType(&pType);
+    if (FAILED(hr)) return hr;
+
+    hr = pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    if (SUCCEEDED(hr))
+        hr = pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+    if (SUCCEEDED(hr))
+        hr = MFSetAttributeSize(pType, MF_MT_FRAME_SIZE, targetWidth, targetHeight);
+    if (SUCCEEDED(hr))
+        hr = pInstance->pSourceReader->SetCurrentMediaType(
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pType);
+    SafeRelease(pType);
+
+    if (FAILED(hr))
+        return hr;
+
+    // Verify and update the actual output dimensions
+    IMFMediaType* pActual = nullptr;
+    hr = pInstance->pSourceReader->GetCurrentMediaType(
+        MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pActual);
+    if (SUCCEEDED(hr)) {
+        MFGetAttributeSize(pActual, MF_MT_FRAME_SIZE,
+                           &pInstance->videoWidth, &pInstance->videoHeight);
+        SafeRelease(pActual);
+    }
+
+    // Invalidate cached sample since dimensions changed
+    if (pInstance->pCachedSample) {
+        pInstance->pCachedSample->Release();
+        pInstance->pCachedSample = nullptr;
+    }
+    pInstance->bHasInitialFrame = FALSE;
 
     return S_OK;
 }

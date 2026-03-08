@@ -12,7 +12,7 @@
 
 // Native API version — bump when the exported API changes.
 // Kotlin JNA bindings should call GetNativeVersion() and compare.
-#define NATIVE_VIDEO_PLAYER_VERSION 1
+#define NATIVE_VIDEO_PLAYER_VERSION 2
 
 // Structure to hold video metadata
 typedef struct VideoMetadata {
@@ -245,6 +245,21 @@ NATIVEVIDEOPLAYER_API HRESULT GetPlaybackSpeed(const VideoPlayerInstance* pInsta
  * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInstance, VideoMetadata* pMetadata);
+
+/**
+ * @brief Sets the desired output resolution for decoded video frames.
+ *
+ * Reconfigures the MF source reader output type to produce frames at the
+ * requested size (hardware-scaled via DXVA2). The aspect ratio of the
+ * original video is preserved; the requested size acts as a bounding box.
+ * Passing 0,0 resets to the native video resolution.
+ *
+ * @param pInstance Handle to the instance.
+ * @param targetWidth  Desired output width  (0 = native).
+ * @param targetHeight Desired output height (0 = native).
+ * @return S_OK on success, or an error code.
+ */
+NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT32 targetWidth, UINT32 targetHeight);
 
 #ifdef __cplusplus
 }
