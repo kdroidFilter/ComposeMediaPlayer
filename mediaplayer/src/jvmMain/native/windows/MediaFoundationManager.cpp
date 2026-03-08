@@ -2,6 +2,7 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <dxgi.h>
+#include <atomic>
 
 namespace MediaFoundation {
 
@@ -11,7 +12,7 @@ static ID3D11Device* g_pD3DDevice = nullptr;
 static IMFDXGIDeviceManager* g_pDXGIDeviceManager = nullptr;
 static UINT32 g_dwResetToken = 0;
 static IMMDeviceEnumerator* g_pEnumerator = nullptr;
-static int g_instanceCount = 0;
+static std::atomic<int> g_instanceCount{0};
 
 HRESULT Initialize() {
     if (g_bMFInitialized)
@@ -33,10 +34,22 @@ HRESULT Initialize() {
     if (SUCCEEDED(hr))
         hr = g_pDXGIDeviceManager->ResetDevice(g_pD3DDevice, g_dwResetToken);
     if (FAILED(hr)) {
-        if (g_pD3DDevice) { 
-            g_pD3DDevice->Release(); 
-            g_pD3DDevice = nullptr; 
+        if (g_pD3DDevice) {
+            g_pD3DDevice->Release();
+            g_pD3DDevice = nullptr;
         }
+        MFShutdown();
+        return hr;
+    }
+
+    // Create the audio device enumerator eagerly so it is released in Shutdown()
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                          IID_PPV_ARGS(&g_pEnumerator));
+    if (FAILED(hr)) {
+        g_pDXGIDeviceManager->Release();
+        g_pDXGIDeviceManager = nullptr;
+        g_pD3DDevice->Release();
+        g_pD3DDevice = nullptr;
         MFShutdown();
         return hr;
     }
@@ -104,10 +117,6 @@ IMFDXGIDeviceManager* GetDXGIDeviceManager() {
 }
 
 IMMDeviceEnumerator* GetDeviceEnumerator() {
-    if (!g_pEnumerator) {
-        CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, 
-                        IID_PPV_ARGS(&g_pEnumerator));
-    }
     return g_pEnumerator;
 }
 

@@ -10,6 +10,10 @@
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 
+// Native API version — bump when the exported API changes.
+// Kotlin JNA bindings should call GetNativeVersion() and compare.
+#define NATIVE_VIDEO_PLAYER_VERSION 2
+
 // Structure to hold video metadata
 typedef struct VideoMetadata {
     wchar_t title[256];          // Title of the video (empty if not available)
@@ -32,7 +36,7 @@ typedef struct VideoMetadata {
     BOOL hasAudioSampleRate;     // TRUE if audio sample rate is available
 } VideoMetadata;
 
-// Macro d'exportation pour la DLL Windows
+// DLL export macro
 #ifdef _WIN32
 #ifdef NATIVEVIDEOPLAYER_EXPORTS
 #define NATIVEVIDEOPLAYER_API __declspec(dllexport)
@@ -43,12 +47,12 @@ typedef struct VideoMetadata {
 #define NATIVEVIDEOPLAYER_API
 #endif
 
-// Codes d'erreur personnalisés
+// Custom error codes
 #define OP_E_NOT_INITIALIZED     ((HRESULT)0x80000001L)
 #define OP_E_ALREADY_INITIALIZED ((HRESULT)0x80000002L)
 #define OP_E_INVALID_PARAMETER   ((HRESULT)0x80000003L)
 
-// Structure pour encapsuler l'état d'une instance de lecteur vidéo
+// Forward declaration for the video player instance state
 struct VideoPlayerInstance;
 
 #ifdef __cplusplus
@@ -56,56 +60,66 @@ extern "C" {
 #endif
 
 // ====================================================================
-// Fonctions exportées pour la gestion des instances et la lecture multimédia
+// Exported functions for instance management and media playback
 // ====================================================================
 
 /**
- * @brief Initialise Media Foundation, Direct3D11 et le gestionnaire DXGI (une seule fois pour toutes les instances).
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Returns the native API version number.
+ *
+ * Kotlin JNA bindings should check that this value matches the expected
+ * version to detect DLL/binding mismatches at load time.
+ *
+ * @return The version number (NATIVE_VIDEO_PLAYER_VERSION).
+ */
+NATIVEVIDEOPLAYER_API int GetNativeVersion();
+
+/**
+ * @brief Initializes Media Foundation, Direct3D11 and the DXGI manager (once for all instances).
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT InitMediaFoundation();
 
 /**
- * @brief Crée une nouvelle instance de lecteur vidéo.
- * @param ppInstance Pointeur pour recevoir le handle de l'instance créée.
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Creates a new video player instance.
+ * @param ppInstance Pointer to receive the handle to the new instance.
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT CreateVideoPlayerInstance(VideoPlayerInstance** ppInstance);
 
 /**
- * @brief Détruit une instance de lecteur vidéo et libère ses ressources.
- * @param pInstance Handle de l'instance à détruire.
+ * @brief Destroys a video player instance and releases its resources.
+ * @param pInstance Handle to the instance to destroy.
  */
 NATIVEVIDEOPLAYER_API void DestroyVideoPlayerInstance(VideoPlayerInstance* pInstance);
 
 /**
- * @brief Ouvre un média (fichier ou URL) et prépare le décodage avec accélération matérielle pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param url Chemin ou URL du média (chaîne large).
- * @param startPlayback TRUE pour démarrer la lecture immédiatement, FALSE pour rester en pause.
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Opens a media file or URL and prepares hardware-accelerated decoding for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param url Path or URL to the media (wide string).
+ * @param startPlayback TRUE to start playback immediately, FALSE to remain paused.
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wchar_t* url, BOOL startPlayback = TRUE);
 
 /**
- * @brief Lit la prochaine frame vidéo en format RGB32 pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param pData Reçoit un pointeur sur les données de la frame (à ne pas libérer).
- * @param pDataSize Reçoit la taille en octets du tampon.
- * @return S_OK si une frame est lue, S_FALSE en fin de flux, ou un code d'erreur.
+ * @brief Reads the next video frame in RGB32 format for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param pData Receives a pointer to the frame data (do not free).
+ * @param pDataSize Receives the buffer size in bytes.
+ * @return S_OK if a frame is read, S_FALSE at end of stream, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYTE** pData, DWORD* pDataSize);
 
 /**
- * @brief Déverrouille le tampon de la frame vidéo précédemment verrouillé pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @return S_OK en cas de succès.
+ * @brief Unlocks the previously locked video frame buffer for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @return S_OK on success.
  */
 NATIVEVIDEOPLAYER_API HRESULT UnlockVideoFrame(VideoPlayerInstance* pInstance);
 
-/*
- * Reads the next video frame and copies it into a destination buffer.
- * pTimestamp receives the 100ns timestamp when available.
+/**
+ * @brief Reads the next video frame and copies it into a destination buffer.
+ * @param pTimestamp Receives the 100ns timestamp when available.
  */
 NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(
     VideoPlayerInstance* pInstance,
@@ -115,112 +129,112 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(
     LONGLONG* pTimestamp);
 
 /**
- * @brief Ferme le média et libère les ressources associées pour une instance spécifique.
- * @param pInstance Handle de l'instance.
+ * @brief Closes the media and releases associated resources for a specific instance.
+ * @param pInstance Handle to the instance.
  */
 NATIVEVIDEOPLAYER_API void CloseMedia(VideoPlayerInstance* pInstance);
 
 /**
- * @brief Indique si la fin du flux média a été atteinte pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @return TRUE si fin de flux, FALSE sinon.
+ * @brief Indicates whether the end of the media stream has been reached for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @return TRUE if end of stream, FALSE otherwise.
  */
 NATIVEVIDEOPLAYER_API BOOL IsEOF(const VideoPlayerInstance* pInstance);
 
 /**
- * @brief Récupère les dimensions de la vidéo pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param pWidth Pointeur pour recevoir la largeur en pixels.
- * @param pHeight Pointeur pour recevoir la hauteur en pixels.
+ * @brief Retrieves the video dimensions for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param pWidth Pointer to receive the width in pixels.
+ * @param pHeight Pointer to receive the height in pixels.
  */
 NATIVEVIDEOPLAYER_API void GetVideoSize(const VideoPlayerInstance* pInstance, UINT32* pWidth, UINT32* pHeight);
 
 /**
- * @brief Récupère le taux de rafraîchissement (frame rate) de la vidéo pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param pNum Pointeur pour recevoir le numérateur.
- * @param pDenom Pointeur pour recevoir le dénominateur.
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Retrieves the video frame rate for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param pNum Pointer to receive the numerator.
+ * @param pDenom Pointer to receive the denominator.
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT GetVideoFrameRate(const VideoPlayerInstance* pInstance, UINT* pNum, UINT* pDenom);
 
 /**
- * @brief Recherche une position spécifique dans le média pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param llPosition Position (en 100-ns) à atteindre.
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Seeks to a specific position in the media for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param llPosition Position (in 100-ns units) to seek to.
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG llPosition);
 
 /**
- * @brief Obtient la durée totale du média pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param pDuration Pointeur pour recevoir la durée (en 100-ns).
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Gets the total duration of the media for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param pDuration Pointer to receive the duration (in 100-ns units).
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT GetMediaDuration(const VideoPlayerInstance* pInstance, LONGLONG* pDuration);
 
 /**
- * @brief Obtient la position de lecture courante pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param pPosition Pointeur pour recevoir la position (en 100-ns).
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Gets the current playback position for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param pPosition Pointer to receive the position (in 100-ns units).
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT GetMediaPosition(const VideoPlayerInstance* pInstance, LONGLONG* pPosition);
 
 /**
- * @brief Définit l'état de lecture (lecture ou pause) pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param bPlaying TRUE pour lecture, FALSE pour pause.
- * @param bStop TRUE si c'est un arrêt complet, FALSE si c'est simplement une pause.
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Sets the playback state (playing or paused) for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param bPlaying TRUE for playback, FALSE for pause.
+ * @param bStop TRUE for a full stop, FALSE for a simple pause.
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT SetPlaybackState(VideoPlayerInstance* pInstance, BOOL bPlaying, BOOL bStop = FALSE);
 
 /**
- * @brief Arrête Media Foundation et libère les ressources globales (après destruction de toutes les instances).
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Shuts down Media Foundation and releases global resources (after all instances are destroyed).
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT ShutdownMediaFoundation();
 
 /**
- * @brief Définit le niveau de volume audio pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param volume Niveau de volume (0.0 à 1.0).
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Sets the audio volume level for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param volume Volume level (0.0 to 1.0).
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT SetAudioVolume(VideoPlayerInstance* pInstance, float volume);
 
 /**
- * @brief Récupère le niveau de volume audio actuel pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param volume Pointeur pour recevoir le niveau de volume (0.0 à 1.0).
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Gets the current audio volume level for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param volume Pointer to receive the volume level (0.0 to 1.0).
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT GetAudioVolume(const VideoPlayerInstance* pInstance, float* volume);
 
 /**
- * @brief Récupère les niveaux audio pour les canaux gauche et droit pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param pLeftLevel Pointeur pour le niveau du canal gauche.
- * @param pRightLevel Pointeur pour le niveau du canal droit.
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Gets the audio levels for left and right channels for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param pLeftLevel Pointer for the left channel level.
+ * @param pRightLevel Pointer for the right channel level.
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT GetAudioLevels(const VideoPlayerInstance* pInstance, float* pLeftLevel, float* pRightLevel);
 
 /**
- * @brief Définit la vitesse de lecture pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param speed Vitesse de lecture (0.5 à 2.0, où 1.0 est la vitesse normale).
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Sets the playback speed for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param speed Playback speed (0.5 to 2.0, where 1.0 is normal speed).
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT SetPlaybackSpeed(VideoPlayerInstance* pInstance, float speed);
 
 /**
- * @brief Récupère la vitesse de lecture actuelle pour une instance spécifique.
- * @param pInstance Handle de l'instance.
- * @param pSpeed Pointeur pour recevoir la vitesse de lecture.
- * @return S_OK en cas de succès, ou un code d'erreur.
+ * @brief Gets the current playback speed for a specific instance.
+ * @param pInstance Handle to the instance.
+ * @param pSpeed Pointer to receive the playback speed.
+ * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT GetPlaybackSpeed(const VideoPlayerInstance* pInstance, float* pSpeed);
 
@@ -231,6 +245,21 @@ NATIVEVIDEOPLAYER_API HRESULT GetPlaybackSpeed(const VideoPlayerInstance* pInsta
  * @return S_OK on success, or an error code.
  */
 NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInstance, VideoMetadata* pMetadata);
+
+/**
+ * @brief Sets the desired output resolution for decoded video frames.
+ *
+ * Reconfigures the MF source reader output type to produce frames at the
+ * requested size (hardware-scaled via DXVA2). The aspect ratio of the
+ * original video is preserved; the requested size acts as a bounding box.
+ * Passing 0,0 resets to the native video resolution.
+ *
+ * @param pInstance Handle to the instance.
+ * @param targetWidth  Desired output width  (0 = native).
+ * @param targetHeight Desired output height (0 = native).
+ * @return S_OK on success, or an error code.
+ */
+NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT32 targetWidth, UINT32 targetHeight);
 
 #ifdef __cplusplus
 }

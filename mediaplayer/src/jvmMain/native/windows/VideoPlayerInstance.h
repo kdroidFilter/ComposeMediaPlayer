@@ -7,6 +7,10 @@
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <endpointvolume.h>
+#include <atomic>
+
+// Forward declaration
+class HLSPlayer;
 
 /**
  * @brief Structure to encapsulate the state of a video player instance.
@@ -20,6 +24,8 @@ struct VideoPlayerInstance {
     DWORD lockedCurrSize = 0;
     UINT32 videoWidth = 0;
     UINT32 videoHeight = 0;
+    UINT32 nativeWidth = 0;   // Original video resolution (before scaling)
+    UINT32 nativeHeight = 0;
     BOOL bEOF = FALSE;
     
     // Frame caching for paused state
@@ -53,7 +59,12 @@ struct VideoPlayerInstance {
     CRITICAL_SECTION csClockSync{};
     BOOL bSeekInProgress = FALSE;
 
-    // Playback control
-    float instanceVolume = 1.0f; // Volume specific to this instance (1.0 = 100%)
-    float playbackSpeed = 1.0f;  // Playback speed (1.0 = 100%)
+    // Playback control (atomic for lock-free access from the audio thread)
+    std::atomic<float> instanceVolume{1.0f}; // Volume specific to this instance (1.0 = 100%)
+    std::atomic<float> playbackSpeed{1.0f};  // Playback speed (1.0 = 100%)
+
+    // Network / HLS streaming
+    BOOL bIsNetworkSource = FALSE;  // TRUE when URL is http:// or https://
+    BOOL bIsLiveStream = FALSE;     // TRUE when duration is unknown (live HLS)
+    HLSPlayer* pHLSPlayer = nullptr; // Non-null when playing HLS via IMFMediaEngine
 };

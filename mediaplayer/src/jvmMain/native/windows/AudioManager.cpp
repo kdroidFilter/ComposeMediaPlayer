@@ -1,4 +1,4 @@
-// AudioManager_improved.cpp – full rewrite with tighter A/V synchronisation
+// AudioManager.cpp – full rewrite with tighter A/V synchronisation
 // -----------------------------------------------------------------------------
 //  * Keeps the original public API so that existing call‑sites still compile.
 //  * Uses an event‑driven render loop instead of busy‑wait polling where possible.
@@ -16,6 +16,13 @@
 #include <algorithm>
 #include <cmath>
 #include <array>
+#include <mmreg.h>
+// WAVE_FORMAT_EXTENSIBLE sub-format GUIDs for volume scaling.
+// Defined inline to avoid pulling in <ks.h>/<ksmedia.h> which may conflict.
+static const GUID kSubtypePCM =
+    {0x00000001, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
+static const GUID kSubtypeIEEEFloat =
+    {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 
 using namespace VideoPlayerUtils;
 
@@ -34,7 +41,7 @@ HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt)
 {
     if (!inst) return E_INVALIDARG;
 
-    // Re‑use previously initialised client if still valid
+    // Reuse previously initialized client if still valid
     if (inst->pAudioClient && inst->pRenderClient) {
         inst->bAudioInitialized = TRUE;
         return S_OK;
@@ -48,56 +55,69 @@ HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt)
     if (!enumerator) return E_FAIL;
 
     hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &inst->pDevice);
-    if (FAILED(hr)) return hr;
+    if (FAILED(hr)) goto fail;
 
     // 2. Activate IAudioClient + IAudioEndpointVolume
     hr = inst->pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                                  reinterpret_cast<void**>(&inst->pAudioClient));
-    if (FAILED(hr)) return hr;
+    if (FAILED(hr)) goto fail;
 
     hr = inst->pDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr,
                                  reinterpret_cast<void**>(&inst->pAudioEndpointVolume));
-    if (FAILED(hr)) return hr;
+    if (FAILED(hr)) goto fail;
 
     // 3. Determine the format that will be rendered
     if (!srcFmt) {
         hr = inst->pAudioClient->GetMixFormat(&deviceMixFmt);
-        if (FAILED(hr)) return hr;
-        srcFmt = deviceMixFmt; // use mix format as fall‑back
+        if (FAILED(hr)) goto fail;
+        srcFmt = deviceMixFmt;
     }
-    inst->pSourceAudioFormat = reinterpret_cast<WAVEFORMATEX*>(CoTaskMemAlloc(srcFmt->cbSize + sizeof(WAVEFORMATEX)));
+    inst->pSourceAudioFormat = reinterpret_cast<WAVEFORMATEX*>(
+        CoTaskMemAlloc(srcFmt->cbSize + sizeof(WAVEFORMATEX)));
+    if (!inst->pSourceAudioFormat) { hr = E_OUTOFMEMORY; goto fail; }
     memcpy(inst->pSourceAudioFormat, srcFmt, srcFmt->cbSize + sizeof(WAVEFORMATEX));
 
-    // 4. Create (or re‑use) the render‑ready event
+    // 4. Create (or reuse) the render-ready event
     if (!inst->hAudioSamplesReadyEvent) {
         inst->hAudioSamplesReadyEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
         if (!inst->hAudioSamplesReadyEvent) {
             hr = HRESULT_FROM_WIN32(GetLastError());
-            goto cleanup;
+            goto fail;
         }
     }
 
-    // 5. Initialise the audio client in shared, event‑callback mode
+    // 5. Initialize the audio client in shared, event-callback mode
     hr = inst->pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                         AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                        kTargetBufferDuration100ns, // buffer dur
-                                        0,                          // periodicity → let system decide
+                                        kTargetBufferDuration100ns,
+                                        0,
                                         srcFmt,
                                         nullptr);
-    if (FAILED(hr)) goto cleanup;
+    if (FAILED(hr)) goto fail;
 
     hr = inst->pAudioClient->SetEventHandle(inst->hAudioSamplesReadyEvent);
-    if (FAILED(hr)) goto cleanup;
+    if (FAILED(hr)) goto fail;
 
-    // 6. Grab the render‑client service interface
+    // 6. Grab the render-client service interface
     hr = inst->pAudioClient->GetService(__uuidof(IAudioRenderClient),
                                         reinterpret_cast<void**>(&inst->pRenderClient));
-    if (FAILED(hr)) goto cleanup;
+    if (FAILED(hr)) goto fail;
 
     inst->bAudioInitialized = TRUE;
-
-cleanup:
     if (deviceMixFmt) CoTaskMemFree(deviceMixFmt);
+    return S_OK;
+
+fail:
+    // Release any partially-created COM objects so that CloseMedia does not
+    // call methods (e.g. pAudioClient->Stop()) on an uninitialized client.
+    if (inst->pRenderClient)        { inst->pRenderClient->Release();        inst->pRenderClient = nullptr; }
+    if (inst->pAudioClient)         { inst->pAudioClient->Release();         inst->pAudioClient = nullptr; }
+    if (inst->pAudioEndpointVolume) { inst->pAudioEndpointVolume->Release(); inst->pAudioEndpointVolume = nullptr; }
+    if (inst->pDevice)              { inst->pDevice->Release();              inst->pDevice = nullptr; }
+    if (inst->pSourceAudioFormat)   { CoTaskMemFree(inst->pSourceAudioFormat); inst->pSourceAudioFormat = nullptr; }
+    if (inst->hAudioSamplesReadyEvent) { CloseHandle(inst->hAudioSamplesReadyEvent); inst->hAudioSamplesReadyEvent = nullptr; }
+    if (deviceMixFmt) CoTaskMemFree(deviceMixFmt);
+    inst->bAudioInitialized = FALSE;
     return hr;
 }
 
@@ -165,7 +185,7 @@ DWORD WINAPI AudioThreadProc(LPVOID lpParam)
             LONGLONG elapsedMs = currentTimeMs - inst->llPlaybackStartTime - inst->llTotalPauseTime;
 
             // Apply playback speed to elapsed time
-            double adjustedElapsedMs = elapsedMs * inst->playbackSpeed;
+            double adjustedElapsedMs = elapsedMs * inst->playbackSpeed.load(std::memory_order_relaxed);
 
             // Convert sample timestamp from 100ns units to milliseconds
             double sampleTimeMs = ts100n / 10000.0;
@@ -217,18 +237,44 @@ DWORD WINAPI AudioThreadProc(LPVOID lpParam)
             const BYTE* chunkStart = srcData + (offsetFrames * blockAlign);
             memcpy(dstData, chunkStart, framesWanted * blockAlign);
 
-            // Apply per‑instance volume in‑place (16‑bit PCM or IEEE‑float)
-            if (inst->instanceVolume < 0.999f) {
-                if (inst->pSourceAudioFormat->wFormatTag == WAVE_FORMAT_PCM &&
-                    inst->pSourceAudioFormat->wBitsPerSample == 16) {
+            // Apply per-instance volume in-place.
+            // Supports PCM 16-bit, PCM 24-bit, IEEE float 32-bit, and
+            // WAVE_FORMAT_EXTENSIBLE wrappers around those sub-formats.
+            const float vol = inst->instanceVolume.load(std::memory_order_relaxed);
+            if (vol < 0.999f) {
+                WORD formatTag = inst->pSourceAudioFormat->wFormatTag;
+                WORD bitsPerSample = inst->pSourceAudioFormat->wBitsPerSample;
+
+                // Unwrap WAVE_FORMAT_EXTENSIBLE to the actual sub-format
+                if (formatTag == WAVE_FORMAT_EXTENSIBLE && inst->pSourceAudioFormat->cbSize >= 22) {
+                    auto* ext = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(inst->pSourceAudioFormat);
+                    if (ext->SubFormat == kSubtypePCM)
+                        formatTag = WAVE_FORMAT_PCM;
+                    else if (ext->SubFormat == kSubtypeIEEEFloat)
+                        formatTag = WAVE_FORMAT_IEEE_FLOAT;
+                }
+
+                if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 16) {
                     auto* s = reinterpret_cast<int16_t*>(dstData);
                     size_t n = (framesWanted * blockAlign) / sizeof(int16_t);
-                    for (size_t i = 0; i < n; ++i) s[i] = static_cast<int16_t>(s[i] * inst->instanceVolume);
-                } else if (inst->pSourceAudioFormat->wFormatTag == WAVE_FORMAT_IEEE_FLOAT &&
-                           inst->pSourceAudioFormat->wBitsPerSample == 32) {
+                    for (size_t i = 0; i < n; ++i)
+                        s[i] = static_cast<int16_t>(s[i] * vol);
+                } else if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 24) {
+                    // 24-bit PCM: 3 bytes per sample, little-endian
+                    size_t totalBytes = framesWanted * blockAlign;
+                    for (size_t i = 0; i + 2 < totalBytes; i += 3) {
+                        int32_t sample = static_cast<int8_t>(dstData[i + 2]);
+                        sample = (sample << 8) | dstData[i + 1];
+                        sample = (sample << 8) | dstData[i];
+                        sample = static_cast<int32_t>(sample * vol);
+                        dstData[i]     = static_cast<BYTE>(sample & 0xFF);
+                        dstData[i + 1] = static_cast<BYTE>((sample >> 8) & 0xFF);
+                        dstData[i + 2] = static_cast<BYTE>((sample >> 16) & 0xFF);
+                    }
+                } else if (formatTag == WAVE_FORMAT_IEEE_FLOAT && bitsPerSample == 32) {
                     auto* s = reinterpret_cast<float*>(dstData);
                     size_t n = (framesWanted * blockAlign) / sizeof(float);
-                    for (size_t i = 0; i < n; ++i) s[i] *= inst->instanceVolume;
+                    for (size_t i = 0; i < n; ++i) s[i] *= vol;
                 }
             }
 
@@ -296,14 +342,14 @@ void StopAudioThread(VideoPlayerInstance* inst)
 HRESULT SetVolume(VideoPlayerInstance* inst, float vol)
 {
     if (!inst) return E_INVALIDARG;
-    inst->instanceVolume = std::clamp(vol, 0.0f, 1.0f);
+    inst->instanceVolume.store(std::clamp(vol, 0.0f, 1.0f), std::memory_order_relaxed);
     return S_OK;
 }
 
 HRESULT GetVolume(const VideoPlayerInstance* inst, float* out)
 {
     if (!inst || !out) return E_INVALIDARG;
-    *out = inst->instanceVolume;
+    *out = inst->instanceVolume.load(std::memory_order_relaxed);
     return S_OK;
 }
 
