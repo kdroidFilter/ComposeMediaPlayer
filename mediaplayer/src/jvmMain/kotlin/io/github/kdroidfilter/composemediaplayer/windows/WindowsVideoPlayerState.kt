@@ -703,6 +703,13 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         setError("Error during SeekMedia for loop: ${e.message}")
                     }
                 } else {
+                    // The last decoded frame's timestamp is always slightly before the
+                    // total duration (duration = last_frame_pts + frame_duration), so
+                    // snap currentTime/progress to the end when playback completes.
+                    if (_duration > 0.0) {
+                        _currentTime = _duration
+                        _progress = 1f
+                    }
                     pause()
                     break
                 }
