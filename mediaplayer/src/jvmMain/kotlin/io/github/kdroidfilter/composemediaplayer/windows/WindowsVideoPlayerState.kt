@@ -398,9 +398,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
-
-        // Hint the GC after freeing big objects synchronously
-        System.gc()
     }
 
     private fun releaseAllResources() {
@@ -409,8 +406,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
         audioLevelsJob?.cancel()
         resizeJob?.cancel()
 
-        // Ensure the frame channel is emptied
-        runBlocking { clearFrameChannel() }
+        // Drain the frame channel (tryReceive is non-suspending)
+        clearFrameChannel()
 
         // Free bitmaps and frame buffers
         bitmapLock.write {
@@ -435,12 +432,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
             lastFrameHash = Int.MIN_VALUE
         }
 
-
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
-
-        // Hint GC after releasing frame buffers and bitmaps
-        System.gc()
     }
 
     private fun clearFrameChannel() {
@@ -656,10 +649,13 @@ class WindowsVideoPlayerState : VideoPlayerState {
     /**
      * Updates the audio level meters
      */
-    private suspend fun updateAudioLevels() {
+    private fun updateAudioLevels() {
         if (isDisposing.get()) return
 
-        mediaOperationMutex.withLock {
+        // Use tryLock to avoid blocking media operations (open, seek, etc.)
+        // when polling audio levels. Skipped updates are retried in 50ms.
+        if (!mediaOperationMutex.tryLock()) return
+        try {
             videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
                 val levelsArr = FloatArray(2)
                 val hr = player.GetAudioLevels(instance, levelsArr)
@@ -668,6 +664,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     _rightLevel = levelsArr[1]
                 }
             }
+        } finally {
+            mediaOperationMutex.unlock()
         }
     }
 

@@ -159,7 +159,20 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* pInstance, IMFSample** ppS
             pInstance->pCachedSample->Release();
             pInstance->pCachedSample = nullptr;
         }
-        pInstance->bHasInitialFrame = FALSE;
+
+        // On the first decoded frame after play/seek, recalibrate the wall clock
+        // so that any decode or network latency doesn't cause mass frame skipping.
+        // This is critical for HTTP sources where ReadSample may block for seconds.
+        if (!pInstance->bHasInitialFrame) {
+            if (pInstance->bUseClockSync && pInstance->llPlaybackStartTime != 0) {
+                double frameTimeMs = llTimestamp / 10000.0;
+                double adjustedMs = frameTimeMs / static_cast<double>(pInstance->playbackSpeed.load());
+                pInstance->llPlaybackStartTime = GetCurrentTimeMs() - static_cast<LONGLONG>(adjustedMs);
+                pInstance->llTotalPauseTime = 0;
+            }
+            pInstance->bHasInitialFrame = TRUE;
+        }
+
         pInstance->llCurrentPosition = llTimestamp;
     }
 
@@ -535,15 +548,10 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYT
         return hr;
     }
 
-    // Force alpha byte to 0xFF — MFVideoFormat_RGB32 (X8R8G8B8) leaves the
-    // high byte undefined, which can cause washed-out colours when Skia
-    // composites the frame against the window background.
-    {
-        const DWORD pixelCount = cbCurr / 4;
-        DWORD* px = reinterpret_cast<DWORD*>(pBytes);
-        for (DWORD i = 0; i < pixelCount; ++i)
-            px[i] |= 0xFF000000;
-    }
+    // Note: MFVideoFormat_RGB32 is X8R8G8B8 — alpha byte is undefined.
+    // The Kotlin side creates Skia bitmaps with ColorAlphaType.OPAQUE,
+    // which instructs Skia to treat all pixels as fully opaque regardless
+    // of the alpha byte value. No per-pixel fixup is needed.
 
     pInstance->pLockedBuffer = pBuffer;
     pInstance->pLockedBytes = pBytes;
