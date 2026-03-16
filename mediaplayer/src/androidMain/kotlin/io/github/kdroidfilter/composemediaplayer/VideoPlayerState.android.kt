@@ -35,9 +35,9 @@ import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
 
 @OptIn(UnstableApi::class)
-actual fun createVideoPlayerState(): VideoPlayerState =
+actual fun createVideoPlayerState(audioMode: AudioMode): VideoPlayerState =
     try {
-        DefaultVideoPlayerState()
+        DefaultVideoPlayerState(audioMode)
     } catch (e: IllegalStateException) {
         PreviewableVideoPlayerState(
             hasMedia = false,
@@ -75,7 +75,9 @@ internal val androidVideoLogger = Logger.withTag("AndroidVideoPlayerSurface")
 
 @UnstableApi
 @Stable
-open class DefaultVideoPlayerState: VideoPlayerState {
+open class DefaultVideoPlayerState(
+    private val audioMode: AudioMode = AudioMode(),
+) : VideoPlayerState {
     private val context: Context = ContextProvider.getContext()
     internal var exoPlayer: ExoPlayer? = null
     private var updateJob: Job? = null
@@ -365,10 +367,17 @@ open class DefaultVideoPlayerState: VideoPlayerState {
                 }
             }
 
+            val manageFocus = audioMode.interruptionMode == InterruptionMode.DoNotMix
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build()
+
             exoPlayer = ExoPlayer.Builder(context)
                 .setRenderersFactory(renderersFactory)
-                .setHandleAudioBecomingNoisy(true)
-                .setWakeMode(C.WAKE_MODE_LOCAL)
+                .setHandleAudioBecomingNoisy(manageFocus)
+                .setWakeMode(if (manageFocus) C.WAKE_MODE_LOCAL else C.WAKE_MODE_NONE)
+                .setAudioAttributes(audioAttributes, manageFocus)
                 .setPauseAtEndOfMediaItems(false)
                 .setReleaseTimeoutMs(2000) // Augmenter le timeout de libération
                 .build()

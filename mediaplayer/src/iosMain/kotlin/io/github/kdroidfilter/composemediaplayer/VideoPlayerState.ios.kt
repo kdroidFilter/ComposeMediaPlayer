@@ -18,7 +18,12 @@ import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
 import platform.AVFAudio.AVAudioSession
+import platform.AVFAudio.AVAudioSessionCategoryAmbient
+import platform.AVFAudio.AVAudioSessionCategoryOptionDuckOthers
+import platform.AVFAudio.AVAudioSessionCategoryOptionMixWithOthers
 import platform.AVFAudio.AVAudioSessionCategoryPlayback
+import platform.AVFAudio.AVAudioSessionCategorySoloAmbient
+import platform.AVFAudio.AVAudioSessionModeDefault
 import platform.AVFAudio.AVAudioSessionModeMoviePlayback
 import platform.AVFAudio.setActive
 import platform.AVFoundation.*
@@ -44,10 +49,12 @@ import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_global_queue
 import platform.darwin.dispatch_get_main_queue
 
-actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState()
+actual fun createVideoPlayerState(audioMode: AudioMode): VideoPlayerState = DefaultVideoPlayerState(audioMode)
 
 @Stable
-open class DefaultVideoPlayerState: VideoPlayerState {
+open class DefaultVideoPlayerState(
+    private val audioMode: AudioMode = AudioMode(),
+) : VideoPlayerState {
 
     // Base states
     private var _volume = mutableStateOf(1.0f)
@@ -159,7 +166,29 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     private fun configureAudioSession() {
         val session = AVAudioSession.sharedInstance()
         try {
-            session.setCategory(AVAudioSessionCategoryPlayback, mode = AVAudioSessionModeMoviePlayback, options = 0u, error = null)
+            val category = if (audioMode.playsInSilentMode) {
+                AVAudioSessionCategoryPlayback
+            } else {
+                when (audioMode.interruptionMode) {
+                    InterruptionMode.DoNotMix -> AVAudioSessionCategorySoloAmbient
+                    InterruptionMode.MixWithOthers,
+                    InterruptionMode.DuckOthers -> AVAudioSessionCategoryAmbient
+                }
+            }
+
+            val mode = if (audioMode.playsInSilentMode) {
+                AVAudioSessionModeMoviePlayback
+            } else {
+                AVAudioSessionModeDefault
+            }
+
+            val options: ULong = when (audioMode.interruptionMode) {
+                InterruptionMode.DoNotMix -> 0u
+                InterruptionMode.MixWithOthers -> AVAudioSessionCategoryOptionMixWithOthers
+                InterruptionMode.DuckOthers -> AVAudioSessionCategoryOptionMixWithOthers or AVAudioSessionCategoryOptionDuckOthers
+            }
+
+            session.setCategory(category, mode = mode, options = options, error = null)
             session.setActive(true, error = null)
         } catch (e: Exception) {
             Logger.e { "Failed to configure audio session: ${e.message}" }
