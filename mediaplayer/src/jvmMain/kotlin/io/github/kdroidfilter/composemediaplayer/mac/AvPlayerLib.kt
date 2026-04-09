@@ -68,4 +68,7 @@ internal object SharedVideoPlayer {
     @JvmStatic external fun nGetVideoMimeType(handle: Long): String?
     @JvmStatic external fun nGetAudioChannels(handle: Long): Int
     @JvmStatic external fun nGetAudioSampleRate(handle: Long): Int
+
+    // Playback completion
+    @JvmStatic external fun nConsumeDidPlayToEnd(handle: Long): Boolean
 }

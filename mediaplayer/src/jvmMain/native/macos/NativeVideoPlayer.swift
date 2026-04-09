@@ -74,6 +74,10 @@ class SharedVideoPlayer {
     private var bufferLikelyToKeepUpObserver: NSKeyValueObservation?
     private var bufferFullObserver: NSKeyValueObservation?
 
+    // End-of-playback flag (set by AVPlayerItemDidPlayToEndTime, consumed once by the Kotlin side)
+    private var didPlayToEnd: Bool = false
+    private var playbackEndObserver: NSObjectProtocol?
+
     // HLS Error tracking
     private var lastError: String? = nil
     private var errorCount: Int = 0
@@ -835,6 +839,15 @@ class SharedVideoPlayer {
             self?.handleTimeControlStatus(player.timeControlStatus)
         }
 
+        // Observe end of playback for all media types
+        playbackEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: nil
+        ) { [weak self] _ in
+            self?.didPlayToEnd = true
+        }
+
         // Configure player for HLS
         if isHLSStream {
             player?.automaticallyWaitsToMinimizeStalling = true
@@ -1321,6 +1334,15 @@ class SharedVideoPlayer {
         }
     }
 
+    /// Consumes the end-of-playback flag. Returns true once per playback completion.
+    func consumeDidPlayToEnd() -> Bool {
+        if didPlayToEnd {
+            didPlayToEnd = false
+            return true
+        }
+        return false
+    }
+
     /// Clean up observers
     private func cleanupObservers() {
         playerItemObserver?.invalidate()
@@ -1329,6 +1351,12 @@ class SharedVideoPlayer {
         bufferEmptyObserver?.invalidate()
         bufferLikelyToKeepUpObserver?.invalidate()
         bufferFullObserver?.invalidate()
+
+        if let observer = playbackEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            playbackEndObserver = nil
+        }
+        didPlayToEnd = false
 
         NotificationCenter.default.removeObserver(self)
     }
@@ -1560,6 +1588,13 @@ public func getAudioSampleRate(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getAudioSampleRate())
+}
+
+@_cdecl("consumeDidPlayToEnd")
+public func consumeDidPlayToEnd(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.consumeDidPlayToEnd() ? 1 : 0
 }
 
 // HLS-specific C exports

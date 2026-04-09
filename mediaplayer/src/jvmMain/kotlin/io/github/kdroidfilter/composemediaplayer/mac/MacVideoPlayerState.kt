@@ -23,9 +23,8 @@ import io.github.vinceglb.filekit.utils.toPath
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
@@ -47,10 +46,11 @@ internal val macLogger = Logger.withTag("MacVideoPlayerState")
 class MacVideoPlayerState : VideoPlayerState {
 
     // Main state variables
-    private val mainMutex = Mutex()
+    // AtomicLong allows lock-free reads of the native pointer from the frame hot path
+    private val playerPtrAtomic = AtomicLong(0L)
+    private val playerPtr: Long get() = playerPtrAtomic.get()
     // Serial dispatcher for frame processing — ensures only one frame is processed at a time
     private val frameDispatcher = Dispatchers.Default.limitedParallelism(1)
-    private var playerPtr: Long = 0L
     private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
     internal val currentFrameState: State<ImageBitmap?> = mutableStateOf(null)
     private var skiaBitmapWidth: Int = 0
@@ -200,7 +200,7 @@ class MacVideoPlayerState : VideoPlayerState {
         try {
             val ptr = SharedVideoPlayer.nCreatePlayer()
             if (ptr != 0L) {
-                mainMutex.withLock { playerPtr = ptr }
+                playerPtrAtomic.set(ptr)
                 macLogger.d { "Native player created successfully" }
                 applyVolume()
                 applyPlaybackSpeed()
@@ -222,7 +222,7 @@ class MacVideoPlayerState : VideoPlayerState {
     /** Updates the frame rate information from the native player. */
     private suspend fun updateFrameRateInfo() {
         macLogger.d { "updateFrameRateInfo()" }
-        val ptr = mainMutex.withLock { playerPtr }
+        val ptr = playerPtr
         if (ptr == 0L) return
 
         try {
@@ -348,11 +348,7 @@ class MacVideoPlayerState : VideoPlayerState {
         stopBufferingCheck()
 
         val ptrToDispose = withContext(frameDispatcher) {
-            mainMutex.withLock {
-                val ptr = playerPtr
-                playerPtr = 0L
-                ptr
-            }
+            playerPtrAtomic.getAndSet(0L)
         }
 
         // Release resources outside of the mutex lock
@@ -373,14 +369,16 @@ class MacVideoPlayerState : VideoPlayerState {
             playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         }
 
-        val isPlayerNull = mainMutex.withLock { playerPtr == 0L }
-
-        if (isPlayerNull) {
+        if (playerPtr == 0L) {
             val ptr = SharedVideoPlayer.nCreatePlayer()
             if (ptr != 0L) {
-                mainMutex.withLock { playerPtr = ptr }
-                applyVolume()
-                applyPlaybackSpeed()
+                if (!playerPtrAtomic.compareAndSet(0L, ptr)) {
+                    // Another coroutine already initialized the player; discard ours
+                    SharedVideoPlayer.nDisposePlayer(ptr)
+                } else {
+                    applyVolume()
+                    applyPlaybackSpeed()
+                }
             } else {
                 throw IllegalStateException("Failed to create native player")
             }
@@ -390,7 +388,7 @@ class MacVideoPlayerState : VideoPlayerState {
     /** Opens media URI and returns a success flag. */
     private suspend fun openMediaUri(uri: String): Boolean {
         macLogger.d { "openMediaUri() - Opening URI: $uri" }
-        val ptr = mainMutex.withLock { playerPtr }
+        val ptr = playerPtr
         if (ptr == 0L) return false
 
         // Check if file exists (for local files)
@@ -445,7 +443,7 @@ class MacVideoPlayerState : VideoPlayerState {
     /** Updates the metadata from the native player. */
     private suspend fun updateMetadata() {
         macLogger.d { "updateMetadata()" }
-        val ptr = mainMutex.withLock { playerPtr }
+        val ptr = playerPtr
         if (ptr == 0L) return
 
         try {
@@ -558,7 +556,7 @@ class MacVideoPlayerState : VideoPlayerState {
         withContext(frameDispatcher) {
             try {
                 // Safely get the player pointer
-                val ptr = mainMutex.withLock { playerPtr }
+                val ptr = playerPtr
                 if (ptr == 0L) return@withContext
 
                 // Get frame dimensions
@@ -635,7 +633,7 @@ class MacVideoPlayerState : VideoPlayerState {
         if (!hasMedia) return
 
         try {
-            val ptr = mainMutex.withLock { playerPtr }
+            val ptr = playerPtr
             if (ptr != 0L) {
                 val newLeft = SharedVideoPlayer.nGetLeftAudioLevel(ptr)
                 val newRight = SharedVideoPlayer.nGetRightAudioLevel(ptr)
@@ -709,18 +707,20 @@ class MacVideoPlayerState : VideoPlayerState {
 
     /** Checks if looping is enabled and restarts the video if needed. */
     private suspend fun checkLoopingAsync(current: Double, duration: Double) {
-        if (current >= duration - 0.5) {
-            if (loop) {
-                macLogger.d { "checkLoopingAsync() - Loop enabled, restarting video" }
-                seekToAsync(0f)
-            } else {
-                macLogger.d { "checkLoopingAsync() - Video completed, updating state" }
-                withContext(Dispatchers.Main) {
-                    isPlaying = false
-                }
-                // Ensure native player state is consistent
-                pauseInBackground()
+        val ptr = playerPtr
+        val ended = ptr != 0L && SharedVideoPlayer.nConsumeDidPlayToEnd(ptr)
+        // Also check position as fallback for content where the notification may not fire
+        if (!ended && (duration <= 0 || current < duration - 0.5)) return
+
+        if (loop) {
+            macLogger.d { "checkLoopingAsync() - Loop enabled, restarting video" }
+            seekToAsync(0f)
+        } else {
+            macLogger.d { "checkLoopingAsync() - Video completed, updating state" }
+            withContext(Dispatchers.Main) {
+                isPlaying = false
             }
+            pauseInBackground()
         }
     }
 
@@ -745,7 +745,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
     /** Plays video on a background thread. */
     private suspend fun playInBackground() {
-        val ptr = mainMutex.withLock { playerPtr }
+        val ptr = playerPtr
         if (ptr == 0L) return
 
         try {
@@ -773,7 +773,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
     /** Pauses video on a background thread. */
     private suspend fun pauseInBackground() {
-        val ptr = mainMutex.withLock { playerPtr }
+        val ptr = playerPtr
         if (ptr == 0L) return
 
         try {
@@ -842,7 +842,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
             lastFrameUpdateTime = System.currentTimeMillis()
 
-            val ptr = mainMutex.withLock { playerPtr }
+            val ptr = playerPtr
             if (ptr == 0L) return
             SharedVideoPlayer.nSeekTo(ptr, seekTime.toDouble())
 
@@ -886,11 +886,7 @@ class MacVideoPlayerState : VideoPlayerState {
         ioScope.launch {
             // Get player pointer and clear cached bitmaps while frame updates are paused.
             val ptrToDispose = withContext(frameDispatcher) {
-                val ptrToDispose = mainMutex.withLock {
-                    val ptr = playerPtr
-                    playerPtr = 0L
-                    ptr
-                }
+                val ptrToDispose = playerPtrAtomic.getAndSet(0L)
 
                 skiaBitmapA?.close()
                 skiaBitmapB?.close()
@@ -966,7 +962,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
     /** Retrieves the current playback time from the native player. */
     private suspend fun getPositionSafely(): Double {
-        val ptr = mainMutex.withLock { playerPtr }
+        val ptr = playerPtr
         if (ptr == 0L) return 0.0
         return try {
             SharedVideoPlayer.nGetCurrentTime(ptr)
@@ -979,7 +975,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
     /** Retrieves the total duration of the video from the native player. */
     private suspend fun getDurationSafely(): Double {
-        val ptr = mainMutex.withLock { playerPtr }
+        val ptr = playerPtr
         if (ptr == 0L) return 0.0
         return try {
             SharedVideoPlayer.nGetVideoDuration(ptr)
@@ -996,14 +992,12 @@ class MacVideoPlayerState : VideoPlayerState {
      * applied when the player is initialized.
      */
     private suspend fun applyVolume() {
-        mainMutex.withLock {
-            val ptr = playerPtr
-            if (ptr != 0L) try {
-                SharedVideoPlayer.nSetVolume(ptr, _volumeState.value)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                macLogger.e { "Error applying volume: ${e.message}" }
-            }
+        val ptr = playerPtr
+        if (ptr != 0L) try {
+            SharedVideoPlayer.nSetVolume(ptr, _volumeState.value)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            macLogger.e { "Error applying volume: ${e.message}" }
         }
     }
 
@@ -1013,14 +1007,12 @@ class MacVideoPlayerState : VideoPlayerState {
      * applied when the player is initialized.
      */
     private suspend fun applyPlaybackSpeed() {
-        mainMutex.withLock {
-            val ptr = playerPtr
-            if (ptr != 0L) try {
-                SharedVideoPlayer.nSetPlaybackSpeed(ptr, _playbackSpeedState.value)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                macLogger.e { "Error applying playback speed: ${e.message}" }
-            }
+        val ptr = playerPtr
+        if (ptr != 0L) try {
+            SharedVideoPlayer.nSetPlaybackSpeed(ptr, _playbackSpeedState.value)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            macLogger.e { "Error applying playback speed: ${e.message}" }
         }
     }
 
@@ -1100,7 +1092,7 @@ class MacVideoPlayerState : VideoPlayerState {
         val sw = surfaceWidth
         val sh = surfaceHeight
         if (sw <= 0 || sh <= 0) return
-        val ptr = mainMutex.withLock { playerPtr }
+        val ptr = playerPtr
         if (ptr == 0L) return
 
         SharedVideoPlayer.nSetOutputSize(ptr, sw, sh)
