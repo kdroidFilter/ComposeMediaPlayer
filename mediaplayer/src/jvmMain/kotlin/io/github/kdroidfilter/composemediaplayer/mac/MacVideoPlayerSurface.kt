@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
@@ -38,7 +39,9 @@ fun MacVideoPlayerSurface(
     isInFullscreenWindow: Boolean = false,
 ) {
     Box(
-        modifier = modifier,
+        modifier = modifier.onSizeChanged { size ->
+            playerState.onResized(size.width, size.height)
+        },
         contentAlignment = Alignment.Center
     ) {
         // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window

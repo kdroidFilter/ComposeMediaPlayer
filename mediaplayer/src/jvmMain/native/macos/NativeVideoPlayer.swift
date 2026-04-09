@@ -27,9 +27,13 @@ class SharedVideoPlayer {
     private var frameBuffer: UnsafeMutablePointer<UInt32>?
     private var bufferCapacity: Int = 0
 
-    // Frame dimensions
+    // Frame dimensions (scaled output — may be smaller than native to save RAM)
     private var frameWidth: Int = 0
     private var frameHeight: Int = 0
+
+    // Native video resolution (unscaled, as reported by the asset)
+    private var nativeVideoWidth: Int = 0
+    private var nativeVideoHeight: Int = 0
 
     // Audio volume control (0.0 to 1.0)
     private var volume: Float = 1.0
@@ -159,13 +163,6 @@ class SharedVideoPlayer {
         // Monitor loaded time ranges for buffer status
         playerItemObserver = item.observe(\.loadedTimeRanges, options: [.new]) { [weak self] item, _ in
             self?.updateBufferStatus(from: item)
-        }
-
-        // Monitor player time control status
-        if let player = player {
-            timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-                self?.handleTimeControlStatus(player.timeControlStatus)
-            }
         }
 
         // Monitor access log for bitrate changes
@@ -727,6 +724,8 @@ class SharedVideoPlayer {
                 if isHLSStream {
                     frameWidth = 1920
                     frameHeight = 1080
+                    nativeVideoWidth = frameWidth
+                    nativeVideoHeight = frameHeight
                     setupFrameBuffer()
                     setupVideoOutputAndPlayer(with: asset)
                 }
@@ -744,6 +743,8 @@ class SharedVideoPlayer {
                         let effectiveSize = naturalSize.applying(transform)
                         self.frameWidth = Int(abs(effectiveSize.width))
                         self.frameHeight = Int(abs(effectiveSize.height))
+                        self.nativeVideoWidth = self.frameWidth
+                        self.nativeVideoHeight = self.frameHeight
 
                         // Continue with buffer allocation and setup
                         self.setupFrameBuffer()
@@ -767,6 +768,8 @@ class SharedVideoPlayer {
                 let effectiveSize = naturalSize.applying(transform)
                 frameWidth = Int(abs(effectiveSize.width))
                 frameHeight = Int(abs(effectiveSize.height))
+                nativeVideoWidth = frameWidth
+                nativeVideoHeight = frameHeight
 
                 // Continue with buffer allocation and setup
                 setupFrameBuffer()
@@ -826,6 +829,11 @@ class SharedVideoPlayer {
         }
 
         player = AVPlayer(playerItem: item)
+
+        // Monitor time control status for all media types (buffering, paused, playing)
+        timeControlStatusObserver = player?.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            self?.handleTimeControlStatus(player.timeControlStatus)
+        }
 
         // Configure player for HLS
         if isHLSStream {
@@ -919,6 +927,8 @@ class SharedVideoPlayer {
             print("HLS: Resolution changed from \(frameWidth)x\(frameHeight) to \(width)x\(height)")
             frameWidth = width
             frameHeight = height
+            nativeVideoWidth = width
+            nativeVideoHeight = height
             setupFrameBuffer()
             guard frameBuffer != nil else { return }
         }
@@ -1069,14 +1079,14 @@ class SharedVideoPlayer {
                 process: self.tapProcess
             )
 
-            var tap: Unmanaged<MTAudioProcessingTap>?
+            var tap: MTAudioProcessingTap?
             // Create the audio processing tap
             let status = MTAudioProcessingTapCreate(
                 kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap
             )
             if status == noErr, let tap = tap {
                 print("Audio tap created successfully")
-                inputParams.audioTapProcessor = tap.takeRetainedValue()
+                inputParams.audioTapProcessor = tap
                 let audioMix = AVMutableAudioMix()
                 audioMix.inputParameters = [inputParams]
                 playerItem.audioMix = audioMix
@@ -1182,6 +1192,46 @@ class SharedVideoPlayer {
 
     /// Returns the height of the video frame in pixels
     func getFrameHeight() -> Int { return frameHeight }
+
+    /// Scales the output to fit within (width, height) while preserving the native aspect ratio.
+    /// Never upscales beyond the native resolution. Recreates the pixel buffer output at the new size.
+    /// Returns true if dimensions actually changed.
+    func setOutputSize(width: Int, height: Int) -> Bool {
+        guard width > 0, height > 0 else { return false }
+        guard nativeVideoWidth > 0, nativeVideoHeight > 0 else { return false }
+
+        let scaleX = Double(width) / Double(nativeVideoWidth)
+        let scaleY = Double(height) / Double(nativeVideoHeight)
+        let scale = min(scaleX, scaleY, 1.0) // never upscale
+
+        // Enforce even dimensions (required by many codecs)
+        let newWidth = max(2, (Int(Double(nativeVideoWidth) * scale) / 2) * 2)
+        let newHeight = max(2, (Int(Double(nativeVideoHeight) * scale) / 2) * 2)
+
+        if newWidth == frameWidth && newHeight == frameHeight { return false }
+
+        frameWidth = newWidth
+        frameHeight = newHeight
+        setupFrameBuffer()
+
+        // Recreate AVPlayerItemVideoOutput with updated hint dimensions
+        if let item = player?.currentItem {
+            if let old = videoOutput {
+                item.remove(old)
+            }
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: newWidth,
+                kCVPixelBufferHeightKey as String: newHeight,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+            ]
+            let newOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: attrs)
+            item.add(newOutput)
+            videoOutput = newOutput
+        }
+
+        return true
+    }
 
     /// Returns the detected video frame rate
     func getVideoFrameRate() -> Float { return videoFrameRate }
@@ -1377,6 +1427,13 @@ public func getFrameHeight(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getFrameHeight())
+}
+
+@_cdecl("setOutputSize")
+public func setOutputSize(_ context: UnsafeMutableRawPointer?, _ width: Int32, _ height: Int32) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.setOutputSize(width: Int(width), height: Int(height)) ? 1 : 0
 }
 
 @_cdecl("getVideoFrameRate")
