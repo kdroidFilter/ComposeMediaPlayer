@@ -15,7 +15,8 @@ extern void   playVideo(void* ctx);
 extern void   pauseVideo(void* ctx);
 extern void   setVolume(void* ctx, float volume);
 extern float  getVolume(void* ctx);
-extern void*  getLatestFrame(void* ctx);
+extern void*  lockLatestFrame(void* ctx, int32_t* outInfo);
+extern void   unlockLatestFrame(void* ctx);
 extern int32_t getFrameWidth(void* ctx);
 extern int32_t getFrameHeight(void* ctx);
 extern int32_t setOutputSize(void* ctx, int32_t width, int32_t height);
@@ -78,10 +79,20 @@ static jfloat JNICALL jni_GetVolume(JNIEnv* env, jclass cls, jlong handle) {
     return handle ? getVolume(toCtx(handle)) : 0.0f;
 }
 
-static jlong JNICALL jni_GetLatestFrameAddress(JNIEnv* env, jclass cls, jlong handle) {
-    if (!handle) return 0L;
-    void* ptr = getLatestFrame(toCtx(handle));
-    return ptr ? (jlong)(uintptr_t)ptr : 0L;
+// Locks the latest CVPixelBuffer and fills outInfo[3] = {width, height, bytesPerRow}.
+// Returns the base address of the locked buffer, or 0 on failure.
+// Caller MUST call jni_UnlockFrame after reading.
+static jlong JNICALL jni_LockFrame(JNIEnv* env, jclass cls, jlong handle, jintArray outInfo) {
+    if (!handle || !outInfo) return 0L;
+    int32_t info[3] = {0, 0, 0};
+    void* addr = lockLatestFrame(toCtx(handle), info);
+    if (!addr) return 0L;
+    (*env)->SetIntArrayRegion(env, outInfo, 0, 3, (jint*)info);
+    return (jlong)(uintptr_t)addr;
+}
+
+static void JNICALL jni_UnlockFrame(JNIEnv* env, jclass cls, jlong handle) {
+    if (handle) unlockLatestFrame(toCtx(handle));
 }
 
 static jobject JNICALL jni_WrapPointer(JNIEnv* env, jclass cls, jlong address, jlong size) {
@@ -190,7 +201,8 @@ static const JNINativeMethod g_methods[] = {
     { "nPause",                  "(J)V",                        (void*)jni_Pause },
     { "nSetVolume",              "(JF)V",                       (void*)jni_SetVolume },
     { "nGetVolume",              "(J)F",                        (void*)jni_GetVolume },
-    { "nGetLatestFrameAddress",  "(J)J",                        (void*)jni_GetLatestFrameAddress },
+    { "nLockFrame",              "(J[I)J",                      (void*)jni_LockFrame },
+    { "nUnlockFrame",            "(J)V",                        (void*)jni_UnlockFrame },
     { "nWrapPointer",            "(JJ)Ljava/nio/ByteBuffer;",   (void*)jni_WrapPointer },
     { "nGetFrameWidth",          "(J)I",                        (void*)jni_GetFrameWidth },
     { "nGetFrameHeight",         "(J)I",                        (void*)jni_GetFrameHeight },

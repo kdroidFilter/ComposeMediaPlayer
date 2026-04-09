@@ -44,8 +44,12 @@ internal object SharedVideoPlayer {
     @JvmStatic external fun nSetPlaybackSpeed(handle: Long, speed: Float)
     @JvmStatic external fun nGetPlaybackSpeed(handle: Long): Float
 
-    // Frame access
-    @JvmStatic external fun nGetLatestFrameAddress(handle: Long): Long
+    // Frame access — lock/unlock CVPixelBuffer directly (zero intermediate copy)
+    // outInfo must be IntArray(3); filled with [width, height, bytesPerRow] on success.
+    // Returns the native base address of the locked buffer, or 0 on failure.
+    // MUST call nUnlockFrame after reading.
+    @JvmStatic external fun nLockFrame(handle: Long, outInfo: IntArray): Long
+    @JvmStatic external fun nUnlockFrame(handle: Long)
     @JvmStatic external fun nWrapPointer(address: Long, size: Long): ByteBuffer?
     @JvmStatic external fun nGetFrameWidth(handle: Long): Int
     @JvmStatic external fun nGetFrameHeight(handle: Long): Int

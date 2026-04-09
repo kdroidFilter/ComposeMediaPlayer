@@ -23,9 +23,11 @@ class SharedVideoPlayer {
     // The actual capture frame rate (minimum of video and screen rates)
     private var captureFrameRate: Float = 0.0
 
-    // Shared buffer to store the frame in BGRA format (no conversion needed)
-    private var frameBuffer: UnsafeMutablePointer<UInt32>?
-    private var bufferCapacity: Int = 0
+    // Latest decoded CVPixelBuffer retained directly — no intermediate copy.
+    // The JNI side locks it for reading, copies to the Skia bitmap, then unlocks.
+    private var latestPixelBuffer: CVPixelBuffer? = nil
+    private var lockedPixelBuffer: CVPixelBuffer? = nil
+    private let bufferLock = NSLock()
 
     // Frame dimensions (scaled output — may be smaller than native to save RAM)
     private var frameWidth: Int = 0
@@ -730,7 +732,6 @@ class SharedVideoPlayer {
                     frameHeight = 1080
                     nativeVideoWidth = frameWidth
                     nativeVideoHeight = frameHeight
-                    setupFrameBuffer()
                     setupVideoOutputAndPlayer(with: asset)
                 }
                 return
@@ -750,8 +751,7 @@ class SharedVideoPlayer {
                         self.nativeVideoWidth = self.frameWidth
                         self.nativeVideoHeight = self.frameHeight
 
-                        // Continue with buffer allocation and setup
-                        self.setupFrameBuffer()
+                        // Continue with player setup
                         self.setupVideoOutputAndPlayer(with: asset)
                     } catch {
                         print("Error loading video track properties: \(error.localizedDescription)")
@@ -759,7 +759,6 @@ class SharedVideoPlayer {
                         if self.isHLSStream {
                             self.frameWidth = 1920
                             self.frameHeight = 1080
-                            self.setupFrameBuffer()
                             self.setupVideoOutputAndPlayer(with: asset)
                         }
                     }
@@ -775,24 +774,57 @@ class SharedVideoPlayer {
                 nativeVideoWidth = frameWidth
                 nativeVideoHeight = frameHeight
 
-                // Continue with buffer allocation and setup
-                setupFrameBuffer()
+                // Continue with player setup
                 setupVideoOutputAndPlayer(with: asset)
             }
         }
     }
 
-    // Helper method to setup frame buffer
-    private func setupFrameBuffer() {
-        // Allocate or reuse the shared buffer if capacity matches
-        let totalPixels = frameWidth * frameHeight
-        if let buffer = frameBuffer, bufferCapacity == totalPixels {
-            buffer.initialize(repeating: 0, count: totalPixels)
-        } else {
-            frameBuffer?.deallocate()
-            frameBuffer = UnsafeMutablePointer<UInt32>.allocate(capacity: totalPixels)
-            frameBuffer?.initialize(repeating: 0, count: totalPixels)
-            bufferCapacity = totalPixels
+    // Retains the latest CVPixelBuffer for zero-copy JNI access.
+    // Updates frame dimensions for HLS streams where resolution may change dynamically.
+    private func retainLatestPixelBuffer(_ pixelBuffer: CVPixelBuffer) {
+        let w = CVPixelBufferGetWidth(pixelBuffer)
+        let h = CVPixelBufferGetHeight(pixelBuffer)
+        if isHLSStream && (w != frameWidth || h != frameHeight) {
+            frameWidth = w
+            frameHeight = h
+            nativeVideoWidth = w
+            nativeVideoHeight = h
+        }
+        bufferLock.lock()
+        latestPixelBuffer = pixelBuffer
+        bufferLock.unlock()
+    }
+
+    // Locks the latest CVPixelBuffer and returns its base address for direct reading.
+    // outInfo must point to an array of 3 int32_t: [width, height, bytesPerRow].
+    // Caller MUST call unlockLatestFrame() after reading.
+    func lockLatestFrame(_ outInfo: UnsafeMutablePointer<Int32>) -> UnsafeMutableRawPointer? {
+        bufferLock.lock()
+        guard let pb = latestPixelBuffer else {
+            bufferLock.unlock()
+            return nil
+        }
+        lockedPixelBuffer = pb
+        bufferLock.unlock()
+
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        guard let addr = CVPixelBufferGetBaseAddress(pb) else {
+            CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+            lockedPixelBuffer = nil
+            return nil
+        }
+        outInfo[0] = Int32(CVPixelBufferGetWidth(pb))
+        outInfo[1] = Int32(CVPixelBufferGetHeight(pb))
+        outInfo[2] = Int32(CVPixelBufferGetBytesPerRow(pb))
+        return addr
+    }
+
+    // Unlocks the CVPixelBuffer previously locked by lockLatestFrame().
+    func unlockLatestFrame() {
+        if let pb = lockedPixelBuffer {
+            CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+            lockedPixelBuffer = nil
         }
     }
 
@@ -886,7 +918,7 @@ class SharedVideoPlayer {
         if output.hasNewPixelBuffer(forItemTime: zeroTime),
            let pixelBuffer = output.copyPixelBuffer(forItemTime: zeroTime, itemTimeForDisplay: nil)
         {
-            updateLatestFrameData(from: pixelBuffer)
+            retainLatestPixelBuffer(pixelBuffer)
         }
     }
 
@@ -919,48 +951,10 @@ class SharedVideoPlayer {
            let pixelBuffer = output.copyPixelBuffer(
                forItemTime: currentTime, itemTimeForDisplay: nil)
         {
-            updateLatestFrameData(from: pixelBuffer)
+            retainLatestPixelBuffer(pixelBuffer)
         }
     }
 
-    /// Directly copies the content of the pixelBuffer into the shared buffer without conversion.
-    private func updateLatestFrameData(from pixelBuffer: CVPixelBuffer) {
-        guard let destBuffer = frameBuffer else { return }
-
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-
-        guard let srcBaseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        let srcBytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-
-        // For HLS, dimensions might change dynamically
-        if isHLSStream && (width != frameWidth || height != frameHeight) {
-            print("HLS: Resolution changed from \(frameWidth)x\(frameHeight) to \(width)x\(height)")
-            frameWidth = width
-            frameHeight = height
-            nativeVideoWidth = width
-            nativeVideoHeight = height
-            setupFrameBuffer()
-            guard frameBuffer != nil else { return }
-        }
-
-        guard width == frameWidth, height == frameHeight else {
-            print("Unexpected dimensions: \(width)x\(height)")
-            return
-        }
-
-        if srcBytesPerRow == width * 4 {
-            memcpy(destBuffer, srcBaseAddress, height * srcBytesPerRow)
-        } else {
-            for row in 0..<height {
-                let srcRow = srcBaseAddress.advanced(by: row * srcBytesPerRow)
-                let destRow = destBuffer.advanced(by: row * width)
-                memcpy(destRow, srcRow, width * 4)
-            }
-        }
-    }
 
     /// Retrieve the audio levels.
     func getLeftAudioLevel() -> Float {
@@ -1134,7 +1128,7 @@ class SharedVideoPlayer {
                let pixelBuffer = output.copyPixelBuffer(
                    forItemTime: currentTime, itemTimeForDisplay: nil)
             {
-                updateLatestFrameData(from: pixelBuffer)
+                retainLatestPixelBuffer(pixelBuffer)
             }
         }
     }
@@ -1195,11 +1189,6 @@ class SharedVideoPlayer {
         return playbackSpeed
     }
 
-    /// Returns a pointer to the shared frame buffer. The caller should not free this pointer.
-    func getLatestFramePointer() -> UnsafeMutablePointer<UInt32>? {
-        return frameBuffer
-    }
-
     /// Returns the width of the video frame in pixels
     func getFrameWidth() -> Int { return frameWidth }
 
@@ -1225,7 +1214,6 @@ class SharedVideoPlayer {
 
         frameWidth = newWidth
         frameHeight = newHeight
-        setupFrameBuffer()
 
         // Recreate AVPlayerItemVideoOutput with updated hint dimensions
         if let item = player?.currentItem {
@@ -1328,7 +1316,7 @@ class SharedVideoPlayer {
                    let pixelBuffer = output.copyPixelBuffer(
                        forItemTime: newTime, itemTimeForDisplay: nil)
                 {
-                    updateLatestFrameData(from: pixelBuffer)
+                    retainLatestPixelBuffer(pixelBuffer)
                 }
             }
         }
@@ -1367,11 +1355,11 @@ class SharedVideoPlayer {
         cleanupObservers()
         player = nil
         videoOutput = nil
-        if let buffer = frameBuffer {
-            buffer.deallocate()
-            frameBuffer = nil
-            bufferCapacity = 0
+        if let pb = lockedPixelBuffer {
+            CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+            lockedPixelBuffer = nil
         }
+        latestPixelBuffer = nil
     }
 }
 
@@ -1433,14 +1421,18 @@ public func getVolume(_ context: UnsafeMutableRawPointer?) -> Float {
     return player.getVolume()
 }
 
-@_cdecl("getLatestFrame")
-public func getLatestFrame(_ context: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-    guard let context = context else { return nil }
+@_cdecl("lockLatestFrame")
+public func lockLatestFrame(_ context: UnsafeMutableRawPointer?, _ outInfo: UnsafeMutablePointer<Int32>?) -> UnsafeMutableRawPointer? {
+    guard let context = context, let outInfo = outInfo else { return nil }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
-    if let ptr = player.getLatestFramePointer() {
-        return UnsafeMutableRawPointer(ptr)
-    }
-    return nil
+    return player.lockLatestFrame(outInfo)
+}
+
+@_cdecl("unlockLatestFrame")
+public func unlockLatestFrame(_ context: UnsafeMutableRawPointer?) {
+    guard let context = context else { return }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    player.unlockLatestFrame()
 }
 
 @_cdecl("getFrameWidth")

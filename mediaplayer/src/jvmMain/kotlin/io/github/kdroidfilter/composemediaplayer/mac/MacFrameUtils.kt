@@ -18,16 +18,20 @@ internal fun copyBgraFrame(
     dst: ByteBuffer,
     width: Int,
     height: Int,
+    srcBytesPerRow: Int,
     dstRowBytes: Int,
 ) {
     require(width > 0) { "width must be > 0 (was $width)" }
     require(height > 0) { "height must be > 0 (was $height)" }
-    val srcRowBytes = width * 4
-    require(dstRowBytes >= srcRowBytes) {
-        "dstRowBytes ($dstRowBytes) must be >= srcRowBytes ($srcRowBytes)"
+    val pixelRowBytes = width * 4
+    require(srcBytesPerRow >= pixelRowBytes) {
+        "srcBytesPerRow ($srcBytesPerRow) must be >= pixelRowBytes ($pixelRowBytes)"
+    }
+    require(dstRowBytes >= pixelRowBytes) {
+        "dstRowBytes ($dstRowBytes) must be >= pixelRowBytes ($pixelRowBytes)"
     }
 
-    val requiredSrcBytes = srcRowBytes.toLong() * height.toLong()
+    val requiredSrcBytes = srcBytesPerRow.toLong() * height.toLong()
     val requiredDstBytes = dstRowBytes.toLong() * height.toLong()
     require(src.capacity().toLong() >= requiredSrcBytes) {
         "src buffer too small: ${src.capacity()} < $requiredSrcBytes"
@@ -41,25 +45,28 @@ internal fun copyBgraFrame(
     srcBuf.rewind()
     dstBuf.rewind()
 
-    if (dstRowBytes == srcRowBytes) {
-        srcBuf.limit(requiredSrcBytes.toInt())
-        dstBuf.limit(requiredSrcBytes.toInt())
+    // Fast path: both buffers have the same layout — single bulk copy
+    if (srcBytesPerRow == pixelRowBytes && dstRowBytes == pixelRowBytes) {
+        val totalBytes = pixelRowBytes.toLong() * height.toLong()
+        srcBuf.limit(totalBytes.toInt())
+        dstBuf.limit(totalBytes.toInt())
         dstBuf.put(srcBuf)
         return
     }
 
+    // Slow path: different strides — copy row by row
     val srcCapacity = srcBuf.capacity()
     val dstCapacity = dstBuf.capacity()
     for (row in 0 until height) {
-        val srcPos = row * srcRowBytes
+        val srcPos = row * srcBytesPerRow
         srcBuf.limit(srcCapacity)
         srcBuf.position(srcPos)
-        srcBuf.limit(srcPos + srcRowBytes)
+        srcBuf.limit(srcPos + pixelRowBytes)
 
         val dstPos = row * dstRowBytes
         dstBuf.limit(dstCapacity)
         dstBuf.position(dstPos)
-        dstBuf.limit(dstPos + srcRowBytes)
+        dstBuf.limit(dstPos + pixelRowBytes)
 
         dstBuf.put(srcBuf)
     }

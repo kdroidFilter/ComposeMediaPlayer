@@ -555,61 +555,65 @@ class MacVideoPlayerState : VideoPlayerState {
     private suspend fun updateFrameAsync() {
         withContext(frameDispatcher) {
             try {
-                // Safely get the player pointer
                 val ptr = playerPtr
                 if (ptr == 0L) return@withContext
 
-                // Get frame dimensions
-                val width = SharedVideoPlayer.nGetFrameWidth(ptr)
-                val height = SharedVideoPlayer.nGetFrameHeight(ptr)
+                // Lock the CVPixelBuffer directly — eliminates the Swift-side memcpy.
+                // outInfo = [width, height, bytesPerRow]
+                val outInfo = IntArray(3)
+                val frameAddress = SharedVideoPlayer.nLockFrame(ptr, outInfo)
+                if (frameAddress == 0L) return@withContext
+
+                val width = outInfo[0]
+                val height = outInfo[1]
+                val srcBytesPerRow = outInfo[2]
 
                 if (width <= 0 || height <= 0) {
+                    SharedVideoPlayer.nUnlockFrame(ptr)
                     return@withContext
                 }
 
-                // Get the latest frame to minimize mutex lock time
-                val frameAddress = SharedVideoPlayer.nGetLatestFrameAddress(ptr)
-                if (frameAddress == 0L) return@withContext
-
-                val pixelCount = width * height
-                val frameSizeBytes = pixelCount.toLong() * 4L
+                val frameSizeBytes = srcBytesPerRow.toLong() * height.toLong()
                 var framePublished = false
 
-                withContext(Dispatchers.Default) {
-                    val srcBuf = SharedVideoPlayer.nWrapPointer(frameAddress, frameSizeBytes)
-                        ?: return@withContext
+                try {
+                    withContext(Dispatchers.Default) {
+                        val srcBuf = SharedVideoPlayer.nWrapPointer(frameAddress, frameSizeBytes)
+                            ?: return@withContext
 
-                    // Allocate/reuse two bitmaps (double-buffering) to avoid writing while the UI draws.
-                    if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
-                        skiaBitmapA?.close()
-                        skiaBitmapB?.close()
+                        // Allocate/reuse two bitmaps (double-buffering) to avoid writing while the UI draws.
+                        if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
+                            skiaBitmapA?.close()
+                            skiaBitmapB?.close()
 
-                        val imageInfo = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
-                        skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
-                        skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
-                        skiaBitmapWidth = width
-                        skiaBitmapHeight = height
-                        nextSkiaBitmapA = true
+                            val imageInfo = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+                            skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
+                            skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
+                            skiaBitmapWidth = width
+                            skiaBitmapHeight = height
+                            nextSkiaBitmapA = true
+                        }
+
+                        val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+                        nextSkiaBitmapA = !nextSkiaBitmapA
+
+                        val pixmap = targetBitmap.peekPixels() ?: return@withContext
+                        val pixelsAddr = pixmap.addr
+                        if (pixelsAddr == 0L) return@withContext
+
+                        // Single copy: CVPixelBuffer → Skia bitmap pixels (no intermediate buffer)
+                        srcBuf.rewind()
+                        val dstRowBytes = pixmap.rowBytes.toInt()
+                        val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
+                        val destBuf = SharedVideoPlayer.nWrapPointer(pixelsAddr, dstSizeBytes)
+                            ?: return@withContext
+                        copyBgraFrame(srcBuf, destBuf, width, height, srcBytesPerRow, dstRowBytes)
+
+                        _currentFrameState.value = targetBitmap.asComposeImageBitmap()
+                        framePublished = true
                     }
-
-                    val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
-                    nextSkiaBitmapA = !nextSkiaBitmapA
-
-                    val pixmap = targetBitmap.peekPixels() ?: return@withContext
-                    val pixelsAddr = pixmap.addr
-                    if (pixelsAddr == 0L) return@withContext
-
-                    // Native-to-native copy: frame buffer -> Skia bitmap pixels.
-                    srcBuf.rewind()
-                    val destRowBytes = pixmap.rowBytes.toInt()
-                    val destSizeBytes = destRowBytes.toLong() * height.toLong()
-                    val destBuf = SharedVideoPlayer.nWrapPointer(pixelsAddr, destSizeBytes)
-                        ?: return@withContext
-                    copyBgraFrame(srcBuf, destBuf, width, height, destRowBytes)
-
-                    // Publish to flow
-                    _currentFrameState.value = targetBitmap.asComposeImageBitmap()
-                    framePublished = true
+                } finally {
+                    SharedVideoPlayer.nUnlockFrame(ptr)
                 }
 
                 if (framePublished) {
