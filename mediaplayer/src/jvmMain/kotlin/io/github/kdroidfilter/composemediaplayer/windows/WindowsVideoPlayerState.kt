@@ -57,7 +57,7 @@ internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
  * Windows implementation of the video player state.
  * Handles media playback using Media Foundation on Windows platform.
  */
-class WindowsVideoPlayerState() : VideoPlayerState {
+class WindowsVideoPlayerState : VideoPlayerState {
     companion object {
         private val isMfBootstrapped = AtomicBoolean(false)
 

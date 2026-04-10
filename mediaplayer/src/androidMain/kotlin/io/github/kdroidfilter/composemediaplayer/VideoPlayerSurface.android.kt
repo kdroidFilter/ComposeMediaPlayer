@@ -1,8 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer
 
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
 import android.view.LayoutInflater
 import android.view.TextureView
 import android.view.View
@@ -28,7 +26,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.coroutineScope
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -38,10 +35,8 @@ import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @UnstableApi
 @Composable
@@ -125,7 +120,6 @@ private fun VideoPlayerSurfaceInternal(
         FullScreenLayout(
             modifier = Modifier,
             onDismissRequest = {
-                isFullscreen = false
                 // Call playerState.toggleFullscreen() to ensure proper cleanup
                 playerState.toggleFullscreen()
             },
@@ -340,27 +334,25 @@ private fun createPlayerViewWithSurfaceType(
             throw e2
         }
     }
-}
 
 @Composable
-fun AutoPipEffect(
-    playerState: VideoPlayerState,
-) {
+fun AutoPipEffect(playerState: VideoPlayerState) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE && playerState.isPipEnabled) {
-                scope.coroutineContext[MonotonicFrameClock]?.let { monoticClock ->
-                    val activity = context as? ComponentActivity
-                    activity?.lifecycleScope?.launch(context = Dispatchers.Main + monoticClock) {
-                        playerState.enterPip()
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_PAUSE && playerState.isPipEnabled) {
+                    scope.coroutineContext[MonotonicFrameClock]?.let { monoticClock ->
+                        val activity = context as? ComponentActivity
+                        activity?.lifecycleScope?.launch(context = Dispatchers.Main + monoticClock) {
+                            playerState.enterPip()
+                        }
                     }
                 }
             }
-        }
 
         lifecycleOwner.lifecycle.addObserver(observer)
 

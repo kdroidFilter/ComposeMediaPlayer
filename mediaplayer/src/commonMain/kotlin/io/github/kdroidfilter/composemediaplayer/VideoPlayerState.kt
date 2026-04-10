@@ -76,7 +76,7 @@ interface VideoPlayerState {
     var isPipEnabled: Boolean get() = false
         set(value) {}
 
-    suspend fun enterPip() : PipResult = PipResult.NotSupported
+    suspend fun enterPip(): PipResult = PipResult.NotSupported
 
     // Functions to control playback
 

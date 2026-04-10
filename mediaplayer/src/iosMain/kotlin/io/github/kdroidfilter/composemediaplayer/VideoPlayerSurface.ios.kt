@@ -96,7 +96,6 @@ fun VideoPlayerSurfaceImpl(
                         backgroundColor = UIColor.blackColor
                         clipsToBounds = true
 
-
                         (playerState as? DefaultVideoPlayerState)?.let { state ->
                             val playerLayer = layer as? AVPlayerLayer ?: return@let
                             state.playerLayer = playerLayer

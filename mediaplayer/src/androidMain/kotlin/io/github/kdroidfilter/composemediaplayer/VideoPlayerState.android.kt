@@ -11,14 +11,11 @@ import android.net.Uri
 import android.os.Build
 import android.util.Rational
 import androidx.annotation.OptIn
-import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.Color
@@ -42,7 +39,6 @@ import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.AndroidFile
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
-import kotlinx.coroutines.android.awaitFrame
 import java.lang.ref.WeakReference
 
 @OptIn(UnstableApi::class)
@@ -252,7 +248,6 @@ open class DefaultVideoPlayerState(
     // Aspect ratio
     private var _aspectRatio by mutableFloatStateOf(16f / 9f)
     override val aspectRatio: Float get() = _aspectRatio
-
 
     // Fullscreen state
     private var _isFullscreen by mutableStateOf(false)
@@ -706,7 +701,6 @@ open class DefaultVideoPlayerState(
         isPipFullScreen = !isPipFullScreen
     }
 
-
     override suspend fun enterPip(): PipResult {
         if (!isPipSupported) return PipResult.NotSupported
         if (!isPipEnabled) return PipResult.NotEnabled
@@ -721,14 +715,15 @@ open class DefaultVideoPlayerState(
             withFrameNanos { } // two frames to be safe
         }
 
-        val params = PictureInPictureParams.Builder()
-            .setAspectRatio(Rational(16, 9))
-            .apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    setAutoEnterEnabled(true)
-                }
-            }
-            .build()
+        val params =
+            PictureInPictureParams
+                .Builder()
+                .setAspectRatio(Rational(16, 9))
+                .apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        setAutoEnterEnabled(true)
+                    }
+                }.build()
 
         val result = currentActivity.enterPictureInPictureMode(params)
 

@@ -182,27 +182,33 @@ open class DefaultVideoPlayerState(
     private fun configureAudioSession() {
         val session = AVAudioSession.sharedInstance()
         try {
-            val category = if (audioMode.playsInSilentMode) {
-                AVAudioSessionCategoryPlayback
-            } else {
-                when (audioMode.interruptionMode) {
-                    InterruptionMode.DoNotMix -> AVAudioSessionCategorySoloAmbient
-                    InterruptionMode.MixWithOthers,
-                    InterruptionMode.DuckOthers -> AVAudioSessionCategoryAmbient
+            val category =
+                if (audioMode.playsInSilentMode) {
+                    AVAudioSessionCategoryPlayback
+                } else {
+                    when (audioMode.interruptionMode) {
+                        InterruptionMode.DoNotMix -> AVAudioSessionCategorySoloAmbient
+                        InterruptionMode.MixWithOthers,
+                        InterruptionMode.DuckOthers,
+                        -> AVAudioSessionCategoryAmbient
+                    }
                 }
-            }
 
-            val mode = if (audioMode.playsInSilentMode) {
-                AVAudioSessionModeMoviePlayback
-            } else {
-                AVAudioSessionModeDefault
-            }
+            val mode =
+                if (audioMode.playsInSilentMode) {
+                    AVAudioSessionModeMoviePlayback
+                } else {
+                    AVAudioSessionModeDefault
+                }
 
-            val options: ULong = when (audioMode.interruptionMode) {
-                InterruptionMode.DoNotMix -> 0u
-                InterruptionMode.MixWithOthers -> AVAudioSessionCategoryOptionMixWithOthers
-                InterruptionMode.DuckOthers -> AVAudioSessionCategoryOptionMixWithOthers or AVAudioSessionCategoryOptionDuckOthers
-            }
+            val options: ULong =
+                when (audioMode.interruptionMode) {
+                    InterruptionMode.DoNotMix -> 0u
+                    InterruptionMode.MixWithOthers -> AVAudioSessionCategoryOptionMixWithOthers
+                    InterruptionMode.DuckOthers ->
+                        AVAudioSessionCategoryOptionMixWithOthers or
+                            AVAudioSessionCategoryOptionDuckOthers
+                }
 
             session.setCategory(category, mode = mode, options = options, error = null)
             session.setActive(true, error = null)
