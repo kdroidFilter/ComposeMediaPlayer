@@ -76,6 +76,7 @@ open class DefaultVideoPlayerState(
     internal var exoPlayer: ExoPlayer? = null
     private var updateJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
     // Protection contre les race conditions
     private var isPlayerReleased = false
     private val playerInitializationLock = Object()

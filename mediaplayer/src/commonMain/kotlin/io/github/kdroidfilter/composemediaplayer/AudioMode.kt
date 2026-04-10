@@ -6,8 +6,10 @@ package io.github.kdroidfilter.composemediaplayer
 enum class InterruptionMode {
     /** Exclusive audio focus. Other apps' audio is paused. */
     DoNotMix,
+
     /** Mix with other apps' audio. No audio focus requested. */
     MixWithOthers,
+
     /** Other apps' audio ducks (lowers volume) while this player is active. */
     DuckOthers,
 }

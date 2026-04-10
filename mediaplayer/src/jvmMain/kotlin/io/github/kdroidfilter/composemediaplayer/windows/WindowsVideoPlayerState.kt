@@ -240,6 +240,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private val isResizing = AtomicBoolean(false)
     private var videoJob: Job? = null
     private var resizeJob: Job? = null
+
     // Memory optimization for frame processing
     private val frameQueueSize = 1
     private val frameChannel =
@@ -631,7 +632,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
                                 launch { produceFrames() }
                                 launch { consumeFrames() }
                             }
-
                     }
                 } catch (e: Exception) {
                     setError("Error while opening media: ${e.message}")
