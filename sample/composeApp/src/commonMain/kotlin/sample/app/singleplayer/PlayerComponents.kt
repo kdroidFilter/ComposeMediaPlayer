@@ -27,6 +27,7 @@ import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerSurface
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun MetadataRow(label: String, value: String) {
@@ -91,94 +92,99 @@ fun VideoDisplay(
                 .clip(RoundedCornerShape(16.dp)),
             contentScale = contentScale
         ) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                if (playerState.isFullscreen) {
-                    var controlsVisible by remember { mutableStateOf(false) }
-
-                    // Reset timer when controls become visible
-                    LaunchedEffect(controlsVisible) {
-                        if (controlsVisible) {
-                            delay(3000) // Hide controls after 3 seconds
-                            controlsVisible = false
-                        }
-                    }
-
-                    // Detect taps to show controls
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable { controlsVisible = true }
-                            .pointerInput(Unit) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        // Show controls when mouse moves
-                                        if (event.type == PointerEventType.Move) {
-                                            controlsVisible = true
-                                        }
-                                    }
-                                }
-                            }
-                    ) {
-                        // Show controls when visible
-                        AnimatedVisibility(
-                            visible = controlsVisible,
-                            enter = fadeIn(),
-                            exit = fadeOut(),
-                            modifier = Modifier.align(Alignment.Center)
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .background(
-                                        color = Color.Black.copy(alpha = 0.7f),
-                                        shape = RoundedCornerShape(16.dp)
-                                    )
-                                    .padding(16.dp)
-                            ) {
-                                // Play/Pause button
-                                IconButton(
-                                    onClick = {
-                                        if (playerState.isPlaying) playerState.pause() else playerState.play()
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = if (playerState.isPlaying) "Pause" else "Play",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(56.dp)
-                                    )
-                                }
-
-                                // Exit fullscreen button
-                                IconButton(
-                                    onClick = { playerState.toggleFullscreen() }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.FullscreenExit,
-                                        contentDescription = "Exit Fullscreen",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(56.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+            if (playerState.isFullscreen) {
+                FullscreenControls(playerState = playerState)
             }
         }
 
         if (playerState.isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Transparent),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
+            LoadingOverlay()
         }
+    }
+}
+
+@Composable
+private fun FullscreenControls(playerState: VideoPlayerState) {
+    var controlsVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(controlsVisible) {
+        if (controlsVisible) {
+            delay(3000)
+            controlsVisible = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable { controlsVisible = true }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type == PointerEventType.Move) {
+                            controlsVisible = true
+                        }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            FullscreenControlsBar(playerState = playerState)
+        }
+    }
+}
+
+@Composable
+private fun FullscreenControlsBar(playerState: VideoPlayerState) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(
+                color = Color.Black.copy(alpha = 0.7f),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .padding(16.dp)
+    ) {
+        IconButton(
+            onClick = {
+                if (playerState.isPlaying) playerState.pause() else playerState.play()
+            }
+        ) {
+            Icon(
+                imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = if (playerState.isPlaying) "Pause" else "Play",
+                tint = Color.White,
+                modifier = Modifier.size(56.dp)
+            )
+        }
+
+        IconButton(onClick = { playerState.toggleFullscreen() }) {
+            Icon(
+                imageVector = Icons.Default.FullscreenExit,
+                contentDescription = "Exit Fullscreen",
+                tint = Color.White,
+                modifier = Modifier.size(56.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LoadingOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Transparent),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator()
     }
 }
 
@@ -232,10 +238,10 @@ fun PrimaryControls(
     onMetadataDialogRequest: () -> Unit,
     onContentScaleDialogRequest: () -> Unit
 ) {
-    Row(
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.Center
     ) {
         FilledIconButton(
             onClick = { videoFileLauncher() },
@@ -302,8 +308,23 @@ fun PrimaryControls(
         ) {
             Icon(Icons.Default.AspectRatio, contentDescription = "Content Scale")
         }
+        val scope = rememberCoroutineScope()
+
+        FilledIconButton(
+            onClick = {
+                scope.launch {
+                    playerState.enterPip()
+                }
+            },
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            )
+        ) {
+            Icon(Icons.Default.PictureInPicture, contentDescription = "Content Scale")
+        }
     }
 }
+
 
 @Composable
 fun VolumeAndPlaybackControls(
@@ -513,10 +534,12 @@ fun ControlsCard(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
-                
-                Row(
+
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.Center,
+                    horizontalArrangement = Arrangement.Center,
+                    itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(
                         selected = initialPlayerState == InitialPlayerState.PLAY,
@@ -527,9 +550,9 @@ fun ControlsCard(
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.clickable { onInitialPlayerStateChange(InitialPlayerState.PLAY) }
                     )
-                    
+
                     Spacer(modifier = Modifier.width(16.dp))
-                    
+
                     RadioButton(
                         selected = initialPlayerState == InitialPlayerState.PAUSE,
                         onClick = { onInitialPlayerStateChange(InitialPlayerState.PAUSE) }
@@ -539,6 +562,32 @@ fun ControlsCard(
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.clickable { onInitialPlayerStateChange(InitialPlayerState.PAUSE) }
                     )
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+
+                        Switch(
+                            checked = playerState.isPipEnabled,
+                            onCheckedChange = { enable ->
+                                playerState.isPipEnabled = enable
+                            }
+                        )
+
+                        Text(
+                            text = "Is pip enabled",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier
+                                .padding(horizontal = 6.dp)
+                                .clickable { onInitialPlayerStateChange(InitialPlayerState.PAUSE) }
+                        )
+
+
+                    }
+
                 }
             }
 

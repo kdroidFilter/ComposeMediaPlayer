@@ -6,6 +6,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.vinceglb.filekit.PlatformFile
 
 /**
@@ -68,6 +69,14 @@ interface VideoPlayerState {
     val currentTime: Double
     var isFullscreen: Boolean
     val aspectRatio: Float
+
+    val isPipSupported: Boolean get() = false
+    var isPipActive: Boolean get() = false
+        set(value) {}
+    var isPipEnabled: Boolean get() = false
+        set(value) {}
+
+    suspend fun enterPip() : PipResult = PipResult.NotSupported
 
     // Functions to control playback
 
@@ -184,6 +193,9 @@ data class PreviewableVideoPlayerState(
     override val availableSubtitleTracks: MutableList<SubtitleTrack> = emptyList<SubtitleTrack>().toMutableList(),
     override var subtitleTextStyle: TextStyle = TextStyle.Default,
     override var subtitleBackgroundColor: Color = Color.Transparent,
+    override val isPipSupported: Boolean = false,
+    override var isPipActive: Boolean = false,
+    override var isPipEnabled: Boolean = false,
 ) : VideoPlayerState {
     override fun play() {}
 

@@ -10,8 +10,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -114,6 +117,7 @@ private fun SinglePlayerScreenCore(playerState: VideoPlayerState) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState())
         ) {
             val isLandscape = maxWidth > maxHeight
 
@@ -127,17 +131,20 @@ private fun SinglePlayerScreenCore(playerState: VideoPlayerState) {
                     // Left side: Video and Timeline
                     Column(
                         modifier = Modifier
+                            .heightIn(min = 300.dp)
                             .weight(1f)
-                            .fillMaxHeight()
+
                     ) {
                         // Header with title
-                        PlayerHeader(title = "Compose Media Player Sample",)
+                        PlayerHeader(title = "Compose Media Player Sample")
 
                         // Video display area
                         VideoDisplay(
                             playerState = playerState,
                             modifier = Modifier
+                                .heightIn(min = 300.dp)
                                 .weight(1f)
+
                                 .fillMaxWidth(),
                             contentScale = selectedContentScale
                         )
@@ -191,13 +198,14 @@ private fun SinglePlayerScreenCore(playerState: VideoPlayerState) {
                         .padding(16.dp)
                 ) {
                     // Header with title
-                    PlayerHeader(title = "Compose Media Player Sample",)
+                    PlayerHeader(title = "Compose Media Player Sample")
 
                     // Video display area
                     VideoDisplay(
                         playerState = playerState,
                         modifier = Modifier
-                            .weight(1f)
+                            .heightIn(min = 100.dp)
+                            .fillMaxHeight()
                             .fillMaxWidth(),
                         contentScale = selectedContentScale
                     )

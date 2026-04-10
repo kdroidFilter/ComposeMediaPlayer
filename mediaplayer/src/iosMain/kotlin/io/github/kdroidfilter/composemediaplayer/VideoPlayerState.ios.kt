@@ -11,6 +11,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.getUri
@@ -28,6 +29,7 @@ import platform.AVFAudio.AVAudioSessionModeDefault
 import platform.AVFAudio.AVAudioSessionModeMoviePlayback
 import platform.AVFAudio.setActive
 import platform.AVFoundation.*
+import platform.AVKit.AVPictureInPictureController
 import platform.CoreGraphics.CGFloat
 import platform.CoreMedia.CMTimeGetSeconds
 import platform.CoreMedia.CMTimeMake
@@ -117,6 +119,20 @@ open class DefaultVideoPlayerState(
             _isFullscreen = value
         }
 
+    override val isPipSupported: Boolean
+        get() = AVPictureInPictureController.isPictureInPictureSupported()
+
+    private var _isPipEnabled by mutableStateOf(false)
+
+    override var isPipEnabled: Boolean
+        get() = _isPipEnabled
+        set(value) {
+            pipController?.setCanStartPictureInPictureAutomaticallyFromInline(value)
+            _isPipEnabled = value
+        }
+
+    override var isPipActive by mutableStateOf(false)
+
     override val error: VideoPlayerError? = null
 
     // Observable instance of AVPlayer
@@ -125,6 +141,8 @@ open class DefaultVideoPlayerState(
 
     var playerLayer: AVPlayerLayer? by mutableStateOf(null)
         internal set
+
+    internal var pipController: AVPictureInPictureController? = null
 
     // Periodic observer for position updates (≈60 fps)
     private var timeObserverToken: Any? = null
@@ -243,6 +261,15 @@ open class DefaultVideoPlayerState(
                     }
                 },
             )
+    }
+
+    override suspend fun enterPip(): PipResult {
+        if (!isPipSupported) return PipResult.NotSupported
+        if (!isPipEnabled) return PipResult.NotEnabled
+        pipController?.setCanStartPictureInPictureAutomaticallyFromInline(true)
+        pipController?.startPictureInPicture()
+        isPipActive = true
+        return PipResult.Success
     }
 
     private fun setupObservers(

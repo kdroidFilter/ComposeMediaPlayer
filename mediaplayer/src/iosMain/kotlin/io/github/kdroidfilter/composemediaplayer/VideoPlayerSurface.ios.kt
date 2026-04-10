@@ -24,6 +24,7 @@ import platform.AVFoundation.AVLayerVideoGravityResizeAspect
 import platform.AVFoundation.AVLayerVideoGravityResizeAspectFill
 import platform.AVFoundation.AVPlayer
 import platform.AVFoundation.AVPlayerLayer
+import platform.AVKit.AVPictureInPictureController
 import platform.CoreGraphics.CGRect
 import platform.Foundation.NSCoder
 import platform.UIKit.UIColor
@@ -95,7 +96,12 @@ fun VideoPlayerSurfaceImpl(
                         backgroundColor = UIColor.blackColor
                         clipsToBounds = true
 
-                        (playerState as? DefaultVideoPlayerState)?.playerLayer = layer as? AVPlayerLayer
+
+                        (playerState as? DefaultVideoPlayerState)?.let { state ->
+                            val playerLayer = layer as? AVPlayerLayer ?: return@let
+                            state.playerLayer = playerLayer
+                            state.pipController = AVPictureInPictureController(playerLayer = playerLayer)
+                        }
                     }
                 },
                 update = { playerView ->

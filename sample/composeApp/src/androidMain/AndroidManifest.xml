@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:tools="http://schemas.android.com/tools" xmlns:android="http://schemas.android.com/apk/res/android">
 <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
@@ -11,11 +11,12 @@
             android:usesCleartextTraffic="true"
             android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
-            android:name=".AppActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:launchMode="singleInstance"
-            android:windowSoftInputMode="adjustPan"
-            android:exported="true">
+                android:name=".AppActivity"
+                android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
+                android:launchMode="singleInstance"
+                android:windowSoftInputMode="adjustPan"
+                android:supportsPictureInPicture="true"
+                android:exported="true" tools:targetApi="24">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

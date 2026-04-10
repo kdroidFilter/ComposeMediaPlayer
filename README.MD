@@ -46,6 +46,8 @@
     - [Customizing Subtitle Appearance](#-customizing-subtitle-appearance)
     - [Disabling Subtitles](#-disabling-subtitles)
   - [Fullscreen Mode](#️-fullscreen-mode)
+  - [Picture-in-Picture (PiP)](#-picture-in-picture-pip)
+  - [Audio Mode](#-audio-mode)
 - [Metadata Support](#-metadata-support)
   - [Example Usage](#example-usage)
   - [Basic Example](#-basic-example)
@@ -67,6 +69,8 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 - **Custom Video Player UI**: Fully customizable using Compose Multiplatform, with support for custom overlays that display even in fullscreen mode.
 - **Audio Levels**: Displays left and right audio levels in real time.
 - **Fullscreen Mode**: Toggle between windowed and fullscreen playback modes.
+- **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
+- **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
 - **Error handling** Simple error handling for network or playback issues.
 
 ## ✨ Supported Video Formats
@@ -439,6 +443,83 @@ VideoPlayerSurface(
 ```
 
 See the "Custom Overlay UI" section under "Displaying the Video Surface" for a complete example.
+
+### 📺 Picture-in-Picture (PiP)
+
+> [!WARNING]
+> PiP is supported on **Android** (8.0+) and **iOS** only. On desktop and web, it is a no-op.
+
+The player supports Picture-in-Picture mode, allowing users to continue watching video in a floating window while using other apps.
+
+| Platform | Status | Notes |
+| :--- | :---: | :--- |
+| **Android** | ✅ | Requires Android 8.0+ (API 26). Add `android:supportsPictureInPicture="true"` to your Activity in the manifest. |
+| **iOS** | ✅ | Uses `AVPictureInPictureController`. Enable "Audio, AirPlay, and Picture in Picture" in Background Modes. |
+| **Desktop** | ❌ | No-op |
+| **Web** | ❌ | No-op |
+
+```kotlin
+// Check if PiP is supported on the current device
+if (playerState.isPipSupported) {
+    // Enable automatic PiP when the app goes to background
+    playerState.isPipEnabled = true
+
+    // Or enter PiP programmatically
+    val result = playerState.enterPip()
+}
+```
+
+On Android, you can use the `AutoPipEffect` composable to automatically enter PiP mode when the app goes to the background while a video is playing:
+
+```kotlin
+AutoPipEffect(playerState)
+```
+
+You also need to forward PiP mode changes from your Activity:
+
+```kotlin
+class MainActivity : ComponentActivity() {
+    override fun onPictureInPictureModeChanged(isInPipMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPipMode, newConfig)
+        DefaultVideoPlayerState.onPictureInPictureModeChanged(isInPipMode)
+    }
+}
+```
+
+### 🔊 Audio Mode
+
+You can configure how the media player interacts with other apps' audio using the `AudioMode` parameter:
+
+```kotlin
+// Default: exclusive playback, pauses other apps' audio
+val playerState = rememberVideoPlayerState()
+
+// Mix with other apps' audio
+val playerState = rememberVideoPlayerState(
+    audioMode = AudioMode(interruptionMode = InterruptionMode.MixWithOthers)
+)
+
+// Duck other apps' audio (lower their volume)
+val playerState = rememberVideoPlayerState(
+    audioMode = AudioMode(interruptionMode = InterruptionMode.DuckOthers)
+)
+
+// Ambient mode (iOS): respect silent switch, mix with others
+val playerState = rememberVideoPlayerState(
+    audioMode = AudioMode(
+        interruptionMode = InterruptionMode.MixWithOthers,
+        playsInSilentMode = false,
+    )
+)
+```
+
+| Parameter | Description | Default |
+| :--- | :--- | :---: |
+| `interruptionMode` | `DoNotMix`, `MixWithOthers`, or `DuckOthers` | `DoNotMix` |
+| `playsInSilentMode` | iOS only: whether audio plays when the silent switch is on | `true` |
+
+> [!NOTE]
+> Audio mode is only effective on **Android** and **iOS**. On desktop and web, the parameter is accepted but ignored.
 
 ## 🔍 Metadata Support
 

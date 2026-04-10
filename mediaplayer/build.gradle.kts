@@ -92,6 +92,7 @@ kotlin {
             implementation(libs.androidx.media3.ui)
             implementation(libs.androidx.activityCompose)
             implementation(libs.androidx.core)
+            implementation(libs.androidx.lifecycle.runtime.ktx)
         }
 
         androidUnitTest.dependencies {
