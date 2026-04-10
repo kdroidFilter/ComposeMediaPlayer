@@ -4,9 +4,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
@@ -15,24 +18,15 @@ import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 
 
 /**
- * A composable function that renders a video player surface using GStreamer with offscreen rendering.
+ * A composable function that renders a video player surface using a native GStreamer
+ * player via JNI with offscreen rendering.
  *
- * This function creates a video rendering area using a Compose Canvas to draw video frames
- * that are rendered offscreen by GStreamer. This approach avoids the rendering issues
- * that can occur when using SwingPanel, especially with overlapping UI elements.
- *
- * @param playerState The state object that encapsulates the GStreamer player logic,
- *                    including playback control, timeline management, and video frames.
- * @param modifier An optional `Modifier` for customizing the layout and appearance of the
- *                 composable container. Defaults to an empty `Modifier`.
+ * @param playerState The state object that encapsulates the native GStreamer player logic.
+ * @param modifier An optional `Modifier` for customizing the layout and appearance.
  * @param contentScale Controls how the video content should be scaled inside the surface.
- *                    This affects how the video is displayed when its dimensions don't match
- *                    the surface dimensions.
  * @param overlay Optional composable content to be displayed on top of the video surface.
- *               This can be used to add custom controls, information, or any UI elements.
  * @param isInFullscreenWindow Whether this surface is already being displayed in a fullscreen window.
  */
-
 @Composable
 fun LinuxVideoPlayerSurface(
     playerState: LinuxVideoPlayerState,
@@ -41,51 +35,52 @@ fun LinuxVideoPlayerSurface(
     overlay: @Composable () -> Unit = {},
     isInFullscreenWindow: Boolean = false
 ) {
-
     Box(
-        modifier = modifier,
+        modifier = modifier.onSizeChanged { size ->
+            playerState.onResized(size.width, size.height)
+        },
         contentAlignment = Alignment.Center
     ) {
         // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
         if (playerState.hasMedia && (!playerState.isFullscreen || isInFullscreenWindow)) {
-            Canvas(
-                modifier = contentScale.toCanvasModifier(
-                    aspectRatio = playerState.aspectRatio,
-                    width = playerState.metadata.width,
-                    height = playerState.metadata.height
-                )
-            ) {
-                playerState.currentFrame?.let { frame ->
+            // Force recomposition when currentFrameState changes
+            val currentFrame by remember(playerState) { playerState.currentFrameState }
+
+            currentFrame?.let { frame ->
+                Canvas(
+                    modifier = contentScale.toCanvasModifier(
+                        playerState.aspectRatio,
+                        playerState.metadata.width,
+                        playerState.metadata.height
+                    ),
+                ) {
                     drawScaledImage(
-                        image        = frame,
-                        dstSize      = IntSize(size.width.toInt(), size.height.toInt()),
+                        image = frame,
+                        dstSize = IntSize(size.width.toInt(), size.height.toInt()),
                         contentScale = contentScale
                     )
                 }
             }
 
             // Add Compose-based subtitle layer
-            // Always render the subtitle layer, but let it handle visibility internally
-            // This ensures it's properly recomposed when subtitles are enabled during playback
-            val currentTimeMs = (playerState.sliderPos / 1000f *
-                    playerState.durationText.toTimeMs()).toLong()
+            if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
+                val currentTimeMs = (playerState.sliderPos / 1000f *
+                        playerState.durationText.toTimeMs()).toLong()
+                val durationMs = playerState.durationText.toTimeMs()
 
-            // Calculate duration in milliseconds
-            val durationMs = playerState.durationText.toTimeMs()
-
-            ComposeSubtitleLayer(
-                currentTimeMs = currentTimeMs,
-                durationMs = durationMs,
-                isPlaying = playerState.isPlaying,
-                subtitleTrack = playerState.currentSubtitleTrack,
-                subtitlesEnabled = playerState.subtitlesEnabled,
-                textStyle = playerState.subtitleTextStyle,
-                backgroundColor = playerState.subtitleBackgroundColor
-            )
+                ComposeSubtitleLayer(
+                    currentTimeMs = currentTimeMs,
+                    durationMs = durationMs,
+                    isPlaying = playerState.isPlaying,
+                    subtitleTrack = playerState.currentSubtitleTrack,
+                    subtitlesEnabled = playerState.subtitlesEnabled,
+                    textStyle = playerState.subtitleTextStyle,
+                    backgroundColor = playerState.subtitleBackgroundColor
+                )
+            }
         }
 
         // Render the overlay content on top of the video with fillMaxSize modifier
-        // to ensure it takes the full height of the parent Box
         Box(modifier = Modifier.fillMaxSize()) {
             overlay()
         }

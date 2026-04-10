@@ -1,6 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
-import com.sun.jna.Platform
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -25,7 +25,7 @@ class WindowsVideoPlayerStateTest {
     @Test
     fun testCreateWindowsVideoPlayerState() {
         // Skip test if not running on Windows
-        if (!Platform.isWindows()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.WINDOWS) {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
@@ -56,7 +56,7 @@ class WindowsVideoPlayerStateTest {
     @Test
     fun testVolumeControl() {
         // Skip test if not running on Windows
-        if (!Platform.isWindows()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.WINDOWS) {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
@@ -87,7 +87,7 @@ class WindowsVideoPlayerStateTest {
     @Test
     fun testLoopSetting() {
         // Skip test if not running on Windows
-        if (!Platform.isWindows()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.WINDOWS) {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
@@ -114,7 +114,7 @@ class WindowsVideoPlayerStateTest {
     @Test
     fun testFullscreenToggle() {
         // Skip test if not running on Windows
-        if (!Platform.isWindows()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.WINDOWS) {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
@@ -141,7 +141,7 @@ class WindowsVideoPlayerStateTest {
     @Test
     fun testErrorHandling() {
         // Skip test if not running on Windows
-        if (!Platform.isWindows()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.WINDOWS) {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }

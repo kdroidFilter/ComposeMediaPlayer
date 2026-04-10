@@ -108,9 +108,6 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
-            implementation(libs.gst1.java.core)
-            implementation(libs.jna.jpms)
-            implementation(libs.jna.platform.jpms)
             implementation(libs.slf4j.simple)
         }
 
@@ -197,13 +194,30 @@ val buildNativeWindows by tasks.registering(Exec::class) {
     commandLine("cmd", "/c", nativeDir.file("build.bat").asFile.absolutePath)
 }
 
+val buildNativeLinux by tasks.registering(Exec::class) {
+    description = "Compiles the C native library into Linux .so (GStreamer + JNI)"
+    group = "build"
+    val hasPrebuilt = nativeResourceDir
+        .dir("linux-x86-64")
+        .file("libNativeVideoPlayer.so")
+        .asFile
+        .exists()
+    enabled = Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC) && !hasPrebuilt
+
+    val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/linux")
+    inputs.dir(nativeDir)
+    outputs.dir(nativeResourceDir)
+    workingDir(nativeDir)
+    commandLine("bash", "build.sh")
+}
+
 tasks.named("jvmProcessResources") {
-    dependsOn(buildNativeMacOs, buildNativeWindows)
+    dependsOn(buildNativeMacOs, buildNativeWindows, buildNativeLinux)
 }
 
 tasks.configureEach {
     if (name == "sourcesJar") {
-        dependsOn(buildNativeMacOs, buildNativeWindows)
+        dependsOn(buildNativeMacOs, buildNativeWindows, buildNativeLinux)
     }
 }
 

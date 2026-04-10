@@ -1,9 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.linux
 
-import androidx.compose.runtime.Stable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
@@ -11,945 +8,873 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import co.touchlab.kermit.Logger
+import co.touchlab.kermit.Logger.Companion.setMinSeverity
+import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
-import io.github.kdroidfilter.composemediaplayer.util.DEFAULT_ASPECT_RATIO
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
-import org.freedesktop.gstreamer.Bin
-import org.freedesktop.gstreamer.Bus
-import org.freedesktop.gstreamer.Caps
-import org.freedesktop.gstreamer.Element
-import org.freedesktop.gstreamer.ElementFactory
-import org.freedesktop.gstreamer.FlowReturn
-import org.freedesktop.gstreamer.Format
-import org.freedesktop.gstreamer.GhostPad
-import org.freedesktop.gstreamer.Sample
-import org.freedesktop.gstreamer.State
-import org.freedesktop.gstreamer.elements.AppSink
-import org.freedesktop.gstreamer.elements.PlayBin
-import org.freedesktop.gstreamer.event.SeekFlags
-import org.freedesktop.gstreamer.event.SeekType
-import org.freedesktop.gstreamer.message.MessageType
-import com.sun.jna.Pointer
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.debounce
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
-import java.awt.EventQueue
 import java.io.File
-import java.net.URI
-import java.nio.ByteBuffer
-import java.util.EnumSet
-import javax.swing.Timer
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
-import kotlin.math.pow
+import kotlin.math.log10
+
+internal val linuxLogger = Logger.withTag("LinuxVideoPlayerState")
+    .apply { setMinSeverity(Severity.Warn) }
 
 /**
- * LinuxVideoPlayerState serves as the Linux-specific implementation for
- * a video player using GStreamer.
+ * LinuxVideoPlayerState — JNI-based implementation using a native C GStreamer player.
  *
- * To dynamically change the subtitle source, the pipeline is set to READY,
- * the source is updated, and then the pipeline is set back to PLAYING.
- * A Timer performs a slight seek to reposition exactly at the saved position.
+ * Architecture mirrors MacVideoPlayerState: coroutine-driven polling of the native
+ * layer for frames, position, audio levels, and end-of-playback detection.
  */
 @Stable
 class LinuxVideoPlayerState : VideoPlayerState {
 
-    companion object {
-        // Flag to enable text subtitles (GST_PLAY_FLAG_TEXT)
-        const val GST_PLAY_FLAG_TEXT = 1 shl 2
-    }
+    // Native player pointer (AtomicLong for lock-free reads from the frame hot path)
+    private val playerPtrAtomic = AtomicLong(0L)
+    private val playerPtr: Long get() = playerPtrAtomic.get()
 
-    init {
-        GStreamerInit.init()
-    }
+    // Serial dispatcher for frame processing
+    private val frameDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
+    internal val currentFrameState: State<ImageBitmap?> = mutableStateOf(null)
 
-    // Use instance-specific unique identifiers for GStreamer elements
-    private val instanceId = System.nanoTime().toString()
-    private val playbin = PlayBin("playbin-$instanceId")
-    private val videoSink = ElementFactory.make("appsink", "videosink-$instanceId") as AppSink
-    private val sliderTimer = Timer(50, null)
-
-    // ---- Internal states ----
-    private var _currentFrame by mutableStateOf<ImageBitmap?>(null)
-    val currentFrame: ImageBitmap?
-        get() = _currentFrame
-
-    private var frameWidth = 0
-    private var frameHeight = 0
-
-    // Double-buffering for zero-copy frame rendering
+    // Double-buffered Skia bitmaps
+    private var skiaBitmapWidth: Int = 0
+    private var skiaBitmapHeight: Int = 0
     private var skiaBitmapA: Bitmap? = null
     private var skiaBitmapB: Bitmap? = null
     private var nextSkiaBitmapA: Boolean = true
-    private var lastFrameHash: Int = Int.MIN_VALUE
 
-    private var bufferingPercent by mutableStateOf(100)
-    private var isUserPaused by mutableStateOf(false)
-    private var hasReceivedFirstFrame by mutableStateOf(false)
+    // Audio levels
+    private val _leftLevel = mutableStateOf(0.0f)
+    private val _rightLevel = mutableStateOf(0.0f)
+    override val leftLevel: Float get() = _leftLevel.value
+    override val rightLevel: Float get() = _rightLevel.value
 
-    private var _sliderPos by mutableStateOf(0f)
-    override var sliderPos: Float
-        get() = _sliderPos
-        set(value) {
-            _sliderPos = value
-        }
+    // Surface display size (pixels) for output scaling
+    private var surfaceWidth = 0
+    private var surfaceHeight = 0
+    private val isResizing = AtomicBoolean(false)
+    private var resizeJob: Job? = null
 
-    // This variable will allow us to handle a potential delay before buffering is signaled
-    private var _isSeeking by mutableStateOf(false)
-    private var targetSeekPos: Float = 0f
+    // Background worker scopes and jobs
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var frameUpdateJob: Job? = null
+    private var bufferingCheckJob: Job? = null
+    private var uiUpdateJob: Job? = null
 
-    private var _userDragging by mutableStateOf(false)
-    override var userDragging: Boolean
-        get() = _userDragging
-        set(value) {
-            _userDragging = value
+    // State tracking
+    private var lastFrameUpdateTime: Long = 0
+    private var seekInProgress = false
+    private var targetSeekTime: Double? = null
 
-            // If user just finished dragging and we have a pending playback speed update, apply it now
-            if (!value && pendingPlaybackSpeedUpdate) {
-                applyPlaybackSpeed()
-            }
-        }
+    // Frame rate from native layer
+    private var captureFrameRate: Float = 0.0f
 
-    private var _loop by mutableStateOf(false)
-    override var loop: Boolean
-        get() = _loop
-        set(value) {
-            _loop = value
-        }
-
-    private var _playbackSpeed by mutableStateOf(1f)
-    private var pendingPlaybackSpeedUpdate = false
-    private var speedUpdateTimer: Timer? = null
-    private val PLAYBACK_SPEED_DEBOUNCE_MS = 200
-
-    override var playbackSpeed: Float
-        get() = _playbackSpeed
-        set(value) {
-            val newSpeed = value.coerceIn(0.5f, 2.0f)
-            // Update the UI immediately
-            _playbackSpeed = newSpeed
-
-            if (hasMedia) {
-                // If we're dragging, defer the actual seek operation
-                if (userDragging) {
-                    pendingPlaybackSpeedUpdate = true
-                    return
-                }
-
-                // Cancel any pending timer
-                speedUpdateTimer?.stop()
-
-                // Apply the speed change immediately for UI feedback
-                // but debounce the actual GStreamer operation
-                pendingPlaybackSpeedUpdate = true
-
-                // Create a new timer for debouncing
-                speedUpdateTimer = Timer(PLAYBACK_SPEED_DEBOUNCE_MS, {
-                    if (pendingPlaybackSpeedUpdate) {
-                        applyPlaybackSpeed()
-                    }
-                })
-                speedUpdateTimer?.isRepeats = false
-                speedUpdateTimer?.start()
-            }
-        }
-
-    private fun applyPlaybackSpeed() {
-        pendingPlaybackSpeedUpdate = false
-        try {
-            // Get current position
-            val currentPosition = playbin.queryPosition(Format.TIME)
-
-            // Perform a seek operation with the new playback speed
-            // This is the proper way to change playback speed in GStreamer
-            playbin.seek(
-                _playbackSpeed.toDouble(),  // Rate (speed multiplier)
-                Format.TIME,                // Format
-                EnumSet.of(SeekFlags.FLUSH, SeekFlags.ACCURATE), // Flags
-                SeekType.SET,               // Start seek type
-                currentPosition,            // Start position
-                SeekType.NONE,              // Stop seek type
-                -1L                         // Stop position (not used)
-            )
-        } catch (e: Exception) {
-            e.printStackTrace()
-            // Don't revert the speed value as it would cause UI inconsistency
-        }
-        }
-
-    private var _volume by mutableStateOf(1f)
-    override var volume: Float
-        get() = _volume
-        set(value) {
-            _volume = value.coerceIn(0f..1f)
-            playbin.set("volume", _volume.toDouble())
-        }
-
-    private var _leftLevel by mutableStateOf(0f)
-    override val leftLevel: Float
-        get() = _leftLevel
-
-    private var _rightLevel by mutableStateOf(0f)
-    override val rightLevel: Float
-        get() = _rightLevel
-
-    private var _positionText by mutableStateOf("00:00")
-    override val positionText: String
-        get() = _positionText
-
-    private var _durationText by mutableStateOf("00:00")
-    override val durationText: String
-        get() = _durationText
-        
-    override val currentTime: Double
-        get() = if (hasMedia) playbin.queryPosition(Format.TIME) / 1_000_000_000.0 else 0.0
-
-    private var _isLoading by mutableStateOf(false)
-    override val isLoading: Boolean
-        get() = _isLoading
-
-    private var _hasMedia by mutableStateOf(false)
-    override val hasMedia: Boolean
-        get() = _hasMedia
-
-
-    private var _isPlaying by mutableStateOf(false)
-    override val isPlaying: Boolean
-        get() = _isPlaying
-
-    private var _error by mutableStateOf<VideoPlayerError?>(null)
-    override val error: VideoPlayerError?
-        get() = _error
-
-    private var _isFullscreen by mutableStateOf(false)
-    override var isFullscreen: Boolean
-        get() = _isFullscreen
-        set(value) {
-            _isFullscreen = value
-        }
-
-    override val metadata: VideoMetadata = VideoMetadata()
-
-    override var subtitlesEnabled: Boolean = false
-    override var currentSubtitleTrack: SubtitleTrack? = null
-    override val availableSubtitleTracks = mutableListOf<SubtitleTrack>()
-    override var subtitleTextStyle: TextStyle = TextStyle(
-        color = Color.White,
-        fontSize = 18.sp,
-        fontWeight = FontWeight.Normal,
-        textAlign = TextAlign.Center
+    // UI State
+    override var hasMedia: Boolean by mutableStateOf(false)
+    override var isPlaying: Boolean by mutableStateOf(false)
+    override var sliderPos: Float by mutableStateOf(0.0f)
+    override var userDragging: Boolean by mutableStateOf(false)
+    override var loop: Boolean by mutableStateOf(false)
+    override var isLoading: Boolean by mutableStateOf(false)
+    override var error: VideoPlayerError? by mutableStateOf(null)
+    override var subtitlesEnabled: Boolean by mutableStateOf(false)
+    override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
+    override val availableSubtitleTracks: MutableList<SubtitleTrack> = mutableListOf()
+    override var subtitleTextStyle: TextStyle by mutableStateOf(
+        TextStyle(
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign = TextAlign.Center
+        )
     )
-    override var subtitleBackgroundColor: Color = Color.Black.copy(alpha = 0.5f)
+    override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
+    override val metadata: VideoMetadata = VideoMetadata()
+    override var isFullscreen: Boolean by mutableStateOf(false)
+    private var lastUri: String? = null
 
-    // ---- Aspect ratio management ----
-    private var lastAspectRatioUpdateTime: Long = 0
-    private val ASPECT_RATIO_DEBOUNCE_MS = 500
-    private var _aspectRatio by mutableStateOf(DEFAULT_ASPECT_RATIO)
-    override val aspectRatio: Float
-        get() = _aspectRatio
+    private val _positionText = mutableStateOf("00:00")
+    override val positionText: String get() = _positionText.value
+
+    private val _durationText = mutableStateOf("00:00")
+    override val durationText: String get() = _durationText.value
+
+    override val currentTime: Double
+        get() = runBlocking {
+            if (hasMedia) getPositionSafely() else 0.0
+        }
+
+    private val _aspectRatio = mutableStateOf(16f / 9f)
+    override val aspectRatio: Float get() = _aspectRatio.value
+
+    // Volume
+    private val _volumeState = mutableStateOf(1.0f)
+    override var volume: Float
+        get() = _volumeState.value
+        set(value) {
+            val newValue = value.coerceIn(0f, 1f)
+            if (_volumeState.value != newValue) {
+                _volumeState.value = newValue
+                ioScope.launch { applyVolume() }
+            }
+        }
+
+    // Playback speed
+    private val _playbackSpeedState = mutableStateOf(1.0f)
+    override var playbackSpeed: Float
+        get() = _playbackSpeedState.value
+        set(value) {
+            val newValue = value.coerceIn(0.5f, 2.0f)
+            if (_playbackSpeedState.value != newValue) {
+                _playbackSpeedState.value = newValue
+                ioScope.launch { applyPlaybackSpeed() }
+            }
+        }
+
+    private val updateInterval: Long
+        get() = if (captureFrameRate > 0) {
+            (1000.0f / captureFrameRate).toLong()
+        } else {
+            33L // ~30fps default
+        }
+
+    private val bufferingCheckInterval = 200L
+    private val bufferingTimeoutThreshold = 500L
 
     init {
-        // GStreamer configuration
-        val audiobin = Bin("audiobin-$instanceId")
-
-        // Create a scaletempo element for pitch-corrected playback speed
-        val scaletempo = ElementFactory.make("scaletempo", "scaletempo-$instanceId")
-
-        // Create the level element for volume monitoring
-        val levelElement = ElementFactory.make("level", "level-$instanceId")
-
-        // Add elements to audiobin
-        audiobin.addMany(scaletempo, levelElement)
-
-        // Link elements in sequence: scaletempo -> level
-        Element.linkMany(scaletempo, levelElement)
-
-        // Create sink and source ghost pads for the bin
-        val sinkPad = scaletempo.getStaticPad("sink")
-        val srcPad = levelElement.getStaticPad("src")
-
-        audiobin.addPad(GhostPad("sink", sinkPad))
-        audiobin.addPad(GhostPad("src", srcPad))
-
-        // Set the audiobin as the audio filter for playbin
-        playbin.set("audio-filter", audiobin)
-
-        // Configuration of the AppSink for video
-        // Requesting RGBA (R, G, B, A) without additional conversion.
-        val caps = Caps.fromString("video/x-raw,format=RGBA")
-        videoSink.caps = caps
-        videoSink.set("emit-signals", true)
-        videoSink.connect(AppSink.NEW_SAMPLE { appSink ->
-            val sample = appSink.pullSample()
-            if (sample != null) {
-                processSample(sample)
-                sample.dispose()
-            }
-            FlowReturn.OK
-        })
-        playbin.setVideoSink(videoSink)
-
-        // ---- GStreamer bus handling ----
-
-        // End of stream
-        playbin.bus.connect(Bus.EOS {
-            EventQueue.invokeLater {
-                if (loop) {
-                    // Restart from beginning if loop = true
-                    playbin.seekSimple(Format.TIME, EnumSet.of(SeekFlags.FLUSH), 0)
-                } else {
-                    stop()
-                }
-                _isPlaying = loop
-            }
-        })
-
-        // Errors
-        playbin.bus.connect(Bus.ERROR { source, code, message ->
-            EventQueue.invokeLater {
-                _error = when {
-                    message.contains("codec", ignoreCase = true) ||
-                            message.contains("decode", ignoreCase = true) ->
-                        VideoPlayerError.CodecError(message)
-
-                    message.contains("network", ignoreCase = true) ||
-                            message.contains("connection", ignoreCase = true) ||
-                            message.contains("dns", ignoreCase = true) ||
-                            message.contains("http", ignoreCase = true) ->
-                        VideoPlayerError.NetworkError(message)
-
-                    message.contains("source", ignoreCase = true) ||
-                            message.contains("uri", ignoreCase = true) ||
-                            message.contains("resource", ignoreCase = true) ->
-                        VideoPlayerError.SourceError(message)
-
-                    else ->
-                        VideoPlayerError.UnknownError(message)
-                }
-                stop()
-            }
-        })
-
-        // Buffering
-        playbin.bus.connect(Bus.BUFFERING { source, percent ->
-            EventQueue.invokeLater {
-                bufferingPercent = percent
-                // When reaching 100%, we consider that any seek has finished
-                if (percent == 100) {
-                    _isSeeking = false
-                }
-                updateLoadingState()
-            }
-        })
-
-        // Pipeline state change
-        playbin.bus.connect { source, old, current, pending ->
-            EventQueue.invokeLater {
-                when (current) {
-                    State.PLAYING -> {
-                        _isPlaying = true
-                        isUserPaused = false
-                        updateLoadingState()
-                        updateAspectRatio()
-                    }
-
-                    State.PAUSED -> {
-                        _isPlaying = false
-                        updateLoadingState()
-                    }
-
-                    State.READY -> {
-                        _isPlaying = false
-                        updateLoadingState()
-                    }
-
-                    else -> {
-                        _isPlaying = false
-                        updateLoadingState()
-                    }
-                }
-            }
-        }
-
-        // TAG (metadata)
-        playbin.bus.connect(Bus.TAG { source, tagList ->
-            if (tagList != null) {
-                EventQueue.invokeLater {
-                    try {
-                        // Extract metadata from TagList
-                        try {
-                            // Try to extract title
-                            val title = tagList.getString("title", 0)
-                            if (title != null) {
-                                metadata.title = title
-                            }
-                        } catch (_: Exception) {
-                            // Ignore errors when getting title
-                        }
-
-                        try {
-                            // Try to extract video bitrate first
-                            val videoBitrate = tagList.getString("video-bitrate", 0)
-                            if (videoBitrate != null) {
-                                try {
-                                    // The bitrate is already in bps, no need to convert
-                                    metadata.bitrate = videoBitrate.toLong()
-                                } catch (_: NumberFormatException) {
-                                    // Ignore if the string can't be converted to a long
-                                }
-                            } else {
-                                // Fallback to generic bitrate if video-specific one is not available
-                                val bitrate = tagList.getString("bitrate", 0)
-                                if (bitrate != null) {
-                                    try {
-                                        // The bitrate is already in bps, no need to convert
-                                        metadata.bitrate = bitrate.toLong()
-                                    } catch (_: NumberFormatException) {
-                                        // Ignore if the string can't be converted to a long
-                                    }
-                                }
-                            }
-                        } catch (_: Exception) {
-                            // Ignore errors when getting bitrate
-                        }
-
-                        try {
-                            // Try to extract MIME type from container format
-                            val containerFormat = tagList.getString("container-format", 0)
-                            if (containerFormat != null) {
-                                metadata.mimeType = containerFormat
-                            } else {
-                                // Try audio codec as fallback
-                                val audioCodec = tagList.getString("audio-codec", 0)
-                                if (audioCodec != null) {
-                                    metadata.mimeType = audioCodec
-                                } else {
-                                    // Try video codec as fallback
-                                    val videoCodec = tagList.getString("video-codec", 0)
-                                    if (videoCodec != null) {
-                                        metadata.mimeType = videoCodec
-                                    }
-                                }
-                            }
-                        } catch (_: Exception) {
-                            // Ignore errors when getting MIME type
-                        }
-
-                        try {
-                            // Try to extract audio channels
-                            val audioChannels = tagList.getString("audio-channels", 0)
-                            if (audioChannels != null) {
-                                try {
-                                    metadata.audioChannels = audioChannels.toInt()
-                                } catch (_: NumberFormatException) {
-                                    // Ignore if the string can't be converted to an integer
-                                }
-                            }
-                        } catch (_: Exception) {
-                            // Ignore errors when getting audio channels
-                        }
-
-                        // We'll also update metadata from the pipeline
-                        updateVideoMetadata()
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-            }
-        })
-
-        // Measuring audio level (via the "level" element)
-        playbin.bus.connect("element") { _, message ->
-            if (message.source == levelElement) {
-                val struct = message.structure
-                if (struct != null && struct.hasField("peak")) {
-                    val peaks = struct.getDoubles("peak")
-                    if (peaks.isNotEmpty() && isPlaying) {
-                        for (i in peaks.indices) {
-                            peaks[i] = 10.0.pow(peaks[i] / 20.0)
-                        }
-                        val l = if (peaks.isNotEmpty()) peaks[0] else 0.0
-                        val r = if (peaks.size > 1) peaks[1] else l
-                        EventQueue.invokeLater {
-                            _leftLevel = (l.coerceIn(0.0, 1.0) * 100f).toFloat()
-                            _rightLevel = (r.coerceIn(0.0, 1.0) * 100f).toFloat()
-                        }
-                    } else {
-                        EventQueue.invokeLater {
-                            _leftLevel = 0f
-                            _rightLevel = 0f
-                        }
-                    }
-                }
-            }
-        }
-
-        // Also monitoring the end of async transitions (e.g., after a seek)
-        playbin.bus.connect("async-done") { _, message ->
-            if (message.type == MessageType.ASYNC_DONE) {
-                EventQueue.invokeLater {
-                    _isSeeking = false
-                    updateLoadingState()
-
-                    // Update metadata after async operations (like seeking) complete
-                    updateVideoMetadata()
-                }
-            }
-        }
-
-        // Timer for the slider position and duration
-        sliderTimer.addActionListener {
-            if (!userDragging) {
-                val dur = playbin.queryDuration(Format.TIME)
-                val pos = playbin.queryPosition(Format.TIME)
-                if (dur > 0) {
-                    val relPos = pos.toDouble() / dur.toDouble()
-                    val currentSliderPos = (relPos * 1000.0).toFloat()
-
-                    if (targetSeekPos > 0f) {
-                        if (abs(targetSeekPos - currentSliderPos) < 1f) {
-                            _sliderPos = currentSliderPos
-                            targetSeekPos = 0f
-                        }
-                    } else {
-                        _sliderPos = currentSliderPos
-                    }
-
-                    if (pos > 0) {
-                        EventQueue.invokeLater {
-                            _positionText = formatTime(pos, true)
-                            _durationText = formatTime(dur, true)
-                        }
-                    }
-                }
-            }
-        }
-        sliderTimer.start()
-    }
-
-    // ---- Subtitle management ----
-    override fun selectSubtitleTrack(track: SubtitleTrack?) {
-        currentSubtitleTrack = track
-        subtitlesEnabled = track != null
-
-        // We're not using GStreamer's native subtitle rendering anymore
-        // Instead, we're using Compose-based subtitles
-        // So we don't need to set the suburi or enable the GST_PLAY_FLAG_TEXT flag
-
-        // Just for backward compatibility, we'll disable any existing subtitles in GStreamer
-        try {
-            // Disable native subtitles in GStreamer
-            playbin.set("suburi", "")
-            val currentFlags = playbin.get("flags") as Int
-            playbin.set("flags", currentFlags and GST_PLAY_FLAG_TEXT.inv())
-        } catch (_: Exception) {
-            // Ignore errors, as we're not using GStreamer's subtitle rendering anyway
+        linuxLogger.d { "Initializing Linux video player (JNI)" }
+        ioScope.launch {
+            initPlayer()
+            startUIUpdateJob()
         }
     }
 
-    override fun disableSubtitles() {
-        currentSubtitleTrack = null
-        subtitlesEnabled = false
-
-        // We're not using GStreamer's native subtitle rendering anymore
-        // Instead, we're using Compose-based subtitles
-        // So we don't need to disable the GST_PLAY_FLAG_TEXT flag
-
-        // Just for backward compatibility, we'll disable any existing subtitles in GStreamer
-        try {
-            // Disable native subtitles in GStreamer
-            playbin.set("suburi", "")
-            val currentFlags = playbin.get("flags") as Int
-            playbin.set("flags", currentFlags and GST_PLAY_FLAG_TEXT.inv())
-        } catch (_: Exception) {
-            // Ignore errors, as we're not using GStreamer's subtitle rendering anyway
+    @OptIn(FlowPreview::class)
+    private fun startUIUpdateJob() {
+        uiUpdateJob?.cancel()
+        uiUpdateJob = ioScope.launch {
+            _currentFrameState.debounce(1).collect { newFrame ->
+                ensureActive()
+                withContext(Dispatchers.Main) {
+                    (currentFrameState as MutableState).value = newFrame
+                }
+            }
         }
     }
 
-    // ---- Aspect ratio management ----
-    private fun updateAspectRatio() {
-        val currentTime = System.currentTimeMillis()
-        if (currentTime - lastAspectRatioUpdateTime < ASPECT_RATIO_DEBOUNCE_MS) {
-            return
-        }
-        lastAspectRatioUpdateTime = currentTime
-
+    private suspend fun initPlayer() = ioScope.launch {
+        linuxLogger.d { "initPlayer() - Creating native player" }
         try {
-            val videoSinkElement = playbin.get("video-sink") as? Element
-            val sinkPad = videoSinkElement?.getStaticPad("sink")
-            val caps = sinkPad?.currentCaps
-            val structure = caps?.getStructure(0)
-
-            if (structure != null) {
-                val width = structure.getInteger("width")
-                val height = structure.getInteger("height")
-
-                if (width > 0 && height > 0) {
-                    val calculatedRatio = width.toFloat() / height.toFloat()
-                    if (calculatedRatio != _aspectRatio) {
-                        EventQueue.invokeLater {
-                            _aspectRatio = if (calculatedRatio > 0) calculatedRatio else 16f / 9f
-                        }
-                    }
+            val ptr = SharedVideoPlayer.nCreatePlayer()
+            if (ptr != 0L) {
+                playerPtrAtomic.set(ptr)
+                linuxLogger.d { "Native player created successfully" }
+                applyVolume()
+                applyPlaybackSpeed()
+            } else {
+                linuxLogger.e { "Failed to create native player" }
+                withContext(Dispatchers.Main) {
+                    error = VideoPlayerError.UnknownError("Failed to create native player")
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
-            _aspectRatio = 16f / 9f
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Exception in initPlayer: ${e.message}" }
+            withContext(Dispatchers.Main) {
+                error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
+            }
+        }
+    }.join()
+
+    private fun checkExistsIfLocalFile(uri: String): Boolean {
+        val schemeDelimiter = uri.indexOf("://")
+        val scheme = if (schemeDelimiter >= 0) uri.substring(0, schemeDelimiter) else ""
+        return when (scheme) {
+            "", "file" -> {
+                val path = if (scheme == "file") uri.removePrefix("file://") else uri
+                File(path).exists()
+            }
+            else -> true
         }
     }
 
-    private fun updateLoadingState() {
-        _isLoading = when {
-            bufferingPercent < 100 -> true
-            _isSeeking -> true
-            isUserPaused -> false
-            _hasMedia && !hasReceivedFirstFrame -> true
-            else -> false
+    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+        linuxLogger.d { "openUri() - Opening URI: $uri" }
+        lastUri = uri
+
+        if (!checkExistsIfLocalFile(uri)) {
+            linuxLogger.e { "File does not exist: $uri" }
+            setPlayerError(VideoPlayerError.SourceError("File not found: $uri"))
+            return
         }
-    }
 
-    /**
-     * Updates the video metadata from the pipeline.
-     * This extracts information like width, height, duration, and frame rate.
-     */
-    private fun updateVideoMetadata() {
-        try {
-            // Get duration
-            val duration = playbin.queryDuration(Format.TIME)
-            if (duration > 0) {
-                metadata.duration = duration
+        ioScope.launch {
+            withContext(Dispatchers.Main) {
+                isLoading = true
+                error = null
+                playbackSpeed = 1.0f
             }
 
-            // Get width and height from video sink
-            val videoSinkElement = playbin.get("video-sink") as? Element
-            val sinkPad = videoSinkElement?.getStaticPad("sink")
-            val caps = sinkPad?.currentCaps
-            val structure = caps?.getStructure(0)
-
-            if (structure != null) {
-                try {
-                    val width = structure.getInteger("width")
-                    val height = structure.getInteger("height")
-
-                    if (width > 0 && height > 0) {
-                        metadata.width = width
-                        metadata.height = height
-                    }
-
-                    // Try to get frame rate if available
-                    if (structure.hasField("framerate")) {
-                        val fraction = structure.getFraction("framerate")
-                        if (fraction != null && fraction.denominator > 0) {
-                            val frameRate = fraction.numerator.toFloat() / fraction.denominator.toFloat()
-                            metadata.frameRate = frameRate
-                        }
-                    }
-                } catch (_: Exception) {
-                    // Ignore errors when getting specific fields
-                }
-            }
-
-            // Get audio channels and sample rate if available
-            // On Linux, we need to use a different approach to get audio metadata
             try {
-                // Try to get audio information from the audio-filter element (level)
-                val levelElement = playbin.get("audio-filter") as? Element
-                if (levelElement != null) {
-                    val sinkPad = levelElement.getStaticPad("sink")
-                    val audioCaps = sinkPad?.currentCaps
-                    val audioStructure = audioCaps?.getStructure(0)
-
-                    if (audioStructure != null) {
-                        if (audioStructure.hasField("channels")) {
-                            val channels = audioStructure.getInteger("channels")
-                            metadata.audioChannels = channels
-                        }
-
-                        if (audioStructure.hasField("rate")) {
-                            val rate = audioStructure.getInteger("rate")
-                            metadata.audioSampleRate = rate
-                        }
-                    }
+                if (hasMedia) {
+                    cleanupCurrentPlayback()
                 }
 
-                // If we couldn't get the info from audio-filter, try the traditional approach
-                if (metadata.audioChannels == null || metadata.audioSampleRate == null) {
-                    val audioSinkPad = playbin.getStaticPad("audio_sink")
-                    val audioCaps = audioSinkPad?.currentCaps
-                    val audioStructure = audioCaps?.getStructure(0)
+                ensurePlayerInitialized()
 
-                    if (audioStructure != null) {
-                        if (audioStructure.hasField("channels") && metadata.audioChannels == null) {
-                            val channels = audioStructure.getInteger("channels")
-                            metadata.audioChannels = channels
-                        }
+                val result = openMediaUri(uri)
 
-                        if (audioStructure.hasField("rate") && metadata.audioSampleRate == null) {
-                            val rate = audioStructure.getInteger("rate")
-                            metadata.audioSampleRate = rate
-                        }
+                if (result) {
+                    // Update frame rate from native layer
+                    updateFrameRateInfo()
+                    updateMetadata()
+
+                    if (surfaceWidth > 0 && surfaceHeight > 0) {
+                        applyOutputScaling()
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        hasMedia = true
+                        isLoading = false
+                        isPlaying = initializeplayerState == InitialPlayerState.PLAY
+                    }
+
+                    startFrameUpdates()
+                    updateFrameAsync()
+                    startBufferingCheck()
+
+                    if (isPlaying) {
+                        playInBackground()
+                    }
+                } else {
+                    linuxLogger.e { "Failed to open URI" }
+                    withContext(Dispatchers.Main) {
+                        isLoading = false
+                        error = VideoPlayerError.SourceError("Failed to open media source")
                     }
                 }
             } catch (e: Exception) {
-                // Ignore errors when getting specific fields
-                e.printStackTrace()
+                if (e is CancellationException) throw e
+                linuxLogger.e { "openUri() - Exception: ${e.message}" }
+                handleError(e)
             }
-        } catch (_: Exception) {
-            // Ignore general errors
         }
     }
 
-    // ---- Controls ----
-    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
-        stop()
-        clearError()
-        _isLoading = true
-        _hasMedia = false
-        hasReceivedFirstFrame = false
-        playbackSpeed = 1.0f
-        try {
-            val uriObj = if (uri.startsWith("http://") || uri.startsWith("https://")) {
-                URI(uri)
-            } else {
-                File(uri).toURI()
-            }
-            playbin.setURI(uriObj)
-            _hasMedia = true
-
-            // Reset metadata for the new media
-            metadata.title = null
-            metadata.duration = null
-            metadata.width = null
-            metadata.height = null
-            metadata.bitrate = null
-            metadata.frameRate = null
-            metadata.mimeType = null
-            metadata.audioChannels = null
-            metadata.audioSampleRate = null
-
-            // Control initial playback state based on the parameter
-            if (initializeplayerState == InitialPlayerState.PLAY) {
-                play()
-            } else {
-                // Initialize player but don't start playback
-                _hasMedia = true
-                _isPlaying = false
-                isUserPaused = true
-                updateVideoMetadata()
-                updateLoadingState()
-            }
-        } catch (e: Exception) {
-            _error = VideoPlayerError.SourceError("Unable to open URI: ${e.message}")
-            _isLoading = false
-            _isPlaying = false
-            _hasMedia = false
-            e.printStackTrace()
-        }
-    }
-
-    override fun openFile(
-        file: PlatformFile,
-        initializeplayerState: InitialPlayerState
-    ) {
+    override fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
         openUri(file.file.path, initializeplayerState)
     }
 
-    override fun play() {
-        try {
-            playbin.play()
-            playbin.set("volume", volume.toDouble())
-            _hasMedia = true
-            _isPlaying = true
-            isUserPaused = false
-            updateLoadingState()
+    private suspend fun cleanupCurrentPlayback() {
+        pauseInBackground()
+        stopFrameUpdates()
+        stopBufferingCheck()
 
-            // Update metadata when starting playback
-            updateVideoMetadata()
+        val ptrToDispose = withContext(frameDispatcher) {
+            playerPtrAtomic.getAndSet(0L)
+        }
+
+        if (ptrToDispose != 0L) {
+            try {
+                SharedVideoPlayer.nDisposePlayer(ptrToDispose)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                linuxLogger.e { "Error disposing player: ${e.message}" }
+            }
+        }
+    }
+
+    private suspend fun ensurePlayerInitialized() {
+        if (!playerScope.isActive) {
+            playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        }
+
+        if (playerPtr == 0L) {
+            val ptr = SharedVideoPlayer.nCreatePlayer()
+            if (ptr != 0L) {
+                if (!playerPtrAtomic.compareAndSet(0L, ptr)) {
+                    SharedVideoPlayer.nDisposePlayer(ptr)
+                } else {
+                    applyVolume()
+                    applyPlaybackSpeed()
+                }
+            } else {
+                throw IllegalStateException("Failed to create native player")
+            }
+        }
+    }
+
+    private suspend fun openMediaUri(uri: String): Boolean {
+        val ptr = playerPtr
+        if (ptr == 0L) return false
+
+        if (!checkExistsIfLocalFile(uri)) {
+            setPlayerError(VideoPlayerError.SourceError("File not found: $uri"))
+            return false
+        }
+
+        return try {
+            SharedVideoPlayer.nOpenUri(ptr, uri)
+            pollDimensionsUntilReady(ptr)
+            updateMetadata()
+            true
         } catch (e: Exception) {
-            _error = VideoPlayerError.UnknownError("Playback failed: ${e.message}")
-            _isPlaying = false
+            linuxLogger.e { "Failed to open URI: ${e.message}" }
+            setPlayerError(VideoPlayerError.SourceError("Error opening media: ${e.message}"))
+            false
+        }
+    }
+
+    private suspend fun pollDimensionsUntilReady(ptr: Long, maxAttempts: Int = 20) {
+        for (attempt in 1..maxAttempts) {
+            val width = SharedVideoPlayer.nGetFrameWidth(ptr)
+            val height = SharedVideoPlayer.nGetFrameHeight(ptr)
+            if (width > 0 && height > 0) {
+                linuxLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
+                return
+            }
+            linuxLogger.d { "Dimensions not ready yet (attempt $attempt/$maxAttempts)" }
+            delay(250)
+        }
+        linuxLogger.e { "Unable to retrieve valid dimensions after $maxAttempts attempts" }
+    }
+
+    private suspend fun updateFrameRateInfo() {
+        val ptr = playerPtr
+        if (ptr == 0L) return
+        try {
+            captureFrameRate = SharedVideoPlayer.nGetFrameRate(ptr)
+            linuxLogger.d { "Frame rate: $captureFrameRate" }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Error updating frame rate: ${e.message}" }
+        }
+    }
+
+    private suspend fun updateMetadata() {
+        val ptr = playerPtr
+        if (ptr == 0L) return
+
+        try {
+            val width = SharedVideoPlayer.nGetFrameWidth(ptr)
+            val height = SharedVideoPlayer.nGetFrameHeight(ptr)
+            val duration = SharedVideoPlayer.nGetVideoDuration(ptr).toLong()
+            val frameRate = SharedVideoPlayer.nGetFrameRate(ptr)
+            val newAspectRatio = if (width > 0 && height > 0) {
+                width.toFloat() / height.toFloat()
+            } else {
+                _aspectRatio.value
+            }
+
+            val title = SharedVideoPlayer.nGetVideoTitle(ptr)
+            val bitrate = SharedVideoPlayer.nGetVideoBitrate(ptr)
+            val mimeType = SharedVideoPlayer.nGetVideoMimeType(ptr)
+            val audioChannels = SharedVideoPlayer.nGetAudioChannels(ptr)
+            val audioSampleRate = SharedVideoPlayer.nGetAudioSampleRate(ptr)
+
+            withContext(Dispatchers.Main) {
+                metadata.duration = duration
+                metadata.width = width
+                metadata.height = height
+                metadata.frameRate = frameRate
+                metadata.title = title
+                metadata.bitrate = bitrate
+                metadata.mimeType = mimeType
+                metadata.audioChannels = if (audioChannels == 0) null else audioChannels
+                metadata.audioSampleRate = if (audioSampleRate == 0) null else audioSampleRate
+                _aspectRatio.value = newAspectRatio
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Error updating metadata: ${e.message}" }
+        }
+    }
+
+    // --- Frame update loop ---
+
+    private fun startFrameUpdates() {
+        stopFrameUpdates()
+        frameUpdateJob = ioScope.launch {
+            while (isActive) {
+                ensureActive()
+                updateFrameAsync()
+                if (!userDragging) {
+                    updatePositionAsync()
+                    updateAudioLevelsAsync()
+                }
+                delay(updateInterval)
+            }
+        }
+    }
+
+    private fun stopFrameUpdates() {
+        frameUpdateJob?.cancel()
+        frameUpdateJob = null
+    }
+
+    private fun startBufferingCheck() {
+        stopBufferingCheck()
+        bufferingCheckJob = ioScope.launch {
+            while (isActive) {
+                ensureActive()
+                checkBufferingState()
+                delay(bufferingCheckInterval)
+            }
+        }
+    }
+
+    private suspend fun checkBufferingState() {
+        if (isPlaying && !isLoading) {
+            val timeSinceLastFrame = System.currentTimeMillis() - lastFrameUpdateTime
+            if (timeSinceLastFrame > bufferingTimeoutThreshold) {
+                withContext(Dispatchers.Main) { isLoading = true }
+            }
+        }
+    }
+
+    private fun stopBufferingCheck() {
+        bufferingCheckJob?.cancel()
+        bufferingCheckJob = null
+    }
+
+    private suspend fun updateFrameAsync() {
+        withContext(frameDispatcher) {
+            try {
+                val ptr = playerPtr
+                if (ptr == 0L) return@withContext
+
+                val width = SharedVideoPlayer.nGetFrameWidth(ptr)
+                val height = SharedVideoPlayer.nGetFrameHeight(ptr)
+                if (width <= 0 || height <= 0) return@withContext
+
+                val frameAddress = SharedVideoPlayer.nGetLatestFrameAddress(ptr)
+                if (frameAddress == 0L) return@withContext
+
+                val pixelCount = width * height
+                val frameSizeBytes = pixelCount.toLong() * 4L
+                var framePublished = false
+
+                withContext(Dispatchers.Default) {
+                    val srcBuf = SharedVideoPlayer.nWrapPointer(frameAddress, frameSizeBytes)
+                        ?: return@withContext
+
+                    // Allocate/reuse double-buffered bitmaps
+                    if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
+                        skiaBitmapA?.close()
+                        skiaBitmapB?.close()
+
+                        val imageInfo = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+                        skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
+                        skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
+                        skiaBitmapWidth = width
+                        skiaBitmapHeight = height
+                        nextSkiaBitmapA = true
+                    }
+
+                    val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+                    nextSkiaBitmapA = !nextSkiaBitmapA
+
+                    val pixmap = targetBitmap.peekPixels() ?: return@withContext
+                    val pixelsAddr = pixmap.addr
+                    if (pixelsAddr == 0L) return@withContext
+
+                    // Native-to-native copy: frame buffer -> Skia bitmap pixels
+                    srcBuf.rewind()
+                    val destRowBytes = pixmap.rowBytes.toInt()
+                    val destSizeBytes = destRowBytes.toLong() * height.toLong()
+                    val destBuf = SharedVideoPlayer.nWrapPointer(pixelsAddr, destSizeBytes)
+                        ?: return@withContext
+                    copyBgraFrame(srcBuf, destBuf, width, height, destRowBytes)
+
+                    _currentFrameState.value = targetBitmap.asComposeImageBitmap()
+                    framePublished = true
+                }
+
+                if (framePublished) {
+                    lastFrameUpdateTime = System.currentTimeMillis()
+                    if (isLoading && !seekInProgress) {
+                        withContext(Dispatchers.Main) { isLoading = false }
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                linuxLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
+            }
+        }
+    }
+
+    private suspend fun updateAudioLevelsAsync() {
+        if (!hasMedia) return
+        try {
+            val ptr = playerPtr
+            if (ptr != 0L) {
+                val newLeft = SharedVideoPlayer.nGetLeftAudioLevel(ptr)
+                val newRight = SharedVideoPlayer.nGetRightAudioLevel(ptr)
+
+                fun convertToPercentage(level: Float): Float {
+                    if (level <= 0f) return 0f
+                    val db = 20 * log10(level)
+                    val normalized = ((db + 60) / 60).coerceIn(0f, 1f)
+                    return normalized * 100f
+                }
+
+                withContext(Dispatchers.Main) {
+                    _leftLevel.value = convertToPercentage(newLeft)
+                    _rightLevel.value = convertToPercentage(newRight)
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Error updating audio levels: ${e.message}" }
+        }
+    }
+
+    private suspend fun updatePositionAsync() {
+        if (!hasMedia || userDragging) return
+        try {
+            val duration = getDurationSafely()
+            if (duration <= 0) return
+
+            val current = getPositionSafely()
+
+            withContext(Dispatchers.Main) {
+                _positionText.value = formatTime(current)
+                _durationText.value = formatTime(duration)
+            }
+
+            if (seekInProgress && targetSeekTime != null) {
+                if (abs(current - targetSeekTime!!) < 0.3) {
+                    seekInProgress = false
+                    targetSeekTime = null
+                    withContext(Dispatchers.Main) { isLoading = false }
+                }
+            } else {
+                val newSliderPos = (current / duration * 1000).toFloat().coerceIn(0f, 1000f)
+                withContext(Dispatchers.Main) { sliderPos = newSliderPos }
+            }
+
+            checkLoopingAsync(current, duration)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Error in updatePositionAsync: ${e.message}" }
+        }
+    }
+
+    private suspend fun checkLoopingAsync(current: Double, duration: Double) {
+        val ptr = playerPtr
+        val ended = ptr != 0L && SharedVideoPlayer.nConsumeDidPlayToEnd(ptr)
+        if (!ended && (duration <= 0 || current < duration - 0.5)) return
+
+        if (loop) {
+            seekToAsync(0f)
+        } else {
+            withContext(Dispatchers.Main) { isPlaying = false }
+            pauseInBackground()
+        }
+    }
+
+    // --- Playback controls ---
+
+    override fun play() {
+        ioScope.launch {
+            if (!hasMedia && lastUri != null) {
+                openUri(lastUri!!)
+            } else if (hasMedia) {
+                playInBackground()
+            } else {
+                withContext(Dispatchers.Main) {
+                    isPlaying = false
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    private suspend fun playInBackground() {
+        val ptr = playerPtr
+        if (ptr == 0L) return
+        try {
+            SharedVideoPlayer.nPlay(ptr)
+            withContext(Dispatchers.Main) { isPlaying = true }
+            startFrameUpdates()
+            startBufferingCheck()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Error in playInBackground: ${e.message}" }
+            handleError(e)
         }
     }
 
     override fun pause() {
+        ioScope.launch { pauseInBackground() }
+    }
+
+    private suspend fun pauseInBackground() {
+        val ptr = playerPtr
+        if (ptr == 0L) return
         try {
-            playbin.pause()
-            _isPlaying = false
-            isUserPaused = true
-            updateLoadingState()
+            SharedVideoPlayer.nPause(ptr)
+            withContext(Dispatchers.Main) {
+                isPlaying = false
+                isLoading = false
+            }
+            updateFrameAsync()
+            stopFrameUpdates()
+            stopBufferingCheck()
         } catch (e: Exception) {
-            _error = VideoPlayerError.UnknownError("Pause failed: ${e.message}")
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Error in pauseInBackground: ${e.message}" }
         }
     }
 
     override fun stop() {
-        playbin.stop()
-        _isPlaying = false
-        _sliderPos = 0f
-        _positionText = "0:00"
-        _isLoading = false
-        isUserPaused = false
-        bufferingPercent = 100
-        _hasMedia = false
-        _isSeeking = false
-        hasReceivedFirstFrame = false
-        _currentFrame = null
-        lastFrameHash = Int.MIN_VALUE
+        ioScope.launch {
+            pauseInBackground()
+            if (hasMedia) seekToAsync(0f)
+            withContext(Dispatchers.Main) {
+                hasMedia = false
+                isLoading = false
+                resetState()
+            }
+        }
     }
 
     override fun seekTo(value: Float) {
-        val dur = playbin.queryDuration(Format.TIME)
-        if (dur > 0) {
-            // Force the loading and seeking indicator before the operation
-            _isSeeking = true
-            _isLoading = true
+        ioScope.launch {
+            delay(10) // Coalesce rapid seek events
+            seekToAsync(value)
+        }
+    }
 
-            _sliderPos = value
-            targetSeekPos = value
+    private suspend fun seekToAsync(value: Float) {
+        withContext(Dispatchers.Main) { isLoading = true }
 
-            val relPos = value / 1000f
-            val seekPos = (relPos * dur).toLong()
-            _positionText = formatTime(seekPos, true)
+        try {
+            val duration = getDurationSafely()
+            if (duration <= 0) {
+                withContext(Dispatchers.Main) { isLoading = false }
+                return
+            }
 
-            playbin.seekSimple(Format.TIME, EnumSet.of(SeekFlags.FLUSH, SeekFlags.ACCURATE), seekPos)
+            val seekTime = ((value / 1000f) * duration.toFloat()).coerceIn(0f, duration.toFloat())
 
-            EventQueue.invokeLater {
-                _positionText = formatTime(seekPos, true)
+            withContext(Dispatchers.Main) {
+                seekInProgress = true
+                targetSeekTime = seekTime.toDouble()
+                sliderPos = value
+            }
+
+            lastFrameUpdateTime = System.currentTimeMillis()
+
+            val ptr = playerPtr
+            if (ptr == 0L) return
+            SharedVideoPlayer.nSeekTo(ptr, seekTime.toDouble())
+
+            if (isPlaying) {
+                SharedVideoPlayer.nPlay(ptr)
+                delay(10)
+                updateFrameAsync()
+                ioScope.launch {
+                    delay(300)
+                    if (seekInProgress) {
+                        seekInProgress = false
+                        targetSeekTime = null
+                        withContext(Dispatchers.Main) { isLoading = false }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            linuxLogger.e { "Error in seekToAsync: ${e.message}" }
+            withContext(Dispatchers.Main) {
+                isLoading = false
+                seekInProgress = false
+                targetSeekTime = null
             }
         }
     }
 
     override fun clearError() {
-        _error = null
-    }
-
-    /**
-     * Toggles the fullscreen state of the video player
-     */
-    override fun toggleFullscreen() {
-        _isFullscreen = !_isFullscreen
-    }
-
-    // ---- Processing of a video sample ----
-    /**
-     * Zero-copy optimized frame processing using double-buffering and direct memory access.
-     *
-     * Optimizations applied:
-     * 1. Double-buffering: Reuses two Bitmap objects, alternating between them to avoid
-     *    allocating new bitmaps every frame while the UI draws from the previous one.
-     * 2. Frame hashing: Skips processing if the frame content hasn't changed (identical frames).
-     * 3. peekPixels(): Direct access to Skia bitmap memory, avoiding intermediate ByteArray allocation.
-     * 4. Single memory copy: GStreamer buffer → Skia bitmap pixels (true zero-copy beyond this necessary transfer).
-     *
-     * Memory flow: GStreamer native buffer → Skia bitmap pixels (1 copy via bulk ByteBuffer.put)
-     */
-    private fun processSample(sample: Sample) {
-        try {
-            val caps = sample.caps ?: return
-            val structure = caps.getStructure(0) ?: return
-
-            val width = structure.getInteger("width")
-            val height = structure.getInteger("height")
-
-            if (width <= 0 || height <= 0) return
-
-            // Handle dimension changes
-            if (width != frameWidth || height != frameHeight) {
-                frameWidth = width
-                frameHeight = height
-
-                // Reallocate bitmaps for new dimensions
-                skiaBitmapA?.close()
-                skiaBitmapB?.close()
-
-                val imageInfo = ImageInfo(width, height, ColorType.RGBA_8888, ColorAlphaType.UNPREMUL)
-                skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
-                skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
-                nextSkiaBitmapA = true
-                lastFrameHash = Int.MIN_VALUE
-
-                updateAspectRatio()
-            }
-
-            val buffer = sample.buffer ?: return
-            val srcBuffer = buffer.map(false) ?: return
-            srcBuffer.rewind()
-
-            val pixelCount = width * height
-
-            // Calculate frame hash to detect identical frames
-            val newHash = calculateFrameHash(srcBuffer, pixelCount)
-            if (newHash == lastFrameHash) {
-                buffer.unmap()
-                return
-            }
-            lastFrameHash = newHash
-
-            // Select the target bitmap (double-buffering)
-            val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
-            nextSkiaBitmapA = !nextSkiaBitmapA
-
-            // Get direct access to bitmap pixels via peekPixels (zero-copy access)
-            val pixmap = targetBitmap.peekPixels() ?: run {
-                buffer.unmap()
-                return
-            }
-
-            val pixelsAddr = pixmap.addr
-            if (pixelsAddr == 0L) {
-                buffer.unmap()
-                return
-            }
-
-            // Single memory copy: GStreamer buffer → Skia bitmap
-            val dstRowBytes = pixmap.rowBytes.toInt()
-            val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
-            val dstBuffer = Pointer(pixelsAddr).getByteBuffer(0, dstSizeBytes)
-
-            srcBuffer.rewind()
-            copyRgbaFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
-
-            // Convert to Compose ImageBitmap
-            val imageBitmap = targetBitmap.asComposeImageBitmap()
-
-            // Update on the AWT thread
-            EventQueue.invokeLater {
-                _currentFrame = imageBitmap
-                if (!hasReceivedFirstFrame) {
-                    hasReceivedFirstFrame = true
-                    updateLoadingState()
-                }
-            }
-
-            buffer.unmap()
-
-        } catch (e: Exception) {
-            e.printStackTrace()
+        runBlocking {
+            withContext(Dispatchers.Main) { error = null }
         }
     }
 
-    // ---- Release resources ----
+    override fun toggleFullscreen() {
+        isFullscreen = !isFullscreen
+    }
+
     override fun dispose() {
-        sliderTimer.stop()
-        speedUpdateTimer?.stop()
-        playbin.stop()
-        playbin.dispose()
-        videoSink.dispose()
+        stopFrameUpdates()
+        stopBufferingCheck()
+        uiUpdateJob?.cancel()
+        playerScope.cancel()
 
-        // Clean up double-buffering bitmaps
-        skiaBitmapA?.close()
-        skiaBitmapB?.close()
-        skiaBitmapA = null
-        skiaBitmapB = null
-        lastFrameHash = Int.MIN_VALUE
+        ioScope.launch {
+            val ptrToDispose = withContext(frameDispatcher) {
+                val ptr = playerPtrAtomic.getAndSet(0L)
 
-        // Don't call Gst.deinit() here as it would affect all instances
-        // Each instance should only clean up its own resources
+                skiaBitmapA?.close()
+                skiaBitmapB?.close()
+                skiaBitmapA = null
+                skiaBitmapB = null
+                skiaBitmapWidth = 0
+                skiaBitmapHeight = 0
+                nextSkiaBitmapA = true
+
+                ptr
+            }
+
+            if (ptrToDispose != 0L) {
+                try {
+                    SharedVideoPlayer.nDisposePlayer(ptrToDispose)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    linuxLogger.e { "Error disposing player: ${e.message}" }
+                }
+            }
+
+            resetState()
+        }
+
+        ioScope.cancel()
+    }
+
+    // --- Subtitle stubs ---
+
+    override fun selectSubtitleTrack(track: SubtitleTrack?) {
+        ioScope.launch {
+            withContext(Dispatchers.Main) {
+                currentSubtitleTrack = track
+                subtitlesEnabled = track != null
+            }
+        }
+    }
+
+    override fun disableSubtitles() {
+        ioScope.launch {
+            withContext(Dispatchers.Main) {
+                subtitlesEnabled = false
+                currentSubtitleTrack = null
+            }
+        }
+    }
+
+    // --- Output scaling ---
+
+    fun onResized(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        if (width == surfaceWidth && height == surfaceHeight) return
+
+        surfaceWidth = width
+        surfaceHeight = height
+
+        isResizing.set(true)
+        resizeJob?.cancel()
+        resizeJob = ioScope.launch {
+            delay(120)
+            try {
+                applyOutputScaling()
+            } finally {
+                isResizing.set(false)
+            }
+        }
+    }
+
+    private suspend fun applyOutputScaling() {
+        val sw = surfaceWidth
+        val sh = surfaceHeight
+        if (sw <= 0 || sh <= 0) return
+        val ptr = playerPtr
+        if (ptr == 0L) return
+        SharedVideoPlayer.nSetOutputSize(ptr, sw, sh)
+    }
+
+    // --- Internal helpers ---
+
+    private suspend fun resetState() {
+        withContext(Dispatchers.Main) {
+            hasMedia = false
+            isPlaying = false
+            isLoading = false
+            _positionText.value = "00:00"
+            _durationText.value = "00:00"
+            _aspectRatio.value = 16f / 9f
+            error = null
+        }
+        _currentFrameState.value = null
+    }
+
+    private fun setPlayerError(error: VideoPlayerError) {
+        runBlocking {
+            withContext(Dispatchers.Main) {
+                isLoading = false
+                this@LinuxVideoPlayerState.error = error
+            }
+        }
+    }
+
+    private suspend fun handleError(e: Exception) {
+        withContext(Dispatchers.Main) {
+            isLoading = false
+            error = VideoPlayerError.SourceError("Error: ${e.message}")
+        }
+    }
+
+    private suspend fun getPositionSafely(): Double {
+        val ptr = playerPtr
+        if (ptr == 0L) return 0.0
+        return try {
+            SharedVideoPlayer.nGetCurrentTime(ptr)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            0.0
+        }
+    }
+
+    private suspend fun getDurationSafely(): Double {
+        val ptr = playerPtr
+        if (ptr == 0L) return 0.0
+        return try {
+            SharedVideoPlayer.nGetVideoDuration(ptr)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            0.0
+        }
+    }
+
+    private suspend fun applyVolume() {
+        val ptr = playerPtr
+        if (ptr != 0L) try {
+            SharedVideoPlayer.nSetVolume(ptr, _volumeState.value)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+        }
+    }
+
+    private suspend fun applyPlaybackSpeed() {
+        val ptr = playerPtr
+        if (ptr != 0L) try {
+            SharedVideoPlayer.nSetPlaybackSpeed(ptr, _playbackSpeedState.value)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+        }
     }
 }

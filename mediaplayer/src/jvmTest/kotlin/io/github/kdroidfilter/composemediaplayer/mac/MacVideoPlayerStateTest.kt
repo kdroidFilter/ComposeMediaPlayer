@@ -8,7 +8,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
-import com.sun.jna.Platform
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 
 /**
  * Tests for the Mac implementation of VideoPlayerState
@@ -24,7 +24,7 @@ class MacVideoPlayerStateTest {
     @Test
     fun testCreateMacVideoPlayerState() {
         // Skip test if not running on Mac
-        if (!Platform.isMac()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
             println("Skipping Mac-specific test on non-Mac platform")
             return
         }
@@ -55,7 +55,7 @@ class MacVideoPlayerStateTest {
     @Test
     fun testVolumeControl() {
         // Skip test if not running on Mac
-        if (!Platform.isMac()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
             println("Skipping Mac-specific test on non-Mac platform")
             return
         }
@@ -86,7 +86,7 @@ class MacVideoPlayerStateTest {
     @Test
     fun testLoopSetting() {
         // Skip test if not running on Mac
-        if (!Platform.isMac()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
             println("Skipping Mac-specific test on non-Mac platform")
             return
         }
@@ -113,7 +113,7 @@ class MacVideoPlayerStateTest {
     @Test
     fun testFullscreenToggle() {
         // Skip test if not running on Mac
-        if (!Platform.isMac()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
             println("Skipping Mac-specific test on non-Mac platform")
             return
         }
@@ -140,7 +140,7 @@ class MacVideoPlayerStateTest {
     @Test
     fun testErrorHandling() {
         // Skip test if not running on Mac
-        if (!Platform.isMac()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
             println("Skipping Mac-specific test on non-Mac platform")
             return
         }
@@ -169,7 +169,7 @@ class MacVideoPlayerStateTest {
 
     private fun testOpenLocalFile(file: String) {
         // Skip test if not running on Mac
-        if (!Platform.isMac()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
             println("Skipping Mac-specific test on non-Mac platform")
             return
         }
@@ -212,7 +212,7 @@ class MacVideoPlayerStateTest {
 
     private fun testMalformedUri(uri: String) {
         // Skip test if not running on Mac
-        if (!Platform.isMac()) {
+        if (CurrentPlatform.os != CurrentPlatform.OS.MAC) {
             println("Skipping Mac-specific test on non-Mac platform")
             return
         }

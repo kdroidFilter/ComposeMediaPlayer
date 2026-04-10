@@ -1,10 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer.linux
 
-import com.sun.jna.Platform
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
-import org.freedesktop.gstreamer.Gst
-import org.freedesktop.gstreamer.Version
 import org.junit.Assume
 import org.junit.Before
 import kotlin.test.Test
@@ -16,56 +14,34 @@ import kotlin.test.assertTrue
 
 /**
  * Tests for the Linux implementation of VideoPlayerState
- * 
+ *
  * Note: These tests will only run on Linux platforms. On other platforms,
  * the tests will be skipped.
- * 
- * Additionally, these tests require GStreamer to be properly installed and
- * the "playbin" element to be available. If GStreamer is not available,
- * the tests will be skipped.
+ *
+ * Additionally, these tests require the native GStreamer library to be available.
+ * If the native library cannot be loaded, the tests will be skipped.
  */
 class LinuxVideoPlayerStateTest {
 
-    /**
-     * Setup method to check if GStreamer is available before running tests.
-     * If GStreamer is not available or the "playbin" element is not found,
-     * the tests will be skipped.
-     */
     @Before
     fun setup() {
         // Skip test if not running on Linux
-        Assume.assumeTrue("Skipping Linux-specific test on non-Linux platform", Platform.isLinux())
+        Assume.assumeTrue("Skipping Linux-specific test on non-Linux platform", CurrentPlatform.os == CurrentPlatform.OS.LINUX)
 
-        // Try to initialize GStreamer
+        // Try to load the native library
         try {
-            // Initialize GStreamer
-            if (!Gst.isInitialized()) {
-                Gst.init(Version.BASELINE, "TestGStreamerPlayer")
-            }
-
-            // Try to create a "playbin" element to check if it's available
-            try {
-                val playbin = org.freedesktop.gstreamer.ElementFactory.make("playbin", "testplaybin")
-                Assume.assumeNotNull("GStreamer 'playbin' element not available", playbin)
-                playbin.dispose() // Clean up the test element
-            } catch (e: Exception) {
-                // If playbin creation fails, skip the test
-                Assume.assumeNoException("GStreamer 'playbin' element not available", e)
+            SharedVideoPlayer.nCreatePlayer().let { ptr ->
+                if (ptr != 0L) SharedVideoPlayer.nDisposePlayer(ptr)
             }
         } catch (e: Exception) {
-            // If GStreamer initialization fails, skip the test
-            Assume.assumeNoException("GStreamer initialization failed", e)
+            Assume.assumeNoException("Native video player library not available", e)
         }
     }
 
-    /**
-     * Test the creation of LinuxVideoPlayerState
-     */
     @Test
     fun testCreateLinuxVideoPlayerState() {
         val playerState = LinuxVideoPlayerState()
 
-        // Verify the player state is initialized correctly
         assertNotNull(playerState)
         assertFalse(playerState.hasMedia)
         assertFalse(playerState.isPlaying)
@@ -79,101 +55,73 @@ class LinuxVideoPlayerStateTest {
         assertFalse(playerState.isFullscreen)
         assertNull(playerState.error)
 
-        // Clean up
         playerState.dispose()
     }
 
-    /**
-     * Test volume control
-     */
     @Test
     fun testVolumeControl() {
         val playerState = LinuxVideoPlayerState()
 
-        // Test initial volume
         assertEquals(1f, playerState.volume)
 
-        // Test setting volume
         playerState.volume = 0.5f
         assertEquals(0.5f, playerState.volume)
 
-        // Test volume bounds
         playerState.volume = -0.1f
         assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
 
         playerState.volume = 1.5f
         assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
 
-        // Clean up
         playerState.dispose()
     }
 
-    /**
-     * Test loop setting
-     */
     @Test
     fun testLoopSetting() {
         val playerState = LinuxVideoPlayerState()
 
-        // Test initial loop setting
         assertFalse(playerState.loop)
 
-        // Test setting loop
         playerState.loop = true
         assertTrue(playerState.loop)
 
         playerState.loop = false
         assertFalse(playerState.loop)
 
-        // Clean up
         playerState.dispose()
     }
 
-    /**
-     * Test fullscreen toggle
-     */
     @Test
     fun testFullscreenToggle() {
         val playerState = LinuxVideoPlayerState()
 
-        // Test initial fullscreen state
         assertFalse(playerState.isFullscreen)
 
-        // Test toggling fullscreen
         playerState.toggleFullscreen()
         assertTrue(playerState.isFullscreen)
 
         playerState.toggleFullscreen()
         assertFalse(playerState.isFullscreen)
 
-        // Clean up
         playerState.dispose()
     }
 
-    /**
-     * Test error handling
-     */
     @Test
     fun testErrorHandling() {
         val playerState = LinuxVideoPlayerState()
 
-        // Initially there should be no error
         assertNull(playerState.error)
 
-        // Test opening a non-existent file (should cause an error)
         runBlocking {
             playerState.openUri("non_existent_file.mp4")
-            delay(500) // Give some time for the error to be set
+            delay(500)
         }
 
-        // There should be an error now
         assertNotNull(playerState.error)
 
-        // Test clearing the error
         playerState.clearError()
         assertNull(playerState.error)
 
-        // Clean up
         playerState.dispose()
     }
 }
