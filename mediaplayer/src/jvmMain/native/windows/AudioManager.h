@@ -60,13 +60,4 @@ HRESULT SetVolume(VideoPlayerInstance* pInstance, float volume);
  */
 HRESULT GetVolume(const VideoPlayerInstance* pInstance, float* volume);
 
-/**
- * @brief Gets the audio levels for a video player instance.
- * @param pInstance Pointer to the video player instance.
- * @param pLeftLevel Pointer to receive the left channel level.
- * @param pRightLevel Pointer to receive the right channel level.
- * @return S_OK on success, or an error code.
- */
-HRESULT GetAudioLevels(const VideoPlayerInstance* pInstance, float* pLeftLevel, float* pRightLevel);
-
 } // namespace AudioManager

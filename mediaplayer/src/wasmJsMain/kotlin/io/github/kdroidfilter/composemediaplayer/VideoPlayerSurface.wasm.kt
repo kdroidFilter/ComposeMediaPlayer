@@ -66,7 +66,6 @@ actual fun VideoPlayerSurface(
                                 video = this,
                                 playerState = playerState,
                                 scope = scope,
-                                enableAudioDetection = true,
                                 useCors = useCors,
                                 onCorsError = { useCors = false },
                             )

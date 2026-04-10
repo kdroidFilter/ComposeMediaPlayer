@@ -37,10 +37,6 @@ int32_t nvp_set_output_size(VideoPlayer* p, int32_t width, int32_t height);
 double nvp_get_duration(VideoPlayer* p);
 double nvp_get_current_time(VideoPlayer* p);
 
-// Audio levels (0.0 - 1.0 linear)
-float nvp_get_left_audio_level(VideoPlayer* p);
-float nvp_get_right_audio_level(VideoPlayer* p);
-
 // Metadata (caller must free returned strings with free())
 char*   nvp_get_title(VideoPlayer* p);
 int64_t nvp_get_bitrate(VideoPlayer* p);

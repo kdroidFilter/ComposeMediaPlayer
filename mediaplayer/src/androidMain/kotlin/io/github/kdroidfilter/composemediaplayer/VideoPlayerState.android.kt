@@ -47,8 +47,6 @@ actual fun createVideoPlayerState(): VideoPlayerState =
             userDragging = false,
             loop = false,
             playbackSpeed = 1f,
-            leftLevel = 0f,
-            rightLevel = 0f,
             positionText = "00:00",
             durationText = "00:00",
             currentTime = 0.0,
@@ -76,8 +74,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     internal var exoPlayer: ExoPlayer? = null
     private var updateJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val audioProcessor = AudioLevelProcessor()
-
     // Protection contre les race conditions
     private var isPlayerReleased = false
     private val playerInitializationLock = Object()
@@ -221,12 +217,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             }
         }
 
-    // Audio levels
-    private var _leftLevel by mutableFloatStateOf(0f)
-    private var _rightLevel by mutableFloatStateOf(0f)
-    override val leftLevel: Float get() = _leftLevel
-    override val rightLevel: Float get() = _rightLevel
-
     // Aspect ratio
     private var _aspectRatio by mutableFloatStateOf(16f / 9f)
     override val aspectRatio: Float get() = _aspectRatio
@@ -247,10 +237,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override val currentTime: Double get() = _currentTime
 
     init {
-        audioProcessor.setOnAudioLevelUpdateListener { left, right ->
-            _leftLevel = left
-            _rightLevel = right
-        }
         initializePlayer()
         registerScreenLockReceiver()
     }
@@ -350,7 +336,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             val audioSink =
                 DefaultAudioSink
                     .Builder(context)
-                    .setAudioProcessors(arrayOf(audioProcessor))
                     .build()
 
             val renderersFactory =
@@ -735,8 +720,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _currentTime = 0.0
         _duration = 0.0
         _sliderPos = 0f
-        _leftLevel = 0f
-        _rightLevel = 0f
         _isPlaying = false
         _isLoading = false
         _error = null

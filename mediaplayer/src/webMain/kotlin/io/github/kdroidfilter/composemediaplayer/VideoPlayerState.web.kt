@@ -112,12 +112,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     override var isFullscreen by mutableStateOf(false)
 
-    // Audio level indicators
-    private var _leftLevel by mutableStateOf(0f)
-    private var _rightLevel by mutableStateOf(0f)
-    override val leftLevel: Float get() = _leftLevel
-    override val rightLevel: Float get() = _rightLevel
-
     // Time display properties
     private var _positionText by mutableStateOf("00:00")
     private var _durationText by mutableStateOf("00:00")
@@ -349,20 +343,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
      */
     fun setError(error: VideoPlayerError) {
         _error = error
-    }
-
-    /**
-     * Updates the audio level indicators.
-     *
-     * @param left The left channel audio level
-     * @param right The right channel audio level
-     */
-    fun updateAudioLevels(
-        left: Float,
-        right: Float,
-    ) {
-        _leftLevel = left
-        _rightLevel = right
     }
 
     /**

@@ -57,16 +57,6 @@ interface VideoPlayerState {
     }
 
     /**
-     * Provides the audio level for the left channel as a percentage.
-     */
-    val leftLevel: Float
-
-    /**
-     * Provides the audio level for the right channel as a percentage.
-     */
-    val rightLevel: Float
-
-    /**
      * Returns the current playback position as a formatted string.
      */
     val positionText: String
@@ -182,8 +172,6 @@ data class PreviewableVideoPlayerState(
     override var userDragging: Boolean = false,
     override var loop: Boolean = true,
     override var playbackSpeed: Float = 1f,
-    override val leftLevel: Float = 1f,
-    override val rightLevel: Float = 1f,
     override val positionText: String = "00:05",
     override val durationText: String = "00:10",
     override val currentTime: Double = 5000.0,

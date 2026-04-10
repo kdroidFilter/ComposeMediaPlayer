@@ -27,7 +27,6 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
-import kotlin.math.log10
 
 internal val linuxLogger = TaggedLogger("LinuxVideoPlayerState")
 
@@ -54,12 +53,6 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private var skiaBitmapA: Bitmap? = null
     private var skiaBitmapB: Bitmap? = null
     private var nextSkiaBitmapA: Boolean = true
-
-    // Audio levels
-    private val _leftLevel = mutableStateOf(0.0f)
-    private val _rightLevel = mutableStateOf(0.0f)
-    override val leftLevel: Float get() = _leftLevel.value
-    override val rightLevel: Float get() = _rightLevel.value
 
     // Surface display size (pixels) for output scaling
     private var surfaceWidth = 0
@@ -430,7 +423,6 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     updateFrameAsync()
                     if (!userDragging) {
                         updatePositionAsync()
-                        updateAudioLevelsAsync()
                     }
                     delay(updateInterval)
                 }
@@ -533,32 +525,6 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 if (e is CancellationException) throw e
                 linuxLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
             }
-        }
-    }
-
-    private suspend fun updateAudioLevelsAsync() {
-        if (!hasMedia) return
-        try {
-            val ptr = playerPtr
-            if (ptr != 0L) {
-                val newLeft = LinuxNativeBridge.nGetLeftAudioLevel(ptr)
-                val newRight = LinuxNativeBridge.nGetRightAudioLevel(ptr)
-
-                fun convertToPercentage(level: Float): Float {
-                    if (level <= 0f) return 0f
-                    val db = 20 * log10(level)
-                    val normalized = ((db + 60) / 60).coerceIn(0f, 1f)
-                    return normalized * 100f
-                }
-
-                withContext(Dispatchers.Main) {
-                    _leftLevel.value = convertToPercentage(newLeft)
-                    _rightLevel.value = convertToPercentage(newRight)
-                }
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            linuxLogger.e { "Error updating audio levels: ${e.message}" }
         }
     }
 

@@ -214,15 +214,6 @@ NATIVEVIDEOPLAYER_API HRESULT SetAudioVolume(VideoPlayerInstance* pInstance, flo
 NATIVEVIDEOPLAYER_API HRESULT GetAudioVolume(const VideoPlayerInstance* pInstance, float* volume);
 
 /**
- * @brief Gets the audio levels for left and right channels for a specific instance.
- * @param pInstance Handle to the instance.
- * @param pLeftLevel Pointer for the left channel level.
- * @param pRightLevel Pointer for the right channel level.
- * @return S_OK on success, or an error code.
- */
-NATIVEVIDEOPLAYER_API HRESULT GetAudioLevels(const VideoPlayerInstance* pInstance, float* pLeftLevel, float* pRightLevel);
-
-/**
  * @brief Sets the playback speed for a specific instance.
  * @param pInstance Handle to the instance.
  * @param speed Playback speed (0.5 to 2.0, where 1.0 is normal speed).

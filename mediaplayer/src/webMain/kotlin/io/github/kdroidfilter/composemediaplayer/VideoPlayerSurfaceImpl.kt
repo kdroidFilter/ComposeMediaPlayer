@@ -20,8 +20,6 @@ import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
@@ -364,34 +362,14 @@ internal fun setupVideoElement(
     video: HTMLVideoElement,
     playerState: VideoPlayerState,
     scope: CoroutineScope,
-    enableAudioDetection: Boolean = true,
     useCors: Boolean = true,
     onCorsError: () -> Unit = {},
 ) {
-    val audioAnalyzer = if (enableAudioDetection) AudioLevelProcessor(video) else null
-    var initializationJob: Job? = null
     var corsErrorDetected = false
 
     playerState.clearError()
     playerState.metadata.audioChannels = null
     playerState.metadata.audioSampleRate = null
-
-    fun initAudioAnalyzer() {
-        if (!enableAudioDetection || corsErrorDetected) return
-        initializationJob?.cancel()
-        initializationJob =
-            scope.launch {
-                val success = audioAnalyzer?.initialize() ?: false
-                if (!success) {
-                    corsErrorDetected = true
-                } else {
-                    audioAnalyzer.let { analyzer ->
-                        playerState.metadata.audioChannels = analyzer.audioChannels
-                        playerState.metadata.audioSampleRate = analyzer.audioSampleRate
-                    }
-                }
-            }
-    }
 
     if (playerState is DefaultVideoPlayerState) {
         video.addEventListeners(
@@ -422,10 +400,6 @@ internal fun setupVideoElement(
 
     conditionalLoadingEvents.forEach { (event, condition) ->
         video.addEventListener(event) {
-            if (event == "loadedmetadata") {
-                initAudioAnalyzer()
-            }
-
             scope.launch {
                 if (playerState is DefaultVideoPlayerState && condition()) {
                     playerState._isLoading = false
@@ -438,35 +412,6 @@ internal fun setupVideoElement(
                 }
             }
         }
-    }
-
-    var audioLevelJob: Job? = null
-
-    video.addEventListener("play") {
-        if (enableAudioDetection && !corsErrorDetected && initializationJob?.isActive != true) {
-            initAudioAnalyzer()
-        }
-
-        if (playerState is DefaultVideoPlayerState && enableAudioDetection && audioLevelJob?.isActive != true) {
-            audioLevelJob =
-                scope.launch {
-                    while (video.paused.not()) {
-                        val (left, right) =
-                            if (!corsErrorDetected) {
-                                audioAnalyzer?.getAudioLevels() ?: (0f to 0f)
-                            } else {
-                                0f to 0f
-                            }
-                        playerState.updateAudioLevels(left, right)
-                        delay(100)
-                    }
-                }
-        }
-    }
-
-    video.addEventListener("pause") {
-        audioLevelJob?.cancel()
-        audioLevelJob = null
     }
 
     video.addEventListener("error") {

@@ -120,11 +120,6 @@ internal object WindowsNativeBridge {
         outVolume: FloatArray,
     ): Int
 
-    @JvmStatic external fun nGetAudioLevels(
-        handle: Long,
-        outLevels: FloatArray,
-    ): Int
-
     @JvmStatic external fun nSetPlaybackSpeed(
         handle: Long,
         speed: Float,
@@ -219,11 +214,6 @@ internal object WindowsNativeBridge {
         handle: Long,
         outVolume: FloatArray,
     ): Int = nGetAudioVolume(handle, outVolume)
-
-    fun GetAudioLevels(
-        handle: Long,
-        outLevels: FloatArray,
-    ): Int = nGetAudioLevels(handle, outLevels)
 
     fun GetPlaybackSpeed(
         handle: Long,

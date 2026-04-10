@@ -86,14 +86,6 @@ static void JNICALL jni_DisposePlayer(JNIEnv* env, jclass cls, jlong handle) {
     if (handle) nvp_destroy(toCtx(handle));
 }
 
-static jfloat JNICALL jni_GetLeftAudioLevel(JNIEnv* env, jclass cls, jlong handle) {
-    return handle ? nvp_get_left_audio_level(toCtx(handle)) : 0.0f;
-}
-
-static jfloat JNICALL jni_GetRightAudioLevel(JNIEnv* env, jclass cls, jlong handle) {
-    return handle ? nvp_get_right_audio_level(toCtx(handle)) : 0.0f;
-}
-
 static void JNICALL jni_SetPlaybackSpeed(JNIEnv* env, jclass cls, jlong handle, jfloat speed) {
     if (handle) nvp_set_playback_speed(toCtx(handle), (float)speed);
 }
@@ -160,8 +152,6 @@ static const JNINativeMethod g_methods[] = {
     { "nGetCurrentTime",         "(J)D",                        (void*)jni_GetCurrentTime },
     { "nSeekTo",                 "(JD)V",                       (void*)jni_SeekTo },
     { "nDisposePlayer",          "(J)V",                        (void*)jni_DisposePlayer },
-    { "nGetLeftAudioLevel",      "(J)F",                        (void*)jni_GetLeftAudioLevel },
-    { "nGetRightAudioLevel",     "(J)F",                        (void*)jni_GetRightAudioLevel },
     { "nSetPlaybackSpeed",       "(JF)V",                       (void*)jni_SetPlaybackSpeed },
     { "nGetPlaybackSpeed",       "(J)F",                        (void*)jni_GetPlaybackSpeed },
     { "nGetVideoTitle",          "(J)Ljava/lang/String;",       (void*)jni_GetVideoTitle },

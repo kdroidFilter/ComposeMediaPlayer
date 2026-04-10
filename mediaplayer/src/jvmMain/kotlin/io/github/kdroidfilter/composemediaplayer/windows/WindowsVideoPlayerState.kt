@@ -181,12 +181,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
             }
         }
 
-    // Updating audio levels via GetAudioLevels
-    private var _leftLevel by mutableStateOf(0f)
-    override val leftLevel: Float get() = _leftLevel
-    private var _rightLevel by mutableStateOf(0f)
-    override val rightLevel: Float get() = _rightLevel
-
     private var _error: VideoPlayerError? = null
     override val error get() = _error
 
@@ -246,8 +240,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private val isResizing = AtomicBoolean(false)
     private var videoJob: Job? = null
     private var resizeJob: Job? = null
-    private var audioLevelsJob: Job? = null
-
     // Memory optimization for frame processing
     private val frameQueueSize = 1
     private val frameChannel =
@@ -307,7 +299,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
             try {
                 // Cancel all jobs with immediate effect
                 videoJob?.cancel()
-                audioLevelsJob?.cancel()
                 resizeJob?.cancel()
 
                 // Wait a bit for coroutines to cancel
@@ -407,7 +398,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private fun releaseAllResources() {
         // Cancel any remaining jobs related to video processing
         videoJob?.cancel()
-        audioLevelsJob?.cancel()
         resizeJob?.cancel()
 
         // Drain the frame channel (tryReceive is non-suspending)
@@ -642,14 +632,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
                                 launch { consumeFrames() }
                             }
 
-                        // Start a task to update audio levels
-                        audioLevelsJob =
-                            scope.launch {
-                                while (isActive && _hasMedia && !isDisposing.get()) {
-                                    updateAudioLevels()
-                                    delay(50)
-                                }
-                            }
                     }
                 } catch (e: Exception) {
                     setError("Error while opening media: ${e.message}")
@@ -658,29 +640,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     if (!_hasMedia) isLoading = false
                 }
             }
-        }
-    }
-
-    /**
-     * Updates the audio level meters
-     */
-    private fun updateAudioLevels() {
-        if (isDisposing.get()) return
-
-        // Use tryLock to avoid blocking media operations (open, seek, etc.)
-        // when polling audio levels. Skipped updates are retried in 50ms.
-        if (!mediaOperationMutex.tryLock()) return
-        try {
-            videoPlayerInstance.takeIf { it != 0L }?.let { instance ->
-                val levelsArr = FloatArray(2)
-                val hr = player.GetAudioLevels(instance, levelsArr)
-                if (hr >= 0) {
-                    _leftLevel = levelsArr[0]
-                    _rightLevel = levelsArr[1]
-                }
-            }
-        } finally {
-            mediaOperationMutex.unlock()
         }
     }
 

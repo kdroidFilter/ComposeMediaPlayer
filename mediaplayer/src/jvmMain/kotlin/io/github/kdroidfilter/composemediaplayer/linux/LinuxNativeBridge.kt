@@ -68,11 +68,6 @@ internal object LinuxNativeBridge {
 
     @JvmStatic external fun nGetCurrentTime(handle: Long): Double
 
-    // Audio levels
-    @JvmStatic external fun nGetLeftAudioLevel(handle: Long): Float
-
-    @JvmStatic external fun nGetRightAudioLevel(handle: Long): Float
-
     // Metadata
     @JvmStatic external fun nGetVideoTitle(handle: Long): String?
 

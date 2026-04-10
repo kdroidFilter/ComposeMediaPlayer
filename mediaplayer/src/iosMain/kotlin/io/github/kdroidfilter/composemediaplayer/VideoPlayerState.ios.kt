@@ -144,10 +144,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     private var _duration: Double = 0.0
     override val currentTime: Double get() = _currentTime
 
-    // Audio levels (not yet implemented)
-    override val leftLevel: Float = 0f
-    override val rightLevel: Float = 0f
-
     // Observable video aspect ratio (default to 16:9)
     private var _videoAspectRatio by mutableStateOf(16.0 / 9.0)
     val videoAspectRatio: CGFloat

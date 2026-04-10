@@ -27,7 +27,6 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
-import kotlin.math.log10
 
 internal val macLogger = TaggedLogger("MacVideoPlayerState")
 
@@ -51,12 +50,6 @@ class MacVideoPlayerState : VideoPlayerState {
     private var skiaBitmapA: Bitmap? = null
     private var skiaBitmapB: Bitmap? = null
     private var nextSkiaBitmapA: Boolean = true
-
-    // Audio level state variables (added for left and right levels)
-    private val _leftLevel = mutableStateOf(0.0f)
-    private val _rightLevel = mutableStateOf(0.0f)
-    override val leftLevel: Float get() = _leftLevel.value
-    override val rightLevel: Float get() = _rightLevel.value
 
     // Surface display size (pixels) — used to scale native output resolution
     private var surfaceWidth = 0
@@ -509,8 +502,6 @@ class MacVideoPlayerState : VideoPlayerState {
                     updateFrameAsync()
                     if (!userDragging) {
                         updatePositionAsync()
-                        // Call the audio level update separately
-                        updateAudioLevelsAsync()
                     }
                     delay(updateInterval)
                 }
@@ -641,37 +632,6 @@ class MacVideoPlayerState : VideoPlayerState {
                 if (e is CancellationException) throw e
                 macLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
             }
-        }
-    }
-
-    private suspend fun updateAudioLevelsAsync() {
-        if (!hasMedia) return
-
-        try {
-            val ptr = playerPtr
-            if (ptr != 0L) {
-                val newLeft = MacNativeBridge.nGetLeftAudioLevel(ptr)
-                val newRight = MacNativeBridge.nGetRightAudioLevel(ptr)
-//                macLogger.d { "Audio levels fetched: L=$newLeft, R=$newRight" }
-
-                // Converts the linear level to a percentage on a logarithmic scale.
-                fun convertToPercentage(level: Float): Float {
-                    if (level <= 0f) return 0f
-                    // Conversion to decibels: 20 * log10(level)
-                    val db = 20 * log10(level)
-                    // Assume that -60 dB corresponds to silence and 0 dB to maximum level.
-                    val normalized = ((db + 60) / 60).coerceIn(0f, 1f)
-                    return normalized * 100f
-                }
-
-                withContext(Dispatchers.Main) {
-                    _leftLevel.value = convertToPercentage(newLeft)
-                    _rightLevel.value = convertToPercentage(newRight)
-                }
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            macLogger.e { "Error updating audio levels: ${e.message}" }
         }
     }
 

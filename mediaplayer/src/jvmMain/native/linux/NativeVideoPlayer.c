@@ -33,10 +33,6 @@ struct VideoPlayer {
     int32_t output_width;
     int32_t output_height;
 
-    // Audio levels
-    float left_level;
-    float right_level;
-
     // Metadata
     pthread_mutex_t meta_lock;
     char*   title;
@@ -131,31 +127,6 @@ static void process_bus_message(VideoPlayer* p, GstMessage* msg) {
             gst_message_parse_state_changed(msg, &old_state, &new_state, NULL);
             if (new_state == GST_STATE_PAUSED || new_state == GST_STATE_PLAYING) {
                 update_stream_metadata(p);
-            }
-        }
-        break;
-    }
-
-    case GST_MESSAGE_ELEMENT: {
-        if (p->level && GST_MESSAGE_SRC(msg) == GST_OBJECT(p->level)) {
-            const GstStructure* st = gst_message_get_structure(msg);
-            if (st && gst_structure_has_name(st, "level")) {
-                const GValue* peak_val = gst_structure_get_value(st, "peak");
-                if (peak_val && GST_VALUE_HOLDS_ARRAY(peak_val)) {
-                    guint n = gst_value_array_get_size(peak_val);
-                    if (n >= 1) {
-                        const GValue* v0 = gst_value_array_get_value(peak_val, 0);
-                        gdouble db_left = g_value_get_double(v0);
-                        p->left_level = (float)pow(10.0, db_left / 20.0);
-                    }
-                    if (n >= 2) {
-                        const GValue* v1 = gst_value_array_get_value(peak_val, 1);
-                        gdouble db_right = g_value_get_double(v1);
-                        p->right_level = (float)pow(10.0, db_right / 20.0);
-                    } else {
-                        p->right_level = p->left_level;
-                    }
-                }
             }
         }
         break;
@@ -338,9 +309,6 @@ int nvp_open_uri(VideoPlayer* p, const char* uri) {
     p->frame_rate = 0.0f;
     pthread_mutex_unlock(&p->meta_lock);
 
-    p->left_level = 0.0f;
-    p->right_level = 0.0f;
-
     // Convert raw file paths to file:// URIs if needed.
     // GStreamer playbin requires a valid URI scheme.
     gchar* resolved_uri = NULL;
@@ -476,18 +444,6 @@ double nvp_get_current_time(VideoPlayer* p) {
         return (double)pos / (double)GST_SECOND;
     }
     return 0.0;
-}
-
-// ---------------------------------------------------------------------------
-// Audio levels
-// ---------------------------------------------------------------------------
-
-float nvp_get_left_audio_level(VideoPlayer* p) {
-    return p ? p->left_level : 0.0f;
-}
-
-float nvp_get_right_audio_level(VideoPlayer* p) {
-    return p ? p->right_level : 0.0f;
 }
 
 // ---------------------------------------------------------------------------

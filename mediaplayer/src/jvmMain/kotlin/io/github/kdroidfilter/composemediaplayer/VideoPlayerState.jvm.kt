@@ -22,8 +22,6 @@ actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState(
  * - `sliderPos`: Represents the current playback position as a normalized value between 0.0 and 1.0.
  * - `userDragging`: Denotes whether the user is manually adjusting the playback position.
  * - `loop`: Specifies if the video should loop when it reaches the end.
- * - `leftLevel`: Provides the audio level for the left channel as a percentage.
- * - `rightLevel`: Provides the audio level for the right channel as a percentage.
  * - `positionText`: Returns the current playback position as a formatted string.
  * - `durationText`: Returns the total duration of the video as a formatted string.
  *
@@ -102,8 +100,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     override fun disableSubtitles() = delegate.disableSubtitles()
 
-    override val leftLevel: Float get() = delegate.leftLevel
-    override val rightLevel: Float get() = delegate.rightLevel
     override val positionText: String get() = delegate.positionText
     override val durationText: String get() = delegate.durationText
     override val currentTime: Double get() = delegate.currentTime

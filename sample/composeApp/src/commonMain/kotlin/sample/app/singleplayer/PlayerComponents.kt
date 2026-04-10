@@ -400,22 +400,6 @@ fun VideoUrlInput(
 }
 
 @Composable
-fun AudioLevelDisplay(
-    leftLevel: Float,
-    rightLevel: Float
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text("Left: ${leftLevel.toInt()}%")
-        Text("Right: ${rightLevel.toInt()}%")
-    }
-}
-
-@Composable
 fun MetadataDisplay(
     playerState: VideoPlayerState
 ) {
@@ -585,10 +569,6 @@ fun ControlsCard(
             }
         }
 
-        AudioLevelDisplay(
-            leftLevel = playerState.leftLevel,
-            rightLevel = playerState.rightLevel
-        )
     }
 }
 
