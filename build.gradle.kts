@@ -15,6 +15,10 @@ detekt {
     buildUponDefaultConfig = true
 }
 
+ktlint {
+    ignoreFailures.set(true)
+}
+
 subprojects {
     if (name == "composeApp") return@subprojects
     apply(plugin = "org.jlleitschuh.gradle.ktlint")

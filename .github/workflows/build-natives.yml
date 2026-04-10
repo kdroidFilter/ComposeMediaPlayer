@@ -33,18 +33,11 @@ jobs:
             echo "OK: $f ($(wc -c < "$f") bytes)"
           done
 
-      - name: Upload Windows x64 DLL
+      - name: Upload Windows natives
         uses: actions/upload-artifact@v4
         with:
-          name: native-win32-x86-64
-          path: build/nativeLibs/win32-x86-64/NativeVideoPlayer.dll
-          retention-days: 1
-
-      - name: Upload Windows ARM64 DLL
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-win32-arm64
-          path: build/nativeLibs/win32-arm64/NativeVideoPlayer.dll
+          name: native-windows
+          path: build/nativeLibs/
           retention-days: 1
 
   macos:
@@ -73,18 +66,11 @@ jobs:
             echo "OK: $f ($(wc -c < "$f") bytes)"
           done
 
-      - name: Upload macOS ARM64 dylib
+      - name: Upload macOS natives
         uses: actions/upload-artifact@v4
         with:
-          name: native-darwin-aarch64
-          path: build/nativeLibs/darwin-aarch64/libNativeVideoPlayer.dylib
-          retention-days: 1
-
-      - name: Upload macOS x86_64 dylib
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-darwin-x86-64
-          path: build/nativeLibs/darwin-x86-64/libNativeVideoPlayer.dylib
+          name: native-macos
+          path: build/nativeLibs/
           retention-days: 1
 
   linux:
@@ -130,5 +116,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-linux-${{ matrix.arch }}
-          path: build/nativeLibs/linux-${{ matrix.arch }}/libNativeVideoPlayer.so
+          path: build/nativeLibs/
           retention-days: 1

@@ -17,41 +17,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download macOS ARM64 library
+      - name: Download all native libraries
         uses: actions/download-artifact@v4
         with:
-          name: native-darwin-aarch64
-          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-aarch64/
-
-      - name: Download macOS x86_64 library
-        uses: actions/download-artifact@v4
-        with:
-          name: native-darwin-x86-64
-          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64/
-
-      - name: Download Linux x86_64 library
-        uses: actions/download-artifact@v4
-        with:
-          name: native-linux-x86-64
-          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-x86-64/
-
-      - name: Download Linux aarch64 library
-        uses: actions/download-artifact@v4
-        with:
-          name: native-linux-aarch64
-          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-aarch64/
-
-      - name: Download Windows x64 library
-        uses: actions/download-artifact@v4
-        with:
-          name: native-win32-x86-64
-          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-x86-64/
-
-      - name: Download Windows ARM64 library
-        uses: actions/download-artifact@v4
-        with:
-          name: native-win32-arm64
-          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-arm64/
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/
+          pattern: native-*
+          merge-multiple: true
 
       - name: Verify all natives present
         run: |
