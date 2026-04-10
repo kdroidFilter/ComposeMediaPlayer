@@ -32,8 +32,8 @@ class LinuxVideoPlayerStateTest {
 
         // Try to load the native library
         try {
-            SharedVideoPlayer.nCreatePlayer().let { ptr ->
-                if (ptr != 0L) SharedVideoPlayer.nDisposePlayer(ptr)
+            LinuxNativeBridge.nCreatePlayer().let { ptr ->
+                if (ptr != 0L) LinuxNativeBridge.nDisposePlayer(ptr)
             }
         } catch (e: Exception) {
             Assume.assumeNoException("Native video player library not available", e)
