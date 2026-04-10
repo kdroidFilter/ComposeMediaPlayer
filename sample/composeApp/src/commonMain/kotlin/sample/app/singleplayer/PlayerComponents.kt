@@ -400,6 +400,130 @@ fun VideoUrlInput(
 }
 
 @Composable
+fun DrmControlsCard(
+    licenseUrl: String,
+    onLicenseUrlChange: (String) -> Unit,
+    drmHeaders: String,
+    onDrmHeadersChange: (String) -> Unit,
+    drmEnabled: Boolean,
+    onDrmEnabledChange: (Boolean) -> Unit,
+    drmType: String,
+    onDrmTypeChange: (String) -> Unit,
+    onLoadTestStream: (() -> Unit)? = null
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "🔐 DRM Settings",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                Switch(
+                    checked = drmEnabled,
+                    onCheckedChange = onDrmEnabledChange
+                )
+            }
+
+            AnimatedVisibility(visible = drmEnabled) {
+                Column {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // DRM Type selection
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Type: ", style = MaterialTheme.typography.bodyMedium)
+                        listOf("WIDEVINE", "PLAYREADY", "CLEARKEY").forEach { type ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = drmType == type,
+                                    onClick = { onDrmTypeChange(type) }
+                                )
+                                Text(
+                                    text = type,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.clickable { onDrmTypeChange(type) }
+                                )
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Show coming soon for unsupported DRM types
+                    if (drmType == "PLAYREADY" || drmType == "CLEARKEY") {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            )
+                        ) {
+                            Text(
+                                text = "$drmType support coming soon",
+                                modifier = Modifier.padding(16.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    } else {
+                        // License URL (Widevine only for now)
+                        OutlinedTextField(
+                            value = licenseUrl,
+                            onValueChange = onLicenseUrlChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("License Server URL") },
+                            placeholder = { Text("https://license.server.com/license") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Custom Headers (JSON)
+                        OutlinedTextField(
+                            value = drmHeaders,
+                            onValueChange = onDrmHeadersChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Custom Headers (JSON)") },
+                            placeholder = { Text("""{"Authorization": "Bearer token"}""") },
+                            singleLine = false,
+                            minLines = 2,
+                            maxLines = 3,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        // Load test stream button
+                        if (onLoadTestStream != null) {
+                            Button(
+                                onClick = onLoadTestStream,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Load Test Stream")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun AudioLevelDisplay(
     leftLevel: Float,
     rightLevel: Float
