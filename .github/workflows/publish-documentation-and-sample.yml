@@ -34,7 +34,7 @@ jobs:
       # Generate Dokka Documentation
       - name: Generate Dokka Docs
         run: |
-          ./gradlew dokkaHtml
+          ./gradlew :mediaplayer:dokkaGenerateHtml
 
       # Build the Kotlin/Compose Example
       - name: Build Kotlin/Compose Example
