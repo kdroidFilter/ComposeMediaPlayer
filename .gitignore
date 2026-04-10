@@ -15,11 +15,8 @@ Pods/
 *.jks
 *.gpg
 *yarn.lock
-# Native compiled binaries (built in CI)
-/mediaplayer/src/jvmMain/resources/win32-x86-64/
-/mediaplayer/src/jvmMain/resources/win32-arm64/
-/mediaplayer/src/jvmMain/resources/darwin-aarch64/
-/mediaplayer/src/jvmMain/resources/darwin-x86-64/
+# Native compiled binaries (built locally or in CI)
+/mediaplayer/src/jvmMain/resources/composemediaplayer/native/
 
 # Native build artifacts
 /mediaplayer/src/jvmMain/native/windows/build-x64/
