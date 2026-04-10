@@ -25,7 +25,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
-actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState()
+actual fun createVideoPlayerState(audioMode: AudioMode): VideoPlayerState = DefaultVideoPlayerState()
 
 /**
  * Implementation of VideoPlayerState for WebAssembly/JavaScript platform.

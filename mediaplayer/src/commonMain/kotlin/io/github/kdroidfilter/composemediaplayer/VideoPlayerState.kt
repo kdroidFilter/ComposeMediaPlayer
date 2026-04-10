@@ -139,7 +139,7 @@ interface VideoPlayerState {
  *  Create platform-specific video player state. Supported platforms include Windows,
  *  macOS, and Linux.
  */
-expect fun createVideoPlayerState(): VideoPlayerState
+expect fun createVideoPlayerState(audioMode: AudioMode = AudioMode()): VideoPlayerState
 
 /**
  * Creates and manages an instance of `VideoPlayerState` within a composable function, ensuring
@@ -150,8 +150,8 @@ expect fun createVideoPlayerState(): VideoPlayerState
  *         controlling and managing video playback, such as play, pause, stop, and seek.
  */
 @Composable
-fun rememberVideoPlayerState(): VideoPlayerState {
-    val playerState = remember { createVideoPlayerState() }
+fun rememberVideoPlayerState(audioMode: AudioMode = AudioMode()): VideoPlayerState {
+    val playerState = remember(audioMode) { createVideoPlayerState(audioMode) }
     DisposableEffect(Unit) {
         onDispose {
             playerState.dispose()
