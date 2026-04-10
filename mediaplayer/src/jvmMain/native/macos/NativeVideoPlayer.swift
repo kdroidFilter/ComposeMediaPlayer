@@ -1020,8 +1020,25 @@ class MacVideoPlayer {
                 process: self.tapProcess
             )
 
-            var tap: Unmanaged<MTAudioProcessingTap>?
             // Create the audio processing tap
+            // On macOS 26+ (Swift 6.2+), MTAudioProcessingTapCreate returns
+            // MTAudioProcessingTap? directly instead of Unmanaged<MTAudioProcessingTap>?
+            #if compiler(>=6.2)
+            var tap: MTAudioProcessingTap?
+            let status = MTAudioProcessingTapCreate(
+                kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap
+            )
+            if status == noErr, let tap = tap {
+                print("Audio tap created successfully")
+                inputParams.audioTapProcessor = tap
+                let audioMix = AVMutableAudioMix()
+                audioMix.inputParameters = [inputParams]
+                playerItem.audioMix = audioMix
+            } else {
+                print("Audio Tap creation failed with status: \(status)")
+            }
+            #else
+            var tap: Unmanaged<MTAudioProcessingTap>?
             let status = MTAudioProcessingTapCreate(
                 kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap
             )
@@ -1034,6 +1051,7 @@ class MacVideoPlayer {
             } else {
                 print("Audio Tap creation failed with status: \(status)")
             }
+            #endif
         }
     }
 
