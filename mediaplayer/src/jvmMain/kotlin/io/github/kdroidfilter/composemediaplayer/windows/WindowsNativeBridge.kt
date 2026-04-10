@@ -1,7 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
-import io.github.kdroidfilter.nucleus.core.runtime.NativeLibraryLoader
+import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
 import java.nio.ByteBuffer
 
 internal object WindowsNativeBridge {
@@ -9,7 +9,7 @@ internal object WindowsNativeBridge {
     private const val EXPECTED_NATIVE_VERSION = 2
 
     init {
-        NativeLibraryLoader.load("NativeVideoPlayer", WindowsNativeBridge::class.java, "composemediaplayer/native")
+        NativeLibraryLoader.load("NativeVideoPlayer", WindowsNativeBridge::class.java)
         val nativeVersion = nGetNativeVersion()
         require(nativeVersion == EXPECTED_NATIVE_VERSION) {
             "NativeVideoPlayer DLL version mismatch: expected $EXPECTED_NATIVE_VERSION but got $nativeVersion. " +

@@ -1,6 +1,6 @@
 package io.github.kdroidfilter.composemediaplayer.linux
 
-import io.github.kdroidfilter.nucleus.core.runtime.NativeLibraryLoader
+import io.github.kdroidfilter.composemediaplayer.util.NativeLibraryLoader
 import java.nio.ByteBuffer
 
 /**
@@ -9,7 +9,7 @@ import java.nio.ByteBuffer
  */
 internal object LinuxNativeBridge {
     init {
-        NativeLibraryLoader.load("NativeVideoPlayer", LinuxNativeBridge::class.java, "composemediaplayer/native")
+        NativeLibraryLoader.load("NativeVideoPlayer", LinuxNativeBridge::class.java)
     }
 
     // Playback control

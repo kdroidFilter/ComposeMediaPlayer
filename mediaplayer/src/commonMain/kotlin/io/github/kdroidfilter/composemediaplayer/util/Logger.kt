@@ -2,6 +2,7 @@ package io.github.kdroidfilter.composemediaplayer.util
 
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlin.jvm.JvmField
 import kotlin.time.Clock
 
 /**
@@ -14,7 +15,8 @@ class ComposeMediaPlayerLoggingLevel private constructor(
         priority.compareTo(other.priority)
 
     companion object {
-        @JvmField val VERBOSE = ComposeMediaPlayerLoggingLevel(0)
+        @JvmField
+        val VERBOSE = ComposeMediaPlayerLoggingLevel(0)
         @JvmField val DEBUG = ComposeMediaPlayerLoggingLevel(1)
         @JvmField val INFO = ComposeMediaPlayerLoggingLevel(2)
         @JvmField val WARN = ComposeMediaPlayerLoggingLevel(3)

@@ -99,7 +99,6 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
-            implementation(libs.nucleus.core.runtime)
         }
 
         jvmTest.dependencies {
