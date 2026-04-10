@@ -41,32 +41,34 @@ kotlin {
         binaries.executable()
     }
 
-    listOf(
-        iosArm64(),
-        iosSimulatorArm64(),
-    ).forEach { target ->
-        target.compilations.getByName("main") {
-            // The default file path is src/nativeInterop/cinterop/<interop-name>.def
-            val nskeyvalueobserving by cinterops.creating
-        }
-    }
-
-    cocoapods {
-        version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
-        summary = "A multiplatform video player library for Compose applications"
-        homepage = "https://github.com/kdroidFilter/Compose-Media-Player"
-        name = "ComposeMediaPlayer"
-
-        framework {
-            baseName = "ComposeMediaPlayer"
-            isStatic = false
-            @OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
-            transitiveExport = false
+    if (Os.isFamily(Os.FAMILY_MAC)) {
+        listOf(
+            iosArm64(),
+            iosSimulatorArm64(),
+        ).forEach { target ->
+            target.compilations.getByName("main") {
+                // The default file path is src/nativeInterop/cinterop/<interop-name>.def
+                val nskeyvalueobserving by cinterops.creating
+            }
         }
 
-        // Maps custom Xcode configuration to NativeBuildType
-        xcodeConfigurationToNativeBuildType["CUSTOM_DEBUG"] = NativeBuildType.DEBUG
-        xcodeConfigurationToNativeBuildType["CUSTOM_RELEASE"] = NativeBuildType.RELEASE
+        cocoapods {
+            version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
+            summary = "A multiplatform video player library for Compose applications"
+            homepage = "https://github.com/kdroidFilter/Compose-Media-Player"
+            name = "ComposeMediaPlayer"
+
+            framework {
+                baseName = "ComposeMediaPlayer"
+                isStatic = false
+                @OptIn(org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi::class)
+                transitiveExport = false
+            }
+
+            // Maps custom Xcode configuration to NativeBuildType
+            xcodeConfigurationToNativeBuildType["CUSTOM_DEBUG"] = NativeBuildType.DEBUG
+            xcodeConfigurationToNativeBuildType["CUSTOM_RELEASE"] = NativeBuildType.RELEASE
+        }
     }
 
     sourceSets {
@@ -108,12 +110,14 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
 
-        iosMain.dependencies {
-        }
+        if (Os.isFamily(Os.FAMILY_MAC)) {
+            iosMain.dependencies {
+            }
 
-        iosTest.dependencies {
-            implementation(kotlin("test"))
-            implementation(libs.kotlinx.coroutines.test)
+            iosTest.dependencies {
+                implementation(kotlin("test"))
+                implementation(libs.kotlinx.coroutines.test)
+            }
         }
 
         webMain.dependencies {
