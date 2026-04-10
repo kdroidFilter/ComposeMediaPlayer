@@ -53,6 +53,11 @@ interface VideoPlayerState {
     var loop: Boolean
     var playbackSpeed: Float
 
+    companion object {
+        const val MIN_PLAYBACK_SPEED = 0.25f
+        const val MAX_PLAYBACK_SPEED = 2.0f
+    }
+
     /**
      * Provides the audio level for the left channel as a percentage.
      */

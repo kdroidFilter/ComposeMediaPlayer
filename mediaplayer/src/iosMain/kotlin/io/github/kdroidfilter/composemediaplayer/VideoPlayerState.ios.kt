@@ -76,7 +76,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
-            _playbackSpeed = value.coerceIn(0.5f, 2.0f)
+            _playbackSpeed = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             // Only update player rate if we are playing to avoid auto-play
             if (_isPlaying) {
                 player?.rate = _playbackSpeed

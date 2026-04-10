@@ -104,7 +104,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
-            val newValue = value.coerceIn(0.5f, 2.0f)
+            val newValue = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             if (_playbackSpeed != newValue) {
                 _playbackSpeed = newValue
                 applyPlaybackSpeedWithThrottle(newValue)
