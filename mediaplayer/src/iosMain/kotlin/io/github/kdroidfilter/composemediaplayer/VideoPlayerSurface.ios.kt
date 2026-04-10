@@ -10,8 +10,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.UIKitView
-import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.cinterop.BetaInteropApi
@@ -30,16 +30,25 @@ import platform.UIKit.UIColor
 import platform.UIKit.UIView
 import platform.UIKit.UIViewMeta
 
+private val iosSurfaceLogger = TaggedLogger("iOSVideoPlayerSurface")
+
 @OptIn(ExperimentalForeignApi::class)
 @Composable
 actual fun VideoPlayerSurface(
     playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
-    overlay: @Composable () -> Unit
+    overlay: @Composable () -> Unit,
 ) {
     // Set pauseOnDispose to false to prevent pausing during screen rotation
-    VideoPlayerSurfaceImpl(playerState, modifier, contentScale, overlay, isInFullscreenView = false, pauseOnDispose = false)
+    VideoPlayerSurfaceImpl(
+        playerState,
+        modifier,
+        contentScale,
+        overlay,
+        isInFullscreenView = false,
+        pauseOnDispose = false,
+    )
 }
 
 @OptIn(ExperimentalForeignApi::class)
@@ -50,18 +59,18 @@ fun VideoPlayerSurfaceImpl(
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
     isInFullscreenView: Boolean = false,
-    pauseOnDispose: Boolean = true
+    pauseOnDispose: Boolean = true,
 ) {
     // Cleanup when deleting the view
     DisposableEffect(Unit) {
         onDispose {
-            Logger.d { "[VideoPlayerSurface] Disposing" }
+            iosSurfaceLogger.d { "[VideoPlayerSurface] Disposing" }
             // Only pause if pauseOnDispose is true (prevents pausing during rotation or fullscreen transitions)
             if (pauseOnDispose) {
-                Logger.d { "[VideoPlayerSurface] Pausing on dispose" }
+                iosSurfaceLogger.d { "[VideoPlayerSurface] Pausing on dispose" }
                 playerState.pause()
             } else {
-                Logger.d { "[VideoPlayerSurface] Not pausing on dispose (rotation or fullscreen transition)" }
+                iosSurfaceLogger.d { "[VideoPlayerSurface] Not pausing on dispose (rotation or fullscreen transition)" }
             }
         }
     }
@@ -70,15 +79,16 @@ fun VideoPlayerSurfaceImpl(
 
     Box(
         modifier = modifier,
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.Center,
     ) {
         if (playerState.hasMedia) {
             UIKitView(
-                modifier = contentScale.toCanvasModifier(
-                    aspectRatio = playerState.aspectRatio,
-                    width = playerState.metadata.width,
-                    height = playerState.metadata.height
-                ),
+                modifier =
+                    contentScale.toCanvasModifier(
+                        aspectRatio = playerState.aspectRatio,
+                        width = playerState.metadata.width,
+                        height = playerState.metadata.height,
+                    ),
                 factory = {
                     PlayerUIView(frame = cValue<CGRect>()).apply {
                         player = currentPlayer
@@ -95,30 +105,38 @@ fun VideoPlayerSurfaceImpl(
                     playerView.hidden = !playerState.hasMedia
 
                     // Update the videoGravity when contentScale changes
-                    val videoGravity = when (contentScale) {
-                        ContentScale.Crop,
-                        ContentScale.FillHeight -> AVLayerVideoGravityResizeAspectFill   // ⬅️ changement
-                        ContentScale.FillWidth -> AVLayerVideoGravityResizeAspectFill   // (même logique)
-                        ContentScale.FillBounds -> AVLayerVideoGravityResize             // pas d’aspect-ratio
-                        ContentScale.Fit,
-                        ContentScale.Inside -> AVLayerVideoGravityResizeAspect
+                    val videoGravity =
+                        when (contentScale) {
+                            ContentScale.Crop,
+                            ContentScale.FillHeight,
+                            -> AVLayerVideoGravityResizeAspectFill // ⬅️ changement
+                            ContentScale.FillWidth -> AVLayerVideoGravityResizeAspectFill // (même logique)
+                            ContentScale.FillBounds -> AVLayerVideoGravityResize // pas d’aspect-ratio
+                            ContentScale.Fit,
+                            ContentScale.Inside,
+                            -> AVLayerVideoGravityResizeAspect
 
-                        else -> AVLayerVideoGravityResizeAspect
-                    }
+                            else -> AVLayerVideoGravityResizeAspect
+                        }
                     playerView.videoGravity = videoGravity
 
-                    Logger.d { "View configured with contentScale: $contentScale, videoGravity: $videoGravity" }
+                    iosSurfaceLogger.d {
+                        "View configured with contentScale: $contentScale, videoGravity: $videoGravity"
+                    }
                 },
                 onRelease = { playerView ->
                     playerView.player = null
-                }
+                },
             )
 
             // Add Compose-based subtitle layer
             if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
                 // Calculate current time in milliseconds
-                val currentTimeMs = (playerState.sliderPos / 1000f * 
-                    playerState.durationText.toTimeMs()).toLong()
+                val currentTimeMs =
+                    (
+                        playerState.sliderPos / 1000f *
+                            playerState.durationText.toTimeMs()
+                    ).toLong()
 
                 // Calculate duration in milliseconds
                 val durationMs = playerState.durationText.toTimeMs()
@@ -130,7 +148,7 @@ fun VideoPlayerSurfaceImpl(
                     subtitleTrack = playerState.currentSubtitleTrack,
                     subtitlesEnabled = playerState.subtitlesEnabled,
                     textStyle = playerState.subtitleTextStyle,
-                    backgroundColor = playerState.subtitleBackgroundColor
+                    backgroundColor = playerState.subtitleBackgroundColor,
                 )
             }
         }
@@ -172,4 +190,3 @@ private class PlayerUIView : UIView {
             (layer as? AVPlayerLayer)?.videoGravity = value
         }
 }
-

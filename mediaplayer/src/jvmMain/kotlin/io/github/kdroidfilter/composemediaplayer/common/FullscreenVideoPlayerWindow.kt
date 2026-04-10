@@ -31,7 +31,7 @@ import io.github.kdroidfilter.composemediaplayer.util.VideoPlayerStateRegistry
 @Composable
 fun openFullscreenWindow(
     playerState: VideoPlayerState,
-    renderSurface: @Composable (VideoPlayerState, Modifier, Boolean) -> Unit
+    renderSurface: @Composable (VideoPlayerState, Modifier, Boolean) -> Unit,
 ) {
     // Register the player state to be accessible from the fullscreen window
     VideoPlayerStateRegistry.registerState(playerState)
@@ -44,13 +44,12 @@ fun openFullscreenWindow(
  * @param renderSurface A composable function that renders the video player surface
  */
 @Composable
-private fun FullscreenVideoPlayerWindow(
-    renderSurface: @Composable (VideoPlayerState, Modifier, Boolean) -> Unit
-) {
+private fun FullscreenVideoPlayerWindow(renderSurface: @Composable (VideoPlayerState, Modifier, Boolean) -> Unit) {
     // Get the player state from the registry
-    val playerState = remember {
-        VideoPlayerStateRegistry.getRegisteredState()
-    }
+    val playerState =
+        remember {
+            VideoPlayerStateRegistry.getRegisteredState()
+        }
 
     // Create a window state for fullscreen
     val windowState = rememberWindowState(placement = WindowPlacement.Maximized)
@@ -83,7 +82,8 @@ private fun FullscreenVideoPlayerWindow(
             } else {
                 false
             }
-        }) {
+        },
+    ) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             playerState?.let { state ->
                 renderSurface(state, Modifier.fillMaxSize(), true)

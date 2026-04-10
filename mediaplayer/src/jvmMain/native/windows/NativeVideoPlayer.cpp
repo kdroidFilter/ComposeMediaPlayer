@@ -1264,16 +1264,6 @@ NATIVEVIDEOPLAYER_API HRESULT GetAudioVolume(const VideoPlayerInstance* pInstanc
     return GetVolume(pInstance, volume);
 }
 
-NATIVEVIDEOPLAYER_API HRESULT GetAudioLevels(const VideoPlayerInstance* pInstance, float* pLeftLevel, float* pRightLevel) {
-    // IMFMediaEngine doesn't expose per-channel audio levels
-    if (pInstance && pInstance->pHLSPlayer) {
-        if (pLeftLevel)  *pLeftLevel  = 0.0f;
-        if (pRightLevel) *pRightLevel = 0.0f;
-        return S_OK;
-    }
-    return AudioManager::GetAudioLevels(pInstance, pLeftLevel, pRightLevel);
-}
-
 NATIVEVIDEOPLAYER_API HRESULT SetPlaybackSpeed(VideoPlayerInstance* pInstance, float speed) {
     if (!pInstance)
         return OP_E_NOT_INITIALIZED;

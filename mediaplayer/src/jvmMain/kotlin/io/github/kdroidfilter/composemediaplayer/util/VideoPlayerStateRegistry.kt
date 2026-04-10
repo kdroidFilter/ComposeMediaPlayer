@@ -27,9 +27,7 @@ object VideoPlayerStateRegistry {
      *
      * @return The registered WindowsVideoPlayerState or null if none is registered
      */
-    fun getRegisteredState(): VideoPlayerState? {
-        return registeredState?.get()
-    }
+    fun getRegisteredState(): VideoPlayerState? = registeredState?.get()
 
     /**
      * Clear the registered WindowsVideoPlayerState instance.

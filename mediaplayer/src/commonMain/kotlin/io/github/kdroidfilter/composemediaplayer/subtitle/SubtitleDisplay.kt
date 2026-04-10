@@ -37,23 +37,25 @@ fun SubtitleDisplay(
     subtitles: SubtitleCueList,
     currentTimeMs: Long,
     modifier: Modifier = Modifier,
-    textStyle: TextStyle = TextStyle(
-        color = Color.White,
-        fontSize = 18.sp,
-        fontWeight = FontWeight.Normal,
-        textAlign = TextAlign.Center
-    ),
-    backgroundColor: Color = Color.Black.copy(alpha = 0.5f)
+    textStyle: TextStyle =
+        TextStyle(
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign = TextAlign.Center,
+        ),
+    backgroundColor: Color = Color.Black.copy(alpha = 0.5f),
 ) {
     // Get active cues at the current time
     val activeCues = subtitles.getActiveCues(currentTimeMs)
 
     if (activeCues.isNotEmpty()) {
         Box(
-            modifier = modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            contentAlignment = Alignment.BottomCenter
+            modifier =
+                modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            contentAlignment = Alignment.BottomCenter,
         ) {
             // Join all active cue texts with line breaks
             val subtitleText = activeCues.joinToString("\n") { it.text }
@@ -61,9 +63,10 @@ fun SubtitleDisplay(
             BasicText(
                 text = subtitleText,
                 style = textStyle,
-                modifier = Modifier
-                    .background(backgroundColor, shape = RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                modifier =
+                    Modifier
+                        .background(backgroundColor, shape = RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
     }
@@ -86,13 +89,14 @@ fun AutoUpdatingSubtitleDisplay(
     currentTimeMs: Long,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
-    textStyle: TextStyle = TextStyle(
-        color = Color.White,
-        fontSize = 18.sp,
-        fontWeight = FontWeight.Normal,
-        textAlign = TextAlign.Center
-    ),
-    backgroundColor: Color = Color.Black.copy(alpha = 0.5f)
+    textStyle: TextStyle =
+        TextStyle(
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign = TextAlign.Center,
+        ),
+    backgroundColor: Color = Color.Black.copy(alpha = 0.5f),
 ) {
     var displayTimeMs by remember { mutableStateOf(currentTimeMs) }
 
@@ -119,6 +123,6 @@ fun AutoUpdatingSubtitleDisplay(
         currentTimeMs = displayTimeMs,
         modifier = modifier,
         textStyle = textStyle,
-        backgroundColor = backgroundColor
+        backgroundColor = backgroundColor,
     )
 }

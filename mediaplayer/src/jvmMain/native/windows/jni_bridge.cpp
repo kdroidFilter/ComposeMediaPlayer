@@ -132,15 +132,6 @@ static jint JNICALL jni_GetAudioVolume(JNIEnv* env, jclass, jlong handle, jfloat
     return hr;
 }
 
-static jint JNICALL jni_GetAudioLevels(JNIEnv* env, jclass, jlong handle, jfloatArray out) {
-    if (!handle) return E_INVALIDARG;
-    float l = 0, r = 0;
-    HRESULT hr = GetAudioLevels(toInstance(handle), &l, &r);
-    jfloat vals[2] = { l, r };
-    env->SetFloatArrayRegion(out, 0, 2, vals);
-    return hr;
-}
-
 static jint JNICALL jni_SetPlaybackSpeed(JNIEnv*, jclass, jlong handle, jfloat speed) {
     return handle ? SetPlaybackSpeed(toInstance(handle), speed) : E_INVALIDARG;
 }
@@ -230,7 +221,6 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nShutdownMediaFoundation"), const_cast<char*>("()I"),                      (void*)jni_ShutdownMediaFoundation },
     { const_cast<char*>("nSetAudioVolume"),      const_cast<char*>("(JF)I"),                        (void*)jni_SetAudioVolume },
     { const_cast<char*>("nGetAudioVolume"),      const_cast<char*>("(J[F)I"),                       (void*)jni_GetAudioVolume },
-    { const_cast<char*>("nGetAudioLevels"),      const_cast<char*>("(J[F)I"),                       (void*)jni_GetAudioLevels },
     { const_cast<char*>("nSetPlaybackSpeed"),    const_cast<char*>("(JF)I"),                        (void*)jni_SetPlaybackSpeed },
     { const_cast<char*>("nGetPlaybackSpeed"),    const_cast<char*>("(J[F)I"),                       (void*)jni_GetPlaybackSpeed },
     { const_cast<char*>("nGetVideoMetadata"),    const_cast<char*>("(J[C[C[J[I[F[Z)I"),             (void*)jni_GetVideoMetadata },
@@ -243,7 +233,7 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK)
         return -1;
 
-    jclass cls = env->FindClass("io/github/kdroidfilter/composemediaplayer/windows/MediaFoundationLib");
+    jclass cls = env->FindClass("io/github/kdroidfilter/composemediaplayer/windows/WindowsNativeBridge");
     if (!cls) return -1;
 
     if (env->RegisterNatives(cls, g_methods, sizeof(g_methods) / sizeof(g_methods[0])) < 0)

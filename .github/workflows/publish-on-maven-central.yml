@@ -15,29 +15,24 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Download Windows natives
-        uses: actions/download-artifact@v4
+      - name: Download all native libraries
+        uses: actions/download-artifact@v8
         with:
-          name: windows-natives
-          path: mediaplayer/src/jvmMain/resources/
-          merge-multiple: true
-
-      - name: Download macOS natives
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-natives
-          path: mediaplayer/src/jvmMain/resources/
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/
+          pattern: native-*
           merge-multiple: true
 
       - name: Verify all natives present
         run: |
           EXPECTED=(
-            "mediaplayer/src/jvmMain/resources/win32-x86-64/NativeVideoPlayer.dll"
-            "mediaplayer/src/jvmMain/resources/win32-arm64/NativeVideoPlayer.dll"
-            "mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib"
-            "mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-aarch64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-x86-64/libNativeVideoPlayer.so"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-aarch64/libNativeVideoPlayer.so"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-x86-64/NativeVideoPlayer.dll"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-arm64/NativeVideoPlayer.dll"
           )
           MISSING=0
           for f in "${EXPECTED[@]}"; do
@@ -51,7 +46,7 @@ jobs:
           if [ "$MISSING" = "1" ]; then exit 1; fi
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'

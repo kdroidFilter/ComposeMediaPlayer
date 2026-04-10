@@ -5,7 +5,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.TextStyle
 import io.github.vinceglb.filekit.PlatformFile
 
@@ -22,7 +21,6 @@ import io.github.vinceglb.filekit.PlatformFile
  */
 @Stable
 interface VideoPlayerState {
-
     // Properties related to media state
     val hasMedia: Boolean
 
@@ -59,16 +57,6 @@ interface VideoPlayerState {
     }
 
     /**
-     * Provides the audio level for the left channel as a percentage.
-     */
-    val leftLevel: Float
-
-    /**
-     * Provides the audio level for the right channel as a percentage.
-     */
-    val rightLevel: Float
-
-    /**
      * Returns the current playback position as a formatted string.
      */
     val positionText: String
@@ -82,6 +70,7 @@ interface VideoPlayerState {
     val aspectRatio: Float
 
     // Functions to control playback
+
     /**
      * Starts or resumes video playback.
      */
@@ -101,17 +90,27 @@ interface VideoPlayerState {
      * Seeks to a specific playback position based on the provided normalized value.
      */
     fun seekTo(value: Float)
+
     fun toggleFullscreen()
 
     // Functions to manage media sources
+
     /**
      * Opens a video file or URL for playback.
      */
-    fun openUri(uri: String, initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY)
-    fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY)
+    fun openUri(
+        uri: String,
+        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+    )
+
+    fun openFile(
+        file: PlatformFile,
+        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+    )
 
     // Error handling
     val error: VideoPlayerError?
+
     fun clearError()
 
     // Metadata
@@ -123,10 +122,13 @@ interface VideoPlayerState {
     val availableSubtitleTracks: MutableList<SubtitleTrack>
     var subtitleTextStyle: TextStyle
     var subtitleBackgroundColor: Color
+
     fun selectSubtitleTrack(track: SubtitleTrack?)
+
     fun disableSubtitles()
 
     // Cleanup
+
     /**
      * Releases resources used by the video player and disposes of the state.
      */
@@ -170,8 +172,6 @@ data class PreviewableVideoPlayerState(
     override var userDragging: Boolean = false,
     override var loop: Boolean = true,
     override var playbackSpeed: Float = 1f,
-    override val leftLevel: Float = 1f,
-    override val rightLevel: Float = 1f,
     override val positionText: String = "00:05",
     override val durationText: String = "00:10",
     override val currentTime: Double = 5000.0,
@@ -186,20 +186,30 @@ data class PreviewableVideoPlayerState(
     override var subtitleBackgroundColor: Color = Color.Transparent,
 ) : VideoPlayerState {
     override fun play() {}
+
     override fun pause() {}
+
     override fun stop() {}
+
     override fun seekTo(value: Float) {}
+
     override fun toggleFullscreen() {}
+
     override fun openUri(
         uri: String,
-        initializeplayerState: InitialPlayerState
+        initializeplayerState: InitialPlayerState,
     ) {}
+
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState
+        initializeplayerState: InitialPlayerState,
     ) {}
+
     override fun clearError() {}
+
     override fun selectSubtitleTrack(track: SubtitleTrack?) {}
+
     override fun disableSubtitles() {}
+
     override fun dispose() {}
 }

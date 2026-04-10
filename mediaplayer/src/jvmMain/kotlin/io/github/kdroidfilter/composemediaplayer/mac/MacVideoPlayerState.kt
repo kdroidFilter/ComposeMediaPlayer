@@ -8,47 +8,39 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Logger.Companion.setMinSeverity
-import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
-import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
-import io.github.vinceglb.filekit.utils.toFile
-import io.github.vinceglb.filekit.utils.toPath
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
-import kotlin.math.log10
 
-// Initialize logger using Kermit
-internal val macLogger = Logger.withTag("MacVideoPlayerState")
-    .apply { setMinSeverity(Severity.Warn) }
+internal val macLogger = TaggedLogger("MacVideoPlayerState")
 
 /**
  * MacVideoPlayerState handles the native Mac video player state.
  *
- * This implementation uses a native video player via SharedVideoPlayer.
- * All debug logs are handled with Kermit.
+ * This implementation uses a native video player via MacNativeBridge.
  */
 class MacVideoPlayerState : VideoPlayerState {
-
     // Main state variables
     // AtomicLong allows lock-free reads of the native pointer from the frame hot path
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
+
     // Serial dispatcher for frame processing — ensures only one frame is processed at a time
     private val frameDispatcher = Dispatchers.Default.limitedParallelism(1)
     private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
@@ -58,12 +50,6 @@ class MacVideoPlayerState : VideoPlayerState {
     private var skiaBitmapA: Bitmap? = null
     private var skiaBitmapB: Bitmap? = null
     private var nextSkiaBitmapA: Boolean = true
-
-    // Audio level state variables (added for left and right levels)
-    private val _leftLevel = mutableStateOf(0.0f)
-    private val _rightLevel = mutableStateOf(0.0f)
-    override val leftLevel: Float get() = _leftLevel.value
-    override val rightLevel: Float get() = _rightLevel.value
 
     // Surface display size (pixels) — used to scale native output resolution
     private var surfaceWidth = 0
@@ -102,8 +88,8 @@ class MacVideoPlayerState : VideoPlayerState {
             color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Normal,
-            textAlign = TextAlign.Center
-        )
+            textAlign = TextAlign.Center,
+        ),
     )
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
     override val metadata: VideoMetadata = VideoMetadata()
@@ -116,11 +102,12 @@ class MacVideoPlayerState : VideoPlayerState {
 
     private val _durationText = mutableStateOf("00:00")
     override val durationText: String get() = _durationText.value
-    
+
     override val currentTime: Double
-        get() = runBlocking {
-            if (hasMedia) getPositionSafely() else 0.0
-        }
+        get() =
+            runBlocking {
+                if (hasMedia) getPositionSafely() else 0.0
+            }
 
     // Non-blocking aspect ratio property
     private val _aspectRatio = mutableStateOf(16f / 9f)
@@ -158,11 +145,12 @@ class MacVideoPlayerState : VideoPlayerState {
         }
 
     private val updateInterval: Long
-        get() = if (captureFrameRate > 0) {
-            (1000.0f / captureFrameRate).toLong()
-        } else {
-            33L  // Default value (in ms) if no valid capture rate is provided
-        }
+        get() =
+            if (captureFrameRate > 0) {
+                (1000.0f / captureFrameRate).toLong()
+            } else {
+                33L // Default value (in ms) if no valid capture rate is provided
+            }
 
     // Buffering detection constants
     private val bufferingCheckInterval = 200L // Increased from 100ms to reduce CPU usage
@@ -183,41 +171,43 @@ class MacVideoPlayerState : VideoPlayerState {
     @OptIn(FlowPreview::class)
     private fun startUIUpdateJob() {
         uiUpdateJob?.cancel()
-        uiUpdateJob = ioScope.launch {
-            _currentFrameState.debounce(1).collect { newFrame ->
-                ensureActive() // Checks that the coroutine is still active
-                withContext(Dispatchers.Main) {
-                    (currentFrameState as MutableState).value = newFrame
+        uiUpdateJob =
+            ioScope.launch {
+                _currentFrameState.debounce(1).collect { newFrame ->
+                    ensureActive() // Checks that the coroutine is still active
+                    withContext(Dispatchers.Main) {
+                        (currentFrameState as MutableState).value = newFrame
+                    }
                 }
             }
-        }
     }
 
-
     /** Initializes the native video player on the IO thread. */
-    private suspend fun initPlayer() = ioScope.launch {
-        macLogger.d { "initPlayer() - Creating native player" }
-        try {
-            val ptr = SharedVideoPlayer.nCreatePlayer()
-            if (ptr != 0L) {
-                playerPtrAtomic.set(ptr)
-                macLogger.d { "Native player created successfully" }
-                applyVolume()
-                applyPlaybackSpeed()
-            } else {
-                macLogger.e { "Error: Failed to create native player" }
-                withContext(Dispatchers.Main) {
-                    error = VideoPlayerError.UnknownError("Failed to create native player")
+    private suspend fun initPlayer() =
+        ioScope
+            .launch {
+                macLogger.d { "initPlayer() - Creating native player" }
+                try {
+                    val ptr = MacNativeBridge.nCreatePlayer()
+                    if (ptr != 0L) {
+                        playerPtrAtomic.set(ptr)
+                        macLogger.d { "Native player created successfully" }
+                        applyVolume()
+                        applyPlaybackSpeed()
+                    } else {
+                        macLogger.e { "Error: Failed to create native player" }
+                        withContext(Dispatchers.Main) {
+                            error = VideoPlayerError.UnknownError("Failed to create native player")
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    macLogger.e { "Exception in initPlayer: ${e.message}" }
+                    withContext(Dispatchers.Main) {
+                        error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
+                    }
                 }
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            macLogger.e { "Exception in initPlayer: ${e.message}" }
-            withContext(Dispatchers.Main) {
-                error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
-            }
-        }
-    }.join()
+            }.join()
 
     /** Updates the frame rate information from the native player. */
     private suspend fun updateFrameRateInfo() {
@@ -226,10 +216,12 @@ class MacVideoPlayerState : VideoPlayerState {
         if (ptr == 0L) return
 
         try {
-            videoFrameRate = SharedVideoPlayer.nGetVideoFrameRate(ptr)
-            screenRefreshRate = SharedVideoPlayer.nGetScreenRefreshRate(ptr)
-            captureFrameRate = SharedVideoPlayer.nGetCaptureFrameRate(ptr)
-            macLogger.d { "Frame Rates - Video: $videoFrameRate, Screen: $screenRefreshRate, Capture: $captureFrameRate" }
+            videoFrameRate = MacNativeBridge.nGetVideoFrameRate(ptr)
+            screenRefreshRate = MacNativeBridge.nGetScreenRefreshRate(ptr)
+            captureFrameRate = MacNativeBridge.nGetCaptureFrameRate(ptr)
+            macLogger.d {
+                "Frame Rates - Video: $videoFrameRate, Screen: $screenRefreshRate, Capture: $captureFrameRate"
+            }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error updating frame rate info: ${e.message}" }
@@ -251,7 +243,10 @@ class MacVideoPlayerState : VideoPlayerState {
         }
     }
 
-    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+    override fun openUri(
+        uri: String,
+        initializeplayerState: InitialPlayerState,
+    ) {
         macLogger.d { "openUri() - Opening URI: $uri, initializeplayerState: $initializeplayerState" }
 
         lastUri = uri
@@ -267,7 +262,7 @@ class MacVideoPlayerState : VideoPlayerState {
         ioScope.launch {
             withContext(Dispatchers.Main) {
                 isLoading = true
-                error = null  // Clear any previous errors only if we got this far
+                error = null // Clear any previous errors only if we got this far
                 playbackSpeed = 1.0f
             }
 
@@ -335,7 +330,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
     override fun openFile(
         file: PlatformFile,
-        initializeplayerState: InitialPlayerState
+        initializeplayerState: InitialPlayerState,
     ) {
         openUri(file.file.path, initializeplayerState)
     }
@@ -347,14 +342,15 @@ class MacVideoPlayerState : VideoPlayerState {
         stopFrameUpdates()
         stopBufferingCheck()
 
-        val ptrToDispose = withContext(frameDispatcher) {
-            playerPtrAtomic.getAndSet(0L)
-        }
+        val ptrToDispose =
+            withContext(frameDispatcher) {
+                playerPtrAtomic.getAndSet(0L)
+            }
 
         // Release resources outside of the mutex lock
         if (ptrToDispose != 0L) {
             try {
-                SharedVideoPlayer.nDisposePlayer(ptrToDispose)
+                MacNativeBridge.nDisposePlayer(ptrToDispose)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 macLogger.e { "Error disposing player: ${e.message}" }
@@ -370,11 +366,11 @@ class MacVideoPlayerState : VideoPlayerState {
         }
 
         if (playerPtr == 0L) {
-            val ptr = SharedVideoPlayer.nCreatePlayer()
+            val ptr = MacNativeBridge.nCreatePlayer()
             if (ptr != 0L) {
                 if (!playerPtrAtomic.compareAndSet(0L, ptr)) {
                     // Another coroutine already initialized the player; discard ours
-                    SharedVideoPlayer.nDisposePlayer(ptr)
+                    MacNativeBridge.nDisposePlayer(ptr)
                 } else {
                     applyVolume()
                     applyPlaybackSpeed()
@@ -402,7 +398,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
         return try {
             // Open video asynchronously
-            SharedVideoPlayer.nOpenUri(ptr, uri)
+            MacNativeBridge.nOpenUri(ptr, uri)
 
             // Instead of directly calling `updateMetadata()`,
             // we poll until valid dimensions are available
@@ -425,10 +421,13 @@ class MacVideoPlayerState : VideoPlayerState {
      * are no longer zero. If dimensions are still zero after
      * a specified number of attempts, stop waiting.
      */
-    private suspend fun pollDimensionsUntilReady(ptr: Long, maxAttempts: Int = 20) {
+    private suspend fun pollDimensionsUntilReady(
+        ptr: Long,
+        maxAttempts: Int = 20,
+    ) {
         for (attempt in 1..maxAttempts) {
-            val width = SharedVideoPlayer.nGetFrameWidth(ptr)
-            val height = SharedVideoPlayer.nGetFrameHeight(ptr)
+            val width = MacNativeBridge.nGetFrameWidth(ptr)
+            val height = MacNativeBridge.nGetFrameHeight(ptr)
 
             if (width > 0 && height > 0) {
                 macLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
@@ -447,26 +446,27 @@ class MacVideoPlayerState : VideoPlayerState {
         if (ptr == 0L) return
 
         try {
-            val width = SharedVideoPlayer.nGetFrameWidth(ptr)
-            val height = SharedVideoPlayer.nGetFrameHeight(ptr)
-            val duration = SharedVideoPlayer.nGetVideoDuration(ptr).toLong()
-            val frameRate = SharedVideoPlayer.nGetVideoFrameRate(ptr)
+            val width = MacNativeBridge.nGetFrameWidth(ptr)
+            val height = MacNativeBridge.nGetFrameHeight(ptr)
+            val duration = MacNativeBridge.nGetVideoDuration(ptr).toLong()
+            val frameRate = MacNativeBridge.nGetVideoFrameRate(ptr)
 
             // Calculate aspect ratio
-            val newAspectRatio = if (width > 0 && height > 0) {
-                width.toFloat() / height.toFloat()
-            } else {
-                // Au lieu de forcer 16f/9f, ne changez pas l’aspect si la vidéo n’est pas encore prête.
-                // Par exemple, on peut conserver l’ancien aspect ratio :
-                _aspectRatio.value
-            }
+            val newAspectRatio =
+                if (width > 0 && height > 0) {
+                    width.toFloat() / height.toFloat()
+                } else {
+                    // Au lieu de forcer 16f/9f, ne changez pas l’aspect si la vidéo n’est pas encore prête.
+                    // Par exemple, on peut conserver l’ancien aspect ratio :
+                    _aspectRatio.value
+                }
 
             // Get additional metadata
-            val title = SharedVideoPlayer.nGetVideoTitle(ptr)
-            val bitrate = SharedVideoPlayer.nGetVideoBitrate(ptr)
-            val mimeType = SharedVideoPlayer.nGetVideoMimeType(ptr)
-            val audioChannels = SharedVideoPlayer.nGetAudioChannels(ptr)
-            val audioSampleRate = SharedVideoPlayer.nGetAudioSampleRate(ptr)
+            val title = MacNativeBridge.nGetVideoTitle(ptr)
+            val bitrate = MacNativeBridge.nGetVideoBitrate(ptr)
+            val mimeType = MacNativeBridge.nGetVideoMimeType(ptr)
+            val audioChannels = MacNativeBridge.nGetAudioChannels(ptr)
+            val audioSampleRate = MacNativeBridge.nGetAudioSampleRate(ptr)
 
             withContext(Dispatchers.Main) {
                 // Update metadata
@@ -495,18 +495,17 @@ class MacVideoPlayerState : VideoPlayerState {
     private fun startFrameUpdates() {
         macLogger.d { "startFrameUpdates() - Starting frame updates" }
         stopFrameUpdates()
-        frameUpdateJob = ioScope.launch {
-            while (isActive) {
-                ensureActive() // Check if coroutine is still active
-                updateFrameAsync()
-                if (!userDragging) {
-                    updatePositionAsync()
-                    // Call the audio level update separately
-                    updateAudioLevelsAsync()
+        frameUpdateJob =
+            ioScope.launch {
+                while (isActive) {
+                    ensureActive() // Check if coroutine is still active
+                    updateFrameAsync()
+                    if (!userDragging) {
+                        updatePositionAsync()
+                    }
+                    delay(updateInterval)
                 }
-                delay(updateInterval)
             }
-        }
     }
 
     /** Stops periodic frame updates. */
@@ -520,13 +519,14 @@ class MacVideoPlayerState : VideoPlayerState {
     private fun startBufferingCheck() {
         macLogger.d { "startBufferingCheck() - Starting buffering detection" }
         stopBufferingCheck()
-        bufferingCheckJob = ioScope.launch {
-            while (isActive) {
-                ensureActive() // Check if coroutine is still active
-                checkBufferingState()
-                delay(bufferingCheckInterval)
+        bufferingCheckJob =
+            ioScope.launch {
+                while (isActive) {
+                    ensureActive() // Check if coroutine is still active
+                    checkBufferingState()
+                    delay(bufferingCheckInterval)
+                }
             }
-        }
     }
 
     /** Checks if the media is currently buffering. */
@@ -561,7 +561,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 // Lock the CVPixelBuffer directly — eliminates the Swift-side memcpy.
                 // outInfo = [width, height, bytesPerRow]
                 val outInfo = IntArray(3)
-                val frameAddress = SharedVideoPlayer.nLockFrame(ptr, outInfo)
+                val frameAddress = MacNativeBridge.nLockFrame(ptr, outInfo)
                 if (frameAddress == 0L) return@withContext
 
                 val width = outInfo[0]
@@ -569,7 +569,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 val srcBytesPerRow = outInfo[2]
 
                 if (width <= 0 || height <= 0) {
-                    SharedVideoPlayer.nUnlockFrame(ptr)
+                    MacNativeBridge.nUnlockFrame(ptr)
                     return@withContext
                 }
 
@@ -578,8 +578,9 @@ class MacVideoPlayerState : VideoPlayerState {
 
                 try {
                     withContext(Dispatchers.Default) {
-                        val srcBuf = SharedVideoPlayer.nWrapPointer(frameAddress, frameSizeBytes)
-                            ?: return@withContext
+                        val srcBuf =
+                            MacNativeBridge.nWrapPointer(frameAddress, frameSizeBytes)
+                                ?: return@withContext
 
                         // Allocate/reuse two bitmaps (double-buffering) to avoid writing while the UI draws.
                         if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
@@ -605,15 +606,16 @@ class MacVideoPlayerState : VideoPlayerState {
                         srcBuf.rewind()
                         val dstRowBytes = pixmap.rowBytes.toInt()
                         val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
-                        val destBuf = SharedVideoPlayer.nWrapPointer(pixelsAddr, dstSizeBytes)
-                            ?: return@withContext
+                        val destBuf =
+                            MacNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
+                                ?: return@withContext
                         copyBgraFrame(srcBuf, destBuf, width, height, srcBytesPerRow, dstRowBytes)
 
                         _currentFrameState.value = targetBitmap.asComposeImageBitmap()
                         framePublished = true
                     }
                 } finally {
-                    SharedVideoPlayer.nUnlockFrame(ptr)
+                    MacNativeBridge.nUnlockFrame(ptr)
                 }
 
                 if (framePublished) {
@@ -630,37 +632,6 @@ class MacVideoPlayerState : VideoPlayerState {
                 if (e is CancellationException) throw e
                 macLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
             }
-        }
-    }
-
-    private suspend fun updateAudioLevelsAsync() {
-        if (!hasMedia) return
-
-        try {
-            val ptr = playerPtr
-            if (ptr != 0L) {
-                val newLeft = SharedVideoPlayer.nGetLeftAudioLevel(ptr)
-                val newRight = SharedVideoPlayer.nGetRightAudioLevel(ptr)
-//                macLogger.d { "Audio levels fetched: L=$newLeft, R=$newRight" }
-
-                // Converts the linear level to a percentage on a logarithmic scale.
-                fun convertToPercentage(level: Float): Float {
-                    if (level <= 0f) return 0f
-                    // Conversion to decibels: 20 * log10(level)
-                    val db = 20 * log10(level)
-                    // Assume that -60 dB corresponds to silence and 0 dB to maximum level.
-                    val normalized = ((db + 60) / 60).coerceIn(0f, 1f)
-                    return normalized * 100f
-                }
-
-                withContext(Dispatchers.Main) {
-                    _leftLevel.value = convertToPercentage(newLeft)
-                    _rightLevel.value = convertToPercentage(newRight)
-                }
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            macLogger.e { "Error updating audio levels: ${e.message}" }
         }
     }
 
@@ -710,9 +681,12 @@ class MacVideoPlayerState : VideoPlayerState {
     }
 
     /** Checks if looping is enabled and restarts the video if needed. */
-    private suspend fun checkLoopingAsync(current: Double, duration: Double) {
+    private suspend fun checkLoopingAsync(
+        current: Double,
+        duration: Double,
+    ) {
         val ptr = playerPtr
-        val ended = ptr != 0L && SharedVideoPlayer.nConsumeDidPlayToEnd(ptr)
+        val ended = ptr != 0L && MacNativeBridge.nConsumeDidPlayToEnd(ptr)
         // Also check position as fallback for content where the notification may not fire
         if (!ended && (duration <= 0 || current < duration - 0.5)) return
 
@@ -753,7 +727,7 @@ class MacVideoPlayerState : VideoPlayerState {
         if (ptr == 0L) return
 
         try {
-            SharedVideoPlayer.nPlay(ptr)
+            MacNativeBridge.nPlay(ptr)
 
             withContext(Dispatchers.Main) {
                 isPlaying = true
@@ -781,7 +755,7 @@ class MacVideoPlayerState : VideoPlayerState {
         if (ptr == 0L) return
 
         try {
-            SharedVideoPlayer.nPause(ptr)
+            MacNativeBridge.nPause(ptr)
 
             withContext(Dispatchers.Main) {
                 isPlaying = false
@@ -848,10 +822,10 @@ class MacVideoPlayerState : VideoPlayerState {
 
             val ptr = playerPtr
             if (ptr == 0L) return
-            SharedVideoPlayer.nSeekTo(ptr, seekTime.toDouble())
+            MacNativeBridge.nSeekTo(ptr, seekTime.toDouble())
 
             if (isPlaying) {
-                SharedVideoPlayer.nPlay(ptr)
+                MacNativeBridge.nPlay(ptr)
                 // Reduce delay to update frame faster for local videos
                 delay(10)
                 updateFrameAsync()
@@ -889,25 +863,26 @@ class MacVideoPlayerState : VideoPlayerState {
 
         ioScope.launch {
             // Get player pointer and clear cached bitmaps while frame updates are paused.
-            val ptrToDispose = withContext(frameDispatcher) {
-                val ptrToDispose = playerPtrAtomic.getAndSet(0L)
+            val ptrToDispose =
+                withContext(frameDispatcher) {
+                    val ptrToDispose = playerPtrAtomic.getAndSet(0L)
 
-                skiaBitmapA?.close()
-                skiaBitmapB?.close()
-                skiaBitmapA = null
-                skiaBitmapB = null
-                skiaBitmapWidth = 0
-                skiaBitmapHeight = 0
-                nextSkiaBitmapA = true
+                    skiaBitmapA?.close()
+                    skiaBitmapB?.close()
+                    skiaBitmapA = null
+                    skiaBitmapB = null
+                    skiaBitmapWidth = 0
+                    skiaBitmapHeight = 0
+                    nextSkiaBitmapA = true
 
-                ptrToDispose
-            }
+                    ptrToDispose
+                }
 
             // Dispose native resources outside the mutex lock
             if (ptrToDispose != 0L) {
                 macLogger.d { "dispose() - Disposing native player" }
                 try {
-                    SharedVideoPlayer.nDisposePlayer(ptrToDispose)
+                    MacNativeBridge.nDisposePlayer(ptrToDispose)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     macLogger.e { "Error disposing player: ${e.message}" }
@@ -915,7 +890,6 @@ class MacVideoPlayerState : VideoPlayerState {
             }
 
             resetState()
-
         }
 
         // Cancel ioScope last to ensure cleanup completes
@@ -936,7 +910,7 @@ class MacVideoPlayerState : VideoPlayerState {
         _currentFrameState.value = null
     }
 
-    /** 
+    /**
      * Sets an error in a consistent way, ensuring it's always set on the main thread.
      * For synchronous calls, this will block until the error is set.
      */
@@ -969,7 +943,7 @@ class MacVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return 0.0
         return try {
-            SharedVideoPlayer.nGetCurrentTime(ptr)
+            MacNativeBridge.nGetCurrentTime(ptr)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error getting position: ${e.message}" }
@@ -982,7 +956,7 @@ class MacVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return 0.0
         return try {
-            SharedVideoPlayer.nGetVideoDuration(ptr)
+            MacNativeBridge.nGetVideoDuration(ptr)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error getting duration: ${e.message}" }
@@ -997,11 +971,13 @@ class MacVideoPlayerState : VideoPlayerState {
      */
     private suspend fun applyVolume() {
         val ptr = playerPtr
-        if (ptr != 0L) try {
-            SharedVideoPlayer.nSetVolume(ptr, _volumeState.value)
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            macLogger.e { "Error applying volume: ${e.message}" }
+        if (ptr != 0L) {
+            try {
+                MacNativeBridge.nSetVolume(ptr, _volumeState.value)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                macLogger.e { "Error applying volume: ${e.message}" }
+            }
         }
     }
 
@@ -1012,11 +988,13 @@ class MacVideoPlayerState : VideoPlayerState {
      */
     private suspend fun applyPlaybackSpeed() {
         val ptr = playerPtr
-        if (ptr != 0L) try {
-            SharedVideoPlayer.nSetPlaybackSpeed(ptr, _playbackSpeedState.value)
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            macLogger.e { "Error applying playback speed: ${e.message}" }
+        if (ptr != 0L) {
+            try {
+                MacNativeBridge.nSetPlaybackSpeed(ptr, _playbackSpeedState.value)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                macLogger.e { "Error applying playback speed: ${e.message}" }
+            }
         }
     }
 
@@ -1069,7 +1047,10 @@ class MacVideoPlayerState : VideoPlayerState {
      * asks the native layer to decode at the surface size instead of native
      * resolution, saving significant memory for high-resolution video.
      */
-    fun onResized(width: Int, height: Int) {
+    fun onResized(
+        width: Int,
+        height: Int,
+    ) {
         if (width <= 0 || height <= 0) return
         if (width == surfaceWidth && height == surfaceHeight) return
 
@@ -1078,14 +1059,15 @@ class MacVideoPlayerState : VideoPlayerState {
 
         isResizing.set(true)
         resizeJob?.cancel()
-        resizeJob = ioScope.launch {
-            delay(120)
-            try {
-                applyOutputScaling()
-            } finally {
-                isResizing.set(false)
+        resizeJob =
+            ioScope.launch {
+                delay(120)
+                try {
+                    applyOutputScaling()
+                } finally {
+                    isResizing.set(false)
+                }
             }
-        }
     }
 
     /**
@@ -1099,6 +1081,6 @@ class MacVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return
 
-        SharedVideoPlayer.nSetOutputSize(ptr, sw, sh)
+        MacNativeBridge.nSetOutputSize(ptr, sw, sh)
     }
 }

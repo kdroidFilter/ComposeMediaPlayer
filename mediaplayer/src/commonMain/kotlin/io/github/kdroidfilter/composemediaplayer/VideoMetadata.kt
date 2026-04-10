@@ -2,7 +2,6 @@ package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Stable
 
-
 /**
  * Represents metadata information of a video file.
  *
@@ -38,15 +37,14 @@ data class VideoMetadata(
      *
      * @return true if all properties are null, false otherwise.
      */
-    fun isAllNull(): Boolean {
-        return title == null &&
-               duration == null &&
-               width == null &&
-               height == null &&
-               bitrate == null &&
-               frameRate == null &&
-               mimeType == null &&
-               audioChannels == null &&
-               audioSampleRate == null
-    }
+    fun isAllNull(): Boolean =
+        title == null &&
+            duration == null &&
+            width == null &&
+            height == null &&
+            bitrate == null &&
+            frameRate == null &&
+            mimeType == null &&
+            audioChannels == null &&
+            audioSampleRate == null
 }

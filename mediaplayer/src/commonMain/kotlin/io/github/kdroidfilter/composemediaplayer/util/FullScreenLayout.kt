@@ -13,15 +13,16 @@ import androidx.compose.ui.window.DialogProperties
 internal fun FullScreenLayout(
     modifier: Modifier = Modifier,
     onDismissRequest: () -> Unit = {},
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
     Dialog(
         onDismissRequest = onDismissRequest,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false
-        )
+        properties =
+            DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false,
+            ),
     ) {
         Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
             content()

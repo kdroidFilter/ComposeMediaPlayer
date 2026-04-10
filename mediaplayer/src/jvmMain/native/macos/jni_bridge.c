@@ -27,8 +27,6 @@ extern double getVideoDuration(void* ctx);
 extern double getCurrentTime(void* ctx);
 extern void   seekTo(void* ctx, double time);
 extern void   disposeVideoPlayer(void* ctx);
-extern float  getLeftAudioLevel(void* ctx);
-extern float  getRightAudioLevel(void* ctx);
 extern void   setPlaybackSpeed(void* ctx, float speed);
 extern float  getPlaybackSpeed(void* ctx);
 extern const char* getVideoTitle(void* ctx);
@@ -140,14 +138,6 @@ static void JNICALL jni_DisposePlayer(JNIEnv* env, jclass cls, jlong handle) {
     if (handle) disposeVideoPlayer(toCtx(handle));
 }
 
-static jfloat JNICALL jni_GetLeftAudioLevel(JNIEnv* env, jclass cls, jlong handle) {
-    return handle ? getLeftAudioLevel(toCtx(handle)) : 0.0f;
-}
-
-static jfloat JNICALL jni_GetRightAudioLevel(JNIEnv* env, jclass cls, jlong handle) {
-    return handle ? getRightAudioLevel(toCtx(handle)) : 0.0f;
-}
-
 static void JNICALL jni_SetPlaybackSpeed(JNIEnv* env, jclass cls, jlong handle, jfloat speed) {
     if (handle) setPlaybackSpeed(toCtx(handle), (float)speed);
 }
@@ -214,8 +204,6 @@ static const JNINativeMethod g_methods[] = {
     { "nGetCurrentTime",         "(J)D",                        (void*)jni_GetCurrentTime },
     { "nSeekTo",                 "(JD)V",                       (void*)jni_SeekTo },
     { "nDisposePlayer",          "(J)V",                        (void*)jni_DisposePlayer },
-    { "nGetLeftAudioLevel",      "(J)F",                        (void*)jni_GetLeftAudioLevel },
-    { "nGetRightAudioLevel",     "(J)F",                        (void*)jni_GetRightAudioLevel },
     { "nSetPlaybackSpeed",       "(JF)V",                       (void*)jni_SetPlaybackSpeed },
     { "nGetPlaybackSpeed",       "(J)F",                        (void*)jni_GetPlaybackSpeed },
     { "nGetVideoTitle",          "(J)Ljava/lang/String;",       (void*)jni_GetVideoTitle },
@@ -232,7 +220,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         return -1;
 
     jclass cls = (*env)->FindClass(
-        env, "io/github/kdroidfilter/composemediaplayer/mac/SharedVideoPlayer");
+        env, "io/github/kdroidfilter/composemediaplayer/mac/MacNativeBridge");
     if (!cls) return -1;
 
     int count = (int)(sizeof(g_methods) / sizeof(g_methods[0]));

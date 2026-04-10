@@ -43,7 +43,7 @@ class MacFrameUtilsTest {
         }
         val dst = ByteBuffer.allocate(size)
 
-        copyBgraFrame(src, dst, width, height, rowBytes)
+        copyBgraFrame(src, dst, width, height, rowBytes, rowBytes)
 
         for (i in 0 until size) {
             assertEquals(src.get(i), dst.get(i), "Mismatch at byte index $i")
@@ -71,7 +71,7 @@ class MacFrameUtilsTest {
             dst.put(i, paddingSentinel)
         }
 
-        copyBgraFrame(src, dst, width, height, dstRowBytes)
+        copyBgraFrame(src, dst, width, height, srcRowBytes, dstRowBytes)
 
         for (row in 0 until height) {
             val srcBase = row * srcRowBytes
@@ -106,8 +106,7 @@ class MacFrameUtilsTest {
         val dst = ByteBuffer.allocate(dstRowBytes * height)
 
         assertFailsWith<IllegalArgumentException> {
-            copyBgraFrame(src, dst, width, height, dstRowBytes)
+            copyBgraFrame(src, dst, width, height, srcRowBytes, dstRowBytes)
         }
     }
 }
-

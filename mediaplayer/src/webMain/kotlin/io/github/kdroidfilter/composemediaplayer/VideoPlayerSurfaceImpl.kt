@@ -13,33 +13,31 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaError
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 import kotlinx.browser.document
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLVideoElement
 import org.w3c.dom.events.Event
 import kotlin.math.abs
 
-internal val webVideoLogger = Logger.withTag("WebVideoPlayerSurface").apply { Logger.setMinSeverity(Severity.Warn) }
+internal val webVideoLogger = TaggedLogger("WebVideoPlayerSurface")
 
 // Cache mime type mappings for better performance
-internal val EXTENSION_TO_MIME_TYPE = mapOf(
-    "mp4" to "video/mp4",
-    "webm" to "video/webm",
-    "ogg" to "video/ogg",
-    "mov" to "video/quicktime",
-    "avi" to "video/x-msvideo",
-    "mkv" to "video/x-matroska"
-)
+internal val EXTENSION_TO_MIME_TYPE =
+    mapOf(
+        "mp4" to "video/mp4",
+        "webm" to "video/webm",
+        "ogg" to "video/ogg",
+        "mov" to "video/quicktime",
+        "avi" to "video/x-msvideo",
+        "mkv" to "video/x-matroska",
+    )
 
 // Helper functions for common operations
 internal fun HTMLVideoElement.safePlay() {
@@ -78,7 +76,7 @@ internal fun HTMLVideoElement.addEventListeners(
     scope: CoroutineScope,
     playerState: VideoPlayerState,
     events: Map<String, (Event) -> Unit>,
-    loadingEvents: Map<String, Boolean> = emptyMap()
+    loadingEvents: Map<String, Boolean> = emptyMap(),
 ) {
     events.forEach { (event, handler) ->
         addEventListener(event, handler)
@@ -93,52 +91,59 @@ internal fun HTMLVideoElement.addEventListeners(
     }
 }
 
-fun Modifier.videoRatioClip(videoRatio: Float?, contentScale: ContentScale = ContentScale.Fit): Modifier =
-    drawBehind { videoRatio?.let { drawVideoRatioRect(it, contentScale) } }
+fun Modifier.videoRatioClip(
+    videoRatio: Float?,
+    contentScale: ContentScale = ContentScale.Fit,
+): Modifier = drawBehind { videoRatio?.let { drawVideoRatioRect(it, contentScale) } }
 
 // Optimized drawing function to reduce calculations during rendering
-private fun DrawScope.drawVideoRatioRect(ratio: Float, contentScale: ContentScale) {
+private fun DrawScope.drawVideoRatioRect(
+    ratio: Float,
+    contentScale: ContentScale,
+) {
     val containerWidth = size.width
     val containerHeight = size.height
     val containerRatio = containerWidth / containerHeight
 
     when (contentScale) {
         ContentScale.Fit, ContentScale.Inside -> {
-            val (rectWidth, rectHeight) = if (containerRatio > ratio) {
-                val height = containerHeight
-                val width = height * ratio
-                width to height
-            } else {
-                val width = containerWidth
-                val height = width / ratio
-                width to height
-            }
+            val (rectWidth, rectHeight) =
+                if (containerRatio > ratio) {
+                    val height = containerHeight
+                    val width = height * ratio
+                    width to height
+                } else {
+                    val width = containerWidth
+                    val height = width / ratio
+                    width to height
+                }
             val xOffset = (containerWidth - rectWidth) / 2f
             val yOffset = (containerHeight - rectHeight) / 2f
             drawRect(
                 color = Color.Transparent,
                 blendMode = BlendMode.Clear,
                 topLeft = Offset(xOffset, yOffset),
-                size = Size(rectWidth, rectHeight)
+                size = Size(rectWidth, rectHeight),
             )
         }
         ContentScale.Crop -> {
-            val (rectWidth, rectHeight) = if (containerRatio < ratio) {
-                val height = containerHeight
-                val width = height * ratio
-                width to height
-            } else {
-                val width = containerWidth
-                val height = width / ratio
-                width to height
-            }
+            val (rectWidth, rectHeight) =
+                if (containerRatio < ratio) {
+                    val height = containerHeight
+                    val width = height * ratio
+                    width to height
+                } else {
+                    val width = containerWidth
+                    val height = width / ratio
+                    width to height
+                }
             val xOffset = (containerWidth - rectWidth) / 2f
             val yOffset = (containerHeight - rectHeight) / 2f
             drawRect(
                 color = Color.Transparent,
                 blendMode = BlendMode.Clear,
                 topLeft = Offset(xOffset, yOffset),
-                size = Size(rectWidth, rectHeight)
+                size = Size(rectWidth, rectHeight),
             )
         }
         ContentScale.FillWidth -> {
@@ -149,7 +154,7 @@ private fun DrawScope.drawVideoRatioRect(ratio: Float, contentScale: ContentScal
                 color = Color.Transparent,
                 blendMode = BlendMode.Clear,
                 topLeft = Offset(0f, yOffset),
-                size = Size(width, height)
+                size = Size(width, height),
             )
         }
         ContentScale.FillHeight -> {
@@ -160,7 +165,7 @@ private fun DrawScope.drawVideoRatioRect(ratio: Float, contentScale: ContentScal
                 color = Color.Transparent,
                 blendMode = BlendMode.Clear,
                 topLeft = Offset(xOffset, 0f),
-                size = Size(width, height)
+                size = Size(width, height),
             )
         }
         ContentScale.FillBounds -> {
@@ -168,26 +173,27 @@ private fun DrawScope.drawVideoRatioRect(ratio: Float, contentScale: ContentScal
                 color = Color.Transparent,
                 blendMode = BlendMode.Clear,
                 topLeft = Offset(0f, 0f),
-                size = Size(containerWidth, containerHeight)
+                size = Size(containerWidth, containerHeight),
             )
         }
         else -> {
-            val (rectWidth, rectHeight) = if (containerRatio > ratio) {
-                val height = containerHeight
-                val width = height * ratio
-                width to height
-            } else {
-                val width = containerWidth
-                val height = width / ratio
-                width to height
-            }
+            val (rectWidth, rectHeight) =
+                if (containerRatio > ratio) {
+                    val height = containerHeight
+                    val width = height * ratio
+                    width to height
+                } else {
+                    val width = containerWidth
+                    val height = width / ratio
+                    width to height
+                }
             val xOffset = (containerWidth - rectWidth) / 2f
             val yOffset = (containerHeight - rectHeight) / 2f
             drawRect(
                 color = Color.Transparent,
                 blendMode = BlendMode.Clear,
                 topLeft = Offset(xOffset, yOffset),
-                size = Size(rectWidth, rectHeight)
+                size = Size(rectWidth, rectHeight),
             )
         }
     }
@@ -199,13 +205,15 @@ internal fun SubtitleOverlay(playerState: VideoPlayerState) {
         return
     }
 
-    val durationMs = remember(playerState.durationText) {
-        playerState.durationText.toTimeMs()
-    }
+    val durationMs =
+        remember(playerState.durationText) {
+            playerState.durationText.toTimeMs()
+        }
 
-    val currentTimeMs = remember(playerState.sliderPos, durationMs) {
-        ((playerState.sliderPos / 1000f) * durationMs).toLong()
-    }
+    val currentTimeMs =
+        remember(playerState.sliderPos, durationMs) {
+            ((playerState.sliderPos / 1000f) * durationMs).toLong()
+        }
 
     ComposeSubtitleLayer(
         currentTimeMs = currentTimeMs,
@@ -214,7 +222,7 @@ internal fun SubtitleOverlay(playerState: VideoPlayerState) {
         subtitleTrack = playerState.currentSubtitleTrack,
         subtitlesEnabled = true,
         textStyle = playerState.subtitleTextStyle,
-        backgroundColor = playerState.subtitleBackgroundColor
+        backgroundColor = playerState.subtitleBackgroundColor,
     )
 }
 
@@ -224,13 +232,14 @@ internal fun VideoBox(
     videoRatio: Float?,
     contentScale: ContentScale,
     isFullscreenMode: Boolean,
-    overlay: @Composable () -> Unit
+    overlay: @Composable () -> Unit,
 ) {
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(if (isFullscreenMode) Color.Black else Color.Transparent)
-            .videoRatioClip(videoRatio, contentScale)
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(if (isFullscreenMode) Color.Black else Color.Transparent)
+                .videoRatioClip(videoRatio, contentScale),
     ) {
         SubtitleOverlay(playerState)
         Box(modifier = Modifier.fillMaxSize()) {
@@ -246,14 +255,14 @@ internal fun VideoContentLayout(
     videoRatio: Float?,
     contentScale: ContentScale,
     overlay: @Composable () -> Unit,
-    videoElementContent: @Composable () -> Unit
+    videoElementContent: @Composable () -> Unit,
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (playerState.isFullscreen) {
             FullScreenLayout(onDismissRequest = { playerState.isFullscreen = false }) {
                 Box(
                     modifier = Modifier.fillMaxSize().background(Color.Black),
-                    contentAlignment = Alignment.Center
+                    contentAlignment = Alignment.Center,
                 ) {
                     VideoBox(playerState, videoRatio, contentScale, true, overlay)
                 }
@@ -279,7 +288,10 @@ internal fun HTMLVideoElement.applyInteropBehindCanvas() {
     }
 }
 
-internal fun HTMLVideoElement.applyContentScale(contentScale: ContentScale, videoRatio: Float?) {
+internal fun HTMLVideoElement.applyContentScale(
+    contentScale: ContentScale,
+    videoRatio: Float?,
+) {
     style.apply {
         backgroundColor = "black"
         setProperty("pointer-events", "none")
@@ -325,8 +337,8 @@ internal fun HTMLVideoElement.applyContentScale(contentScale: ContentScale, vide
     }
 }
 
-internal fun createVideoElement(useCors: Boolean = true): HTMLVideoElement {
-    return (document.createElement("video") as HTMLVideoElement).apply {
+internal fun createVideoElement(useCors: Boolean = true): HTMLVideoElement =
+    (document.createElement("video") as HTMLVideoElement).apply {
         controls = false
         style.width = "100%"
         style.height = "100%"
@@ -345,70 +357,49 @@ internal fun createVideoElement(useCors: Boolean = true): HTMLVideoElement {
         setAttribute("preload", "auto")
         setAttribute("x-webkit-airplay", "allow")
     }
-}
 
 internal fun setupVideoElement(
     video: HTMLVideoElement,
     playerState: VideoPlayerState,
     scope: CoroutineScope,
-    enableAudioDetection: Boolean = true,
     useCors: Boolean = true,
     onCorsError: () -> Unit = {},
 ) {
-    val audioAnalyzer = if (enableAudioDetection) AudioLevelProcessor(video) else null
-    var initializationJob: Job? = null
     var corsErrorDetected = false
 
     playerState.clearError()
     playerState.metadata.audioChannels = null
     playerState.metadata.audioSampleRate = null
 
-    fun initAudioAnalyzer() {
-        if (!enableAudioDetection || corsErrorDetected) return
-        initializationJob?.cancel()
-        initializationJob = scope.launch {
-            val success = audioAnalyzer?.initialize() ?: false
-            if (!success) {
-                corsErrorDetected = true
-            } else {
-                audioAnalyzer.let { analyzer ->
-                    playerState.metadata.audioChannels = analyzer.audioChannels
-                    playerState.metadata.audioSampleRate = analyzer.audioSampleRate
-                }
-            }
-        }
-    }
-
     if (playerState is DefaultVideoPlayerState) {
         video.addEventListeners(
             scope = scope,
             playerState = playerState,
-            events = mapOf(
-                "timeupdate" to { event -> playerState.onTimeUpdateEvent(event) },
-                "ended" to { scope.launch { playerState.pause() } }
-            ),
-            loadingEvents = mapOf(
-                "seeking" to true,
-                "waiting" to true,
-                "playing" to false,
-                "seeked" to false,
-                "canplaythrough" to false,
-                "canplay" to false
-            )
+            events =
+                mapOf(
+                    "timeupdate" to { event -> playerState.onTimeUpdateEvent(event) },
+                    "ended" to { scope.launch { playerState.pause() } },
+                ),
+            loadingEvents =
+                mapOf(
+                    "seeking" to true,
+                    "waiting" to true,
+                    "playing" to false,
+                    "seeked" to false,
+                    "canplaythrough" to false,
+                    "canplay" to false,
+                ),
         )
     }
 
-    val conditionalLoadingEvents = mapOf(
-        "suspend" to { video.readyState >= 3 },
-        "loadedmetadata" to { true }
-    )
+    val conditionalLoadingEvents =
+        mapOf(
+            "suspend" to { video.readyState >= 3 },
+            "loadedmetadata" to { true },
+        )
 
     conditionalLoadingEvents.forEach { (event, condition) ->
         video.addEventListener(event) {
-            if (event == "loadedmetadata") {
-                initAudioAnalyzer()
-            }
-
             scope.launch {
                 if (playerState is DefaultVideoPlayerState && condition()) {
                     playerState._isLoading = false
@@ -423,37 +414,11 @@ internal fun setupVideoElement(
         }
     }
 
-    var audioLevelJob: Job? = null
-
-    video.addEventListener("play") {
-        if (enableAudioDetection && !corsErrorDetected && initializationJob?.isActive != true) {
-            initAudioAnalyzer()
-        }
-
-        if (playerState is DefaultVideoPlayerState && enableAudioDetection && audioLevelJob?.isActive != true) {
-            audioLevelJob = scope.launch {
-                while (video.paused.not()) {
-                    val (left, right) = if (!corsErrorDetected) {
-                        audioAnalyzer?.getAudioLevels() ?: (0f to 0f)
-                    } else {
-                        0f to 0f
-                    }
-                    playerState.updateAudioLevels(left, right)
-                    delay(100)
-                }
-            }
-        }
-    }
-
-    video.addEventListener("pause") {
-        audioLevelJob?.cancel()
-        audioLevelJob = null
-    }
-
     video.addEventListener("error") {
         scope.launch {
-            if (playerState is DefaultVideoPlayerState)
+            if (playerState is DefaultVideoPlayerState) {
                 playerState._isLoading = false
+            }
             corsErrorDetected = true
 
             val error = video.error
@@ -462,11 +427,12 @@ internal fun setupVideoElement(
                     playerState.clearError()
                     onCorsError()
                 } else {
-                    val errorMsg = if (error.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
-                        "Failed to load because the video format is not supported"
-                    } else {
-                        "Failed to load because no supported source was found"
-                    }
+                    val errorMsg =
+                        if (error.code == MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
+                            "Failed to load because the video format is not supported"
+                        } else {
+                            "Failed to load because no supported source was found"
+                        }
                     if (playerState is DefaultVideoPlayerState) {
                         playerState.setError(VideoPlayerError.SourceError(errorMsg))
                     }
@@ -490,7 +456,7 @@ internal fun DefaultVideoPlayerState.onTimeUpdateEvent(event: Event) {
 
 internal fun HTMLVideoElement.setupMetadataListener(
     playerState: VideoPlayerState,
-    onVideoRatioChange: (Float) -> Unit
+    onVideoRatioChange: (Float) -> Unit,
 ) {
     addEventListener("loadedmetadata") {
         val width = videoWidth
@@ -543,7 +509,7 @@ internal fun VideoPlayerEffects(
     onLastPlaybackSpeedChange: (Float) -> Unit,
     lastPosition: Double,
     wasPlaying: Boolean,
-    lastPlaybackSpeed: Float
+    lastPlaybackSpeed: Float,
 ) {
     // Handle fullscreen
     LaunchedEffect(playerState.isFullscreen) {
@@ -567,10 +533,13 @@ internal fun VideoPlayerEffects(
             }
         }
 
-        val fullscreenEvents = listOf(
-            "fullscreenchange", "webkitfullscreenchange",
-            "mozfullscreenchange", "MSFullscreenChange"
-        )
+        val fullscreenEvents =
+            listOf(
+                "fullscreenchange",
+                "webkitfullscreenchange",
+                "mozfullscreenchange",
+                "MSFullscreenChange",
+            )
 
         fullscreenEvents.forEach { event ->
             document.addEventListener(event, fullscreenChangeListener)
@@ -643,7 +612,7 @@ internal fun VideoPlayerEffects(
 
     // Handle seeking
     LaunchedEffect(playerState.sliderPos) {
-        if (playerState is DefaultVideoPlayerState &&  !playerState.userDragging && playerState.hasMedia) {
+        if (playerState is DefaultVideoPlayerState && !playerState.userDragging && playerState.hasMedia) {
             playerState.seekJob?.cancel()
 
             videoElement?.let { video ->
@@ -653,9 +622,10 @@ internal fun VideoPlayerEffects(
                     val currentTime = video.currentTime
 
                     if (abs(currentTime - newTime) > 0.5) {
-                        playerState.seekJob = scope.launch {
-                            video.safeSetCurrentTime(newTime.toDouble())
-                        }
+                        playerState.seekJob =
+                            scope.launch {
+                                video.safeSetCurrentTime(newTime.toDouble())
+                            }
                     }
                 }
             }
@@ -687,7 +657,7 @@ internal fun VideoPlayerEffects(
 @Composable
 internal fun VideoVolumeAndSpeedEffects(
     playerState: VideoPlayerState,
-    videoElement: HTMLVideoElement?
+    videoElement: HTMLVideoElement?,
 ) {
     var pendingVolumeChange by remember { mutableStateOf<Double?>(null) }
     var pendingPlaybackSpeedChange by remember { mutableStateOf<Float?>(null) }

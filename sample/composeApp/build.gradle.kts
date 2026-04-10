@@ -1,5 +1,6 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
+import org.apache.tools.ant.taskdefs.condition.Os
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
@@ -50,27 +51,27 @@ kotlin {
         }
         binaries.executable()
     }
-    listOf(
-        iosX64(),
-        iosArm64(),
-        iosSimulatorArm64()
-    ).forEach {
-        it.binaries.framework {
-            baseName = "ComposeApp"
-            isStatic = true
+    if (Os.isFamily(Os.FAMILY_MAC)) {
+        listOf(
+            iosArm64(),
+            iosSimulatorArm64(),
+        ).forEach {
+            it.binaries.framework {
+                baseName = "ComposeApp"
+                isStatic = true
+            }
         }
     }
 
     sourceSets {
         commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.components.uiToolingPreview)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            implementation(libs.compose.ui.tooling.preview)
+            implementation(libs.compose.material.icons.extended)
             implementation(project(":mediaplayer"))
-            implementation(compose.materialIconsExtended)
             implementation(libs.filekit.dialogs.compose)
-            implementation(libs.platformtools.darkmodedetector)
         }
 
         androidMain.dependencies {
@@ -83,13 +84,8 @@ kotlin {
         }
         webMain.dependencies {
             implementation(libs.kotlinx.browser)
-
         }
     }
-}
-
-dependencies {
-    debugImplementation(compose.uiTooling)
 }
 
 android {
@@ -104,6 +100,10 @@ android {
         versionCode = 1
         versionName = "1.0.0"
     }
+}
+
+dependencies {
+    debugImplementation(libs.compose.ui.tooling)
 }
 
 compose.desktop {
@@ -126,26 +126,4 @@ compose.desktop {
     }
 }
 
-// Task to run the iOS app
-tasks.register<Exec>("runIos") {
-    group = "run"
-    description = "Run the iOS app in a simulator"
-
-    // Set the working directory to the iosApp directory
-    workingDir = file("${project.rootDir}/sample/iosApp")
-
-    // Command to execute the run_ios.sh script
-    commandLine("bash", "./run_ios.sh")
-
-    // Make the task depend on building the iOS framework
-    dependsOn(tasks.named("linkDebugFrameworkIosSimulatorArm64"))
-
-    doFirst {
-        println("Running iOS app in simulator...")
-    }
-}
-
-dependencies {
-    debugImplementation(compose.uiTooling)
-}
 

@@ -10,7 +10,6 @@ import kotlin.test.assertTrue
  * Tests for the VideoPlayerError class
  */
 class VideoPlayerErrorTest {
-
     /**
      * Test the creation of CodecError
      */
@@ -111,20 +110,22 @@ class VideoPlayerErrorTest {
      */
     @Test
     fun testWhenExpression() {
-        val errors = listOf(
-            VideoPlayerError.CodecError("Codec error"),
-            VideoPlayerError.NetworkError("Network error"),
-            VideoPlayerError.SourceError("Source error"),
-            VideoPlayerError.UnknownError("Unknown error")
-        )
+        val errors =
+            listOf(
+                VideoPlayerError.CodecError("Codec error"),
+                VideoPlayerError.NetworkError("Network error"),
+                VideoPlayerError.SourceError("Source error"),
+                VideoPlayerError.UnknownError("Unknown error"),
+            )
 
         for (error in errors) {
-            val message = when (error) {
-                is VideoPlayerError.CodecError -> "Codec: ${error.message}"
-                is VideoPlayerError.NetworkError -> "Network: ${error.message}"
-                is VideoPlayerError.SourceError -> "Source: ${error.message}"
-                is VideoPlayerError.UnknownError -> "Unknown: ${error.message}"
-            }
+            val message =
+                when (error) {
+                    is VideoPlayerError.CodecError -> "Codec: ${error.message}"
+                    is VideoPlayerError.NetworkError -> "Network: ${error.message}"
+                    is VideoPlayerError.SourceError -> "Source: ${error.message}"
+                    is VideoPlayerError.UnknownError -> "Unknown: ${error.message}"
+                }
 
             when (error) {
                 is VideoPlayerError.CodecError -> assertEquals("Codec: Codec error", message)

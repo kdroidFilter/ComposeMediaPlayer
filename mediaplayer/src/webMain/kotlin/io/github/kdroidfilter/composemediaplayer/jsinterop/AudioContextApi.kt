@@ -2,11 +2,11 @@
 
 package io.github.kdroidfilter.composemediaplayer.jsinterop
 
-import kotlin.js.JsAny
 import org.khronos.webgl.Float32Array
 import org.khronos.webgl.Uint8Array
 import org.w3c.dom.HTMLMediaElement
 import kotlin.js.ExperimentalWasmJsInterop
+import kotlin.js.JsAny
 import kotlin.js.definedExternally
 
 /**
@@ -15,14 +15,19 @@ import kotlin.js.definedExternally
 @OptIn(ExperimentalWasmJsInterop::class)
 external class AudioContext : JsAny {
     constructor()
+
     val destination: AudioDestinationNode
     val state: String
     val sampleRate: Int
 
     fun createMediaElementSource(mediaElement: HTMLMediaElement): MediaElementAudioSourceNode
+
     fun createChannelSplitter(numberOfOutputs: Int = definedExternally): ChannelSplitterNode
+
     fun createAnalyser(): AnalyserNode
+
     fun resume()
+
     fun close()
 }
 
@@ -31,7 +36,12 @@ external class AudioContext : JsAny {
  */
 @OptIn(ExperimentalWasmJsInterop::class)
 open external class AudioNode : JsAny {
-    fun connect(destination: AudioNode, output: Int = definedExternally, input: Int = definedExternally): AudioNode
+    fun connect(
+        destination: AudioNode,
+        output: Int = definedExternally,
+        input: Int = definedExternally,
+    ): AudioNode
+
     fun disconnect()
 }
 
@@ -96,5 +106,6 @@ external class AnalyserNode : AudioNode {
      * Additional methods if needed: retrieval in Float32.
      */
     fun getFloatFrequencyData(array: Float32Array)
+
     fun getFloatTimeDomainData(array: Float32Array)
 }

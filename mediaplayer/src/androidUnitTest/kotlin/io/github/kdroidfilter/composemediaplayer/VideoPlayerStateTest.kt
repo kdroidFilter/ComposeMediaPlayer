@@ -11,7 +11,6 @@ import kotlin.test.assertTrue
  * Tests for the Android implementation of VideoPlayerState
  */
 class VideoPlayerStateTest {
-
     /**
      * Helper function to check if ContextProvider is available and initialized
      * If not, the test will be skipped
@@ -50,8 +49,6 @@ class VideoPlayerStateTest {
         assertFalse(playerState.loop)
         assertEquals("00:00", playerState.positionText)
         assertEquals("00:00", playerState.durationText)
-        assertEquals(0f, playerState.leftLevel)
-        assertEquals(0f, playerState.rightLevel)
         assertFalse(playerState.isFullscreen)
 
         // Clean up
@@ -169,11 +166,12 @@ class VideoPlayerStateTest {
         assertTrue(playerState.availableSubtitleTracks.isEmpty())
 
         // Create a test subtitle track
-        val testTrack = SubtitleTrack(
-            label = "English",
-            language = "en",
-            src = "test.vtt"
-        )
+        val testTrack =
+            SubtitleTrack(
+                label = "English",
+                language = "en",
+                src = "test.vtt",
+            )
 
         // Select the subtitle track
         playerState.selectSubtitleTrack(testTrack)

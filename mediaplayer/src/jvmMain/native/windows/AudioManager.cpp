@@ -353,34 +353,4 @@ HRESULT GetVolume(const VideoPlayerInstance* inst, float* out)
     return S_OK;
 }
 
-// -------------------------------------------
-//  Peak‑meter (endpoint) level in percentage
-// -------------------------------------------
-HRESULT GetAudioLevels(const VideoPlayerInstance* inst, float* left, float* right)
-{
-    if (!inst || !left || !right) return E_INVALIDARG;
-    if (!inst->pDevice)            return E_FAIL;
-
-    IAudioMeterInformation* meter = nullptr;
-    HRESULT hr = inst->pDevice->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, nullptr,
-                                         reinterpret_cast<void**>(&meter));
-    if (FAILED(hr)) return hr;
-
-    std::array<float, 2> peaks = {0.f, 0.f};
-    hr = meter->GetChannelsPeakValues(2, peaks.data());
-    meter->Release();
-    if (FAILED(hr)) return hr;
-
-    auto toPercent = [](float level) {
-        if (level <= 0.f) return 0.f;
-        float db = 20.f * log10(level);
-        float pct = std::clamp((db + 60.f) / 60.f, 0.f, 1.f);
-        return pct * 100.f;
-    };
-
-    *left  = toPercent(peaks[0]);
-    *right = toPercent(peaks[1]);
-    return S_OK;
-}
-
 } // namespace AudioManager

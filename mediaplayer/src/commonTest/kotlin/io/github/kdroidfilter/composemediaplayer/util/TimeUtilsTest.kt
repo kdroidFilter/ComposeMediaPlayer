@@ -4,7 +4,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class TimeUtilsTest {
-    
     @Test
     fun testFormatTimeWithSeconds() {
         // Test with seconds (as Double)
@@ -19,7 +18,7 @@ class TimeUtilsTest {
         assertEquals("01:01:01", formatTime(3661.0))
         assertEquals("99:59:59", formatTime(359999.0))
     }
-    
+
     @Test
     fun testFormatTimeWithNanoseconds() {
         // Test with nanoseconds (as Long)
@@ -33,7 +32,7 @@ class TimeUtilsTest {
         assertEquals("01:00:01", formatTime(3601_000_000_000L, true))
         assertEquals("01:01:01", formatTime(3661_000_000_000L, true))
     }
-    
+
     @Test
     fun testToTimeMs() {
         // Test conversion from time string to milliseconds
@@ -46,32 +45,32 @@ class TimeUtilsTest {
         assertEquals(3600000, "01:00:00".toTimeMs())
         assertEquals(3601000, "01:00:01".toTimeMs())
         assertEquals(3661000, "01:01:01".toTimeMs())
-        
+
         // Test invalid formats
         assertEquals(0, "invalid".toTimeMs())
         assertEquals(0, "".toTimeMs())
         assertEquals(0, ":".toTimeMs())
         assertEquals(0, "::".toTimeMs())
     }
-    
+
     @Test
     fun testRoundTrip() {
         // Test that converting from seconds to string and back to milliseconds works correctly
         val testSeconds = listOf(0.0, 1.0, 59.0, 60.0, 61.0, 3599.0, 3600.0, 3601.0, 3661.0)
-        
+
         for (seconds in testSeconds) {
             val formatted = formatTime(seconds)
             val milliseconds = formatted.toTimeMs()
-            
+
             // Allow for small rounding differences due to floating point
             val expectedMs = (seconds * 1000).toLong()
             val tolerance = 1000L // 1 second tolerance due to rounding to whole seconds in formatTime
-            
+
             assertEquals(
-                true, 
+                true,
                 kotlin.math.abs(expectedMs - milliseconds) <= tolerance,
                 "Round trip conversion failed for $seconds seconds. " +
-                "Expected ~$expectedMs ms, got $milliseconds ms (formatted as $formatted)"
+                    "Expected ~$expectedMs ms, got $milliseconds ms (formatted as $formatted)",
             )
         }
     }

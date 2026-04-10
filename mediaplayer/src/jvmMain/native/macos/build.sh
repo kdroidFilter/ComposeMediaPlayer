@@ -2,10 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-RESOURCES_DIR="$SCRIPT_DIR/../../resources"
+OUTPUT_DIR="${NATIVE_LIBS_OUTPUT_DIR:-$SCRIPT_DIR/../../resources/composemediaplayer/native}"
 
 SWIFT_SOURCE="$SCRIPT_DIR/NativeVideoPlayer.swift"
 JNI_BRIDGE="$SCRIPT_DIR/jni_bridge.c"
+
+echo "=== Building macOS NativeVideoPlayer ==="
+echo "Output dir: $OUTPUT_DIR"
 
 # Resolve JDK include paths (required to compile jni_bridge.c)
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home 2>/dev/null || echo '')}"
@@ -16,8 +19,8 @@ fi
 JNI_INCLUDES="-I${JAVA_HOME}/include -I${JAVA_HOME}/include/darwin"
 
 # Output directories
-ARM64_DIR="$RESOURCES_DIR/darwin-aarch64"
-X64_DIR="$RESOURCES_DIR/darwin-x86-64"
+ARM64_DIR="$OUTPUT_DIR/darwin-aarch64"
+X64_DIR="$OUTPUT_DIR/darwin-x86-64"
 
 mkdir -p "$ARM64_DIR" "$X64_DIR"
 

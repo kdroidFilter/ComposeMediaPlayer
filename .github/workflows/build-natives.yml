@@ -8,55 +8,113 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
       - name: Build Windows native DLLs
         shell: cmd
         working-directory: mediaplayer/src/jvmMain/native/windows
         run: call build.bat
+        env:
+          NATIVE_LIBS_OUTPUT_DIR: ${{ github.workspace }}/build/nativeLibs
 
       - name: Verify Windows natives
         shell: bash
         run: |
           for f in \
-            mediaplayer/src/jvmMain/resources/win32-x86-64/NativeVideoPlayer.dll \
-            mediaplayer/src/jvmMain/resources/win32-arm64/NativeVideoPlayer.dll; do
+            build/nativeLibs/win32-x86-64/NativeVideoPlayer.dll \
+            build/nativeLibs/win32-arm64/NativeVideoPlayer.dll; do
             if [ ! -f "$f" ]; then echo "MISSING: $f" >&2; exit 1; fi
             echo "OK: $f ($(wc -c < "$f") bytes)"
           done
 
-      - name: Upload Windows DLLs
-        uses: actions/upload-artifact@v4
+      - name: Upload Windows natives
+        uses: actions/upload-artifact@v7
         with:
-          name: windows-natives
-          path: |
-            mediaplayer/src/jvmMain/resources/win32-x86-64/
-            mediaplayer/src/jvmMain/resources/win32-arm64/
+          name: native-windows
+          path: build/nativeLibs/
           retention-days: 1
 
   macos:
     runs-on: macos-latest
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
       - name: Build macOS native dylibs
         run: bash mediaplayer/src/jvmMain/native/macos/build.sh
+        env:
+          NATIVE_LIBS_OUTPUT_DIR: ${{ github.workspace }}/build/nativeLibs
 
       - name: Verify macOS natives
         run: |
           for f in \
-            mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib \
-            mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib; do
+            build/nativeLibs/darwin-aarch64/libNativeVideoPlayer.dylib \
+            build/nativeLibs/darwin-x86-64/libNativeVideoPlayer.dylib; do
             if [ ! -f "$f" ]; then echo "MISSING: $f" >&2; exit 1; fi
             echo "OK: $f ($(wc -c < "$f") bytes)"
           done
 
-      - name: Upload macOS dylibs
-        uses: actions/upload-artifact@v4
+      - name: Upload macOS natives
+        uses: actions/upload-artifact@v7
         with:
-          name: macos-natives
-          path: |
-            mediaplayer/src/jvmMain/resources/darwin-aarch64/
-            mediaplayer/src/jvmMain/resources/darwin-x86-64/
+          name: native-macos
+          path: build/nativeLibs/
+          retention-days: 1
+
+  linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86-64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v6
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install GStreamer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good
+
+      - name: Build Linux native library
+        working-directory: mediaplayer/src/jvmMain/native/linux
+        run: bash build.sh
+        env:
+          NATIVE_LIBS_OUTPUT_DIR: ${{ github.workspace }}/build/nativeLibs
+
+      - name: Verify Linux natives
+        run: |
+          test -f build/nativeLibs/linux-${{ matrix.arch }}/libNativeVideoPlayer.so
+          ls -la build/nativeLibs/linux-${{ matrix.arch }}/
+
+      - name: Upload Linux library
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-linux-${{ matrix.arch }}
+          path: build/nativeLibs/
           retention-days: 1

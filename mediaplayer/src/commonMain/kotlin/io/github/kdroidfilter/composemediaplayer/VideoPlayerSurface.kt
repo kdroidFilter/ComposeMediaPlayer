@@ -19,8 +19,8 @@ import androidx.compose.ui.layout.ContentScale
  */
 @Composable
 expect fun VideoPlayerSurface(
-    playerState: VideoPlayerState, 
+    playerState: VideoPlayerState,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
-    overlay: @Composable () -> Unit = {}
+    overlay: @Composable () -> Unit = {},
 )

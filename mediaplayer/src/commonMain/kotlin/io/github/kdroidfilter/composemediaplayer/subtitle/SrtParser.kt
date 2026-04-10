@@ -10,6 +10,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 object SrtParser {
     // SRT time format uses comma instead of period for milliseconds: "00:00:00,000"
     private val TIME_PATTERN = Regex("(\\d{2}):(\\d{2}):(\\d{2}),(\\d{3})")
+
     // SRT timing line format: "00:00:00,000 --> 00:00:00,000"
     private val CUE_TIMING_PATTERN = Regex("(\\d{2}:\\d{2}:\\d{2},\\d{3}) --> (\\d{2}:\\d{2}:\\d{2},\\d{3})")
 
@@ -114,8 +115,8 @@ object SrtParser {
      * @return A SubtitleCueList containing the parsed subtitle cues
      */
     @OptIn(ExperimentalEncodingApi::class)
-    suspend fun loadFromUrl(url: String): SubtitleCueList {
-        return withContext(Dispatchers.Default) {
+    suspend fun loadFromUrl(url: String): SubtitleCueList =
+        withContext(Dispatchers.Default) {
             try {
                 // Use the platform-specific loadSubtitleContent function to fetch the content
                 val content = loadSubtitleContent(url)
@@ -124,5 +125,4 @@ object SrtParser {
                 SubtitleCueList() // Return empty list on error
             }
         }
-    }
 }

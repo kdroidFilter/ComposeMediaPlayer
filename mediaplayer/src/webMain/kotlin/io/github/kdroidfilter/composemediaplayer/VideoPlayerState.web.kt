@@ -33,8 +33,7 @@ actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState(
  * and error handling.
  */
 @Stable
-open class DefaultVideoPlayerState: VideoPlayerState {
-
+open class DefaultVideoPlayerState : VideoPlayerState {
     // Variable to store the last opened URI for potential replay
     private var lastUri: String? = null
 
@@ -68,7 +67,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
     // Media metadata
     override val metadata = VideoMetadata()
-    override val aspectRatio : Float = 16f / 9f //TO DO: Get from video source
+    override val aspectRatio: Float = 16f / 9f // TO DO: Get from video source
 
     // Subtitle management
     override var subtitlesEnabled by mutableStateOf(false)
@@ -79,8 +78,8 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Normal,
-            textAlign = TextAlign.Center
-        )
+            textAlign = TextAlign.Center,
+        ),
     )
     override var subtitleBackgroundColor by mutableStateOf(Color.Black.copy(alpha = 0.5f))
 
@@ -113,12 +112,6 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
     override var isFullscreen by mutableStateOf(false)
 
-    // Audio level indicators
-    private var _leftLevel by mutableStateOf(0f)
-    private var _rightLevel by mutableStateOf(0f)
-    override val leftLevel: Float get() = _leftLevel
-    override val rightLevel: Float get() = _rightLevel
-
     // Time display properties
     private var _positionText by mutableStateOf("00:00")
     private var _durationText by mutableStateOf("00:00")
@@ -127,7 +120,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
     // Current duration of the media
     private var _currentDuration: Float = 0f
-    
+
     // Current time of the media in seconds
     private var _currentTime: Double = 0.0
     override val currentTime: Double get() = _currentTime
@@ -171,11 +164,12 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
         if (timeSinceLastChange < 100.milliseconds) {
             // If changes are coming too rapidly, schedule them with a delay
-            pendingVolumeChange = playerScope.launch {
-                delay(100.milliseconds.minus(timeSinceLastChange).inWholeMilliseconds)
-                applyVolumeCallback?.invoke(value)
-                lastVolumeChangeTime = TimeSource.Monotonic.markNow()
-            }
+            pendingVolumeChange =
+                playerScope.launch {
+                    delay(100.milliseconds.minus(timeSinceLastChange).inWholeMilliseconds)
+                    applyVolumeCallback?.invoke(value)
+                    lastVolumeChangeTime = TimeSource.Monotonic.markNow()
+                }
         } else {
             // Apply immediately if we're not throttling
             applyVolumeCallback?.invoke(value)
@@ -195,11 +189,12 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
         if (timeSinceLastChange < 100.milliseconds) {
             // If changes are coming too rapidly, schedule them with a delay
-            pendingSpeedChange = playerScope.launch {
-                delay(100.milliseconds.minus(timeSinceLastChange).inWholeMilliseconds)
-                applyPlaybackSpeedCallback?.invoke(value)
-                lastSpeedChangeTime = TimeSource.Monotonic.markNow()
-            }
+            pendingSpeedChange =
+                playerScope.launch {
+                    delay(100.milliseconds.minus(timeSinceLastChange).inWholeMilliseconds)
+                    applyPlaybackSpeedCallback?.invoke(value)
+                    lastSpeedChangeTime = TimeSource.Monotonic.markNow()
+                }
         } else {
             // Apply immediately if we're not throttling
             applyPlaybackSpeedCallback?.invoke(value)
@@ -231,7 +226,10 @@ open class DefaultVideoPlayerState: VideoPlayerState {
      * @param uri The URI of the media to open
      * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+    override fun openUri(
+        uri: String,
+        initializeplayerState: InitialPlayerState,
+    ) {
         playerScope.coroutineContext.cancelChildren()
 
         // Store the URI for potential replay after stop
@@ -239,7 +237,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
         _sourceUri = uri
         _hasMedia = true
-        _isLoading = true  // Set initial loading state
+        _isLoading = true // Set initial loading state
         _error = null
         _isPlaying = false
         _playbackSpeed = 1.0f
@@ -251,10 +249,11 @@ open class DefaultVideoPlayerState: VideoPlayerState {
                 _isPlaying = initializeplayerState == InitialPlayerState.PLAY
             } catch (e: Exception) {
                 _isLoading = false
-                _error = when (e) {
-                    is IOException -> VideoPlayerError.NetworkError(e.message ?: "Network error")
-                    else -> VideoPlayerError.UnknownError(e.message ?: "Unknown error")
-                }
+                _error =
+                    when (e) {
+                        is IOException -> VideoPlayerError.NetworkError(e.message ?: "Network error")
+                        else -> VideoPlayerError.UnknownError(e.message ?: "Unknown error")
+                    }
             }
         }
     }
@@ -265,7 +264,10 @@ open class DefaultVideoPlayerState: VideoPlayerState {
      * @param file The file to open
      * @param initializeplayerState Controls whether playback should start automatically after opening
      */
-    override fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
+    override fun openFile(
+        file: PlatformFile,
+        initializeplayerState: InitialPlayerState,
+    ) {
         val fileUri = file.getUri()
         openUri(fileUri, initializeplayerState)
     }
@@ -344,35 +346,32 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     /**
-     * Updates the audio level indicators.
-     *
-     * @param left The left channel audio level
-     * @param right The right channel audio level
-     */
-    fun updateAudioLevels(left: Float, right: Float) {
-        _leftLevel = left
-        _rightLevel = right
-    }
-
-    /**
      * Updates the position and duration display.
      *
      * @param currentTime The current playback position in seconds
      * @param duration The total duration of the media in seconds
      * @param forceUpdate If true, bypasses the rate limiting check (useful for tests)
      */
-    fun updatePosition(currentTime: Float, duration: Float, forceUpdate: Boolean = false) {
+    fun updatePosition(
+        currentTime: Float,
+        duration: Float,
+        forceUpdate: Boolean = false,
+    ) {
         val now = TimeSource.Monotonic.markNow()
         if (forceUpdate || now - lastUpdateTime >= 1.seconds) {
             // Calculate a dynamic threshold based on video duration (10% of duration or at least 0.5 seconds)
-            val threshold = if (duration > 0f && !duration.isNaN()) {
-                maxOf(duration * 0.1f, 0.5f)
-            } else {
-                0.5f
-            }
+            val threshold =
+                if (duration > 0f && !duration.isNaN()) {
+                    maxOf(duration * 0.1f, 0.5f)
+                } else {
+                    0.5f
+                }
 
             // Check if we're very close to the end of the video
-            val isNearEnd = duration > 0f && !duration.isNaN() && !currentTime.isNaN() &&
+            val isNearEnd =
+                duration > 0f &&
+                    !duration.isNaN() &&
+                    !currentTime.isNaN() &&
                     (duration - currentTime < threshold)
 
             // If we're near the end, use the duration as the current time
@@ -380,16 +379,17 @@ open class DefaultVideoPlayerState: VideoPlayerState {
 
             _positionText = if (displayTime.isNaN()) "00:00" else formatTime(displayTime)
             _durationText = if (duration.isNaN()) "00:00" else formatTime(duration)
-            
+
             // Update the current time property
             _currentTime = displayTime.toDouble()
 
             if (!userDragging && duration > 0f && !duration.isNaN() && !_isLoading) {
-                sliderPos = if (isNearEnd) {
-                    PERCENTAGE_MULTIPLIER // Set to 100% if near end
-                } else {
-                    (currentTime / duration) * PERCENTAGE_MULTIPLIER
-                }
+                sliderPos =
+                    if (isNearEnd) {
+                        PERCENTAGE_MULTIPLIER // Set to 100% if near end
+                    } else {
+                        (currentTime / duration) * PERCENTAGE_MULTIPLIER
+                    }
             }
             _currentDuration = duration
             lastUpdateTime = now
@@ -403,7 +403,11 @@ open class DefaultVideoPlayerState: VideoPlayerState {
      * @param duration The total duration of the media in seconds
      * @param forceUpdate If true, bypasses the rate limiting check (useful for tests)
      */
-    fun onTimeUpdate(currentTime: Float, duration: Float, forceUpdate: Boolean = false) {
+    fun onTimeUpdate(
+        currentTime: Float,
+        duration: Float,
+        forceUpdate: Boolean = false,
+    ) {
         updatePosition(currentTime, duration, forceUpdate)
     }
 

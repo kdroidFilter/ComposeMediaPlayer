@@ -18,11 +18,11 @@ internal fun VideoPlayerSurfacePreview(
 ) {
     Box(
         modifier = modifier.background(Color.Black.copy(alpha = 0.08f)),
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.Center,
     ) {
         BasicText(
             text = message,
-            style = TextStyle(color = Color.Gray)
+            style = TextStyle(color = Color.Gray),
         )
         Box(modifier = Modifier.fillMaxSize()) {
             overlay()

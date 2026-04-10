@@ -9,11 +9,16 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  */
 object WebVttParser {
     private const val WEBVTT_HEADER = "WEBVTT"
+
     // Support both formats: "00:00:00.000" (with hours) and "00:00.000" (without hours)
     private val TIME_PATTERN_WITH_HOURS = Regex("(\\d{2}):(\\d{2}):(\\d{2})\\.(\\d{3})")
     private val TIME_PATTERN_WITHOUT_HOURS = Regex("(\\d{2}):(\\d{2})\\.(\\d{3})")
+
     // Support both formats in the timing line
-    private val CUE_TIMING_PATTERN = Regex("(\\d{2}:\\d{2}:\\d{2}\\.\\d{3}|\\d{2}:\\d{2}\\.\\d{3}) --> (\\d{2}:\\d{2}:\\d{2}\\.\\d{3}|\\d{2}:\\d{2}\\.\\d{3})")
+    private val CUE_TIMING_PATTERN =
+        Regex(
+            "(\\d{2}:\\d{2}:\\d{2}\\.\\d{3}|\\d{2}:\\d{2}\\.\\d{3}) --> (\\d{2}:\\d{2}:\\d{2}\\.\\d{3}|\\d{2}:\\d{2}\\.\\d{3})",
+        )
 
     /**
      * Parses a WebVTT file content into a SubtitleCueList.
@@ -108,8 +113,8 @@ object WebVttParser {
      * @return A SubtitleCueList containing the parsed subtitle cues
      */
     @OptIn(ExperimentalEncodingApi::class)
-    suspend fun loadFromUrl(url: String): SubtitleCueList {
-        return withContext(Dispatchers.Default) {
+    suspend fun loadFromUrl(url: String): SubtitleCueList =
+        withContext(Dispatchers.Default) {
             try {
                 // Use the platform-specific loadSubtitleContent function to fetch the content
                 val content = loadSubtitleContent(url)
@@ -118,5 +123,4 @@ object WebVttParser {
                 SubtitleCueList() // Return empty list on error
             }
         }
-    }
 }

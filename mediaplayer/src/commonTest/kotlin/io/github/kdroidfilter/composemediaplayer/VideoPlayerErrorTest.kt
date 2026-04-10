@@ -6,7 +6,6 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class VideoPlayerErrorTest {
-
     @Test
     fun testCodecError() {
         val error = VideoPlayerError.CodecError("Unsupported codec")
@@ -71,8 +70,10 @@ class VideoPlayerErrorTest {
         for (i in errors.indices) {
             for (j in errors.indices) {
                 if (i != j) {
-                    assertTrue(errors[i] != errors[j], 
-                        "Different error types should not be equal: ${errors[i]} vs ${errors[j]}")
+                    assertTrue(
+                        errors[i] != errors[j],
+                        "Different error types should not be equal: ${errors[i]} vs ${errors[j]}",
+                    )
                 }
             }
         }

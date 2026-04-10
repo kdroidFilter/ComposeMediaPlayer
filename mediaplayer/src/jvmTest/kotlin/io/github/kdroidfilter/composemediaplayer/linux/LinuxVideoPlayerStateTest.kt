@@ -22,19 +22,21 @@ import kotlin.test.assertTrue
  * If the native library cannot be loaded, the tests will be skipped.
  */
 class LinuxVideoPlayerStateTest {
-
     @Before
     fun setup() {
         // Skip test if not running on Linux
-        Assume.assumeTrue("Skipping Linux-specific test on non-Linux platform", CurrentPlatform.os == CurrentPlatform.OS.LINUX)
+        Assume.assumeTrue(
+            "Skipping Linux-specific test on non-Linux platform",
+            CurrentPlatform.os == CurrentPlatform.OS.LINUX,
+        )
 
-        // Try to load the native library
+        // Try to load the native library (catch Throwable for UnsatisfiedLinkError/NoClassDefFoundError)
         try {
-            SharedVideoPlayer.nCreatePlayer().let { ptr ->
-                if (ptr != 0L) SharedVideoPlayer.nDisposePlayer(ptr)
+            LinuxNativeBridge.nCreatePlayer().let { ptr ->
+                if (ptr != 0L) LinuxNativeBridge.nDisposePlayer(ptr)
             }
-        } catch (e: Exception) {
-            Assume.assumeNoException("Native video player library not available", e)
+        } catch (e: Throwable) {
+            Assume.assumeTrue("Native video player library not available: ${e.message}", false)
         }
     }
 
@@ -50,8 +52,6 @@ class LinuxVideoPlayerStateTest {
         assertFalse(playerState.loop)
         assertEquals("00:00", playerState.positionText)
         assertEquals("00:00", playerState.durationText)
-        assertEquals(0f, playerState.leftLevel)
-        assertEquals(0f, playerState.rightLevel)
         assertFalse(playerState.isFullscreen)
         assertNull(playerState.error)
 

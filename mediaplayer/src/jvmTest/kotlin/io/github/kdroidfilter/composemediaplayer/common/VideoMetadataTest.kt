@@ -10,7 +10,6 @@ import kotlin.test.assertNull
  * Tests for the VideoMetadata class
  */
 class VideoMetadataTest {
-
     /**
      * Test the creation of VideoMetadata with default values
      */
@@ -36,17 +35,18 @@ class VideoMetadataTest {
      */
     @Test
     fun testCreateVideoMetadataWithValues() {
-        val metadata = VideoMetadata(
-            title = "Test Title",
-            duration = 120000L,
-            width = 1920,
-            height = 1080,
-            bitrate = 5000000L,
-            frameRate = 30.0f,
-            mimeType = "video/mp4",
-            audioChannels = 2,
-            audioSampleRate = 44100
-        )
+        val metadata =
+            VideoMetadata(
+                title = "Test Title",
+                duration = 120000L,
+                width = 1920,
+                height = 1080,
+                bitrate = 5000000L,
+                frameRate = 30.0f,
+                mimeType = "video/mp4",
+                audioChannels = 2,
+                audioSampleRate = 44100,
+            )
 
         // Verify the metadata properties
         assertEquals("Test Title", metadata.title)
@@ -95,16 +95,18 @@ class VideoMetadataTest {
      */
     @Test
     fun testMetadataCopy() {
-        val metadata = VideoMetadata(
-            title = "Original Title",
-            duration = 60000L
-        )
+        val metadata =
+            VideoMetadata(
+                title = "Original Title",
+                duration = 60000L,
+            )
 
         // Create a copy with some modified properties
-        val copy = metadata.copy(
-            title = "New Title",
-            duration = 90000L
-        )
+        val copy =
+            metadata.copy(
+                title = "New Title",
+                duration = 90000L,
+            )
 
         // Verify the original metadata is unchanged
         assertEquals("Original Title", metadata.title)

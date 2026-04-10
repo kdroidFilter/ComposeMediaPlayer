@@ -1,0 +1,18 @@
+# .editorconfig
+[*]
+charset = utf-8
+end_of_line = lf
+indent_size = 4
+indent_style = space
+insert_final_newline = true
+max_line_length = 120
+tab_width = 4
+trim_trailing_whitespace = true
+
+[*.{kt,kts}]
+ij_kotlin_allow_trailing_comma = true
+ij_kotlin_allow_trailing_comma_on_call_site = true
+ij_kotlin_imports_layout = *, java.**, javax.**, kotlin.**, ^
+ktlint_standard_no-wildcard-imports = disabled
+ktlint_standard_function-naming = disabled
+ktlint_standard_backing-property-naming = disabled

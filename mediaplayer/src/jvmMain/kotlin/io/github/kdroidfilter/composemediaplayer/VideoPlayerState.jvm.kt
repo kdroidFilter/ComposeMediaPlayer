@@ -22,8 +22,6 @@ actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState(
  * - `sliderPos`: Represents the current playback position as a normalized value between 0.0 and 1.0.
  * - `userDragging`: Denotes whether the user is manually adjusting the playback position.
  * - `loop`: Specifies if the video should loop when it reaches the end.
- * - `leftLevel`: Provides the audio level for the left channel as a percentage.
- * - `rightLevel`: Provides the audio level for the right channel as a percentage.
  * - `positionText`: Returns the current playback position as a formatted string.
  * - `durationText`: Returns the total duration of the video as a formatted string.
  *
@@ -36,12 +34,13 @@ actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState(
  * - `dispose()`: Releases resources used by the video player and disposes of the state.
  */
 @Stable
-open class DefaultVideoPlayerState: VideoPlayerState {
-    val delegate: VideoPlayerState = when (CurrentPlatform.os) {
-        CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState()
-        CurrentPlatform.OS.MAC -> MacVideoPlayerState()
-        CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState()
-    }
+open class DefaultVideoPlayerState : VideoPlayerState {
+    val delegate: VideoPlayerState =
+        when (CurrentPlatform.os) {
+            CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState()
+            CurrentPlatform.OS.MAC -> MacVideoPlayerState()
+            CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState()
+        }
 
     override val hasMedia: Boolean get() = delegate.hasMedia
     override val isPlaying: Boolean get() = delegate.isPlaying
@@ -84,8 +83,8 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     override val aspectRatio: Float get() = delegate.aspectRatio
 
     override var subtitlesEnabled = delegate.subtitlesEnabled
-    override var currentSubtitleTrack : SubtitleTrack? = delegate.currentSubtitleTrack
-    override val availableSubtitleTracks  = delegate.availableSubtitleTracks
+    override var currentSubtitleTrack: SubtitleTrack? = delegate.currentSubtitleTrack
+    override val availableSubtitleTracks = delegate.availableSubtitleTracks
     override var subtitleTextStyle: TextStyle
         get() = delegate.subtitleTextStyle
         set(value) {
@@ -96,22 +95,36 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         set(value) {
             delegate.subtitleBackgroundColor = value
         }
+
     override fun selectSubtitleTrack(track: SubtitleTrack?) = delegate.selectSubtitleTrack(track)
+
     override fun disableSubtitles() = delegate.disableSubtitles()
 
-    override val leftLevel: Float get() = delegate.leftLevel
-    override val rightLevel: Float get() = delegate.rightLevel
     override val positionText: String get() = delegate.positionText
     override val durationText: String get() = delegate.durationText
     override val currentTime: Double get() = delegate.currentTime
 
-    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) = delegate.openUri(uri, initializeplayerState)
-    override fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) = delegate.openUri(file.file.path, initializeplayerState)
+    override fun openUri(
+        uri: String,
+        initializeplayerState: InitialPlayerState,
+    ) = delegate.openUri(uri, initializeplayerState)
+
+    override fun openFile(
+        file: PlatformFile,
+        initializeplayerState: InitialPlayerState,
+    ) = delegate.openUri(file.file.path, initializeplayerState)
+
     override fun play() = delegate.play()
+
     override fun pause() = delegate.pause()
+
     override fun stop() = delegate.stop()
+
     override fun seekTo(value: Float) = delegate.seekTo(value)
+
     override fun toggleFullscreen() = delegate.toggleFullscreen()
+
     override fun dispose() = delegate.dispose()
+
     override fun clearError() = delegate.clearError()
 }

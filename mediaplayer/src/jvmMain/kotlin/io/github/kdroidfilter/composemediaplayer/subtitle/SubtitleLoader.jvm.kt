@@ -16,48 +16,49 @@ import java.net.URL
  * @param src The source URI of the subtitle file
  * @return The content of the subtitle file as a string
  */
-actual suspend fun loadSubtitleContent(src: String): String = withContext(Dispatchers.IO) {
-    try {
-        when {
-            // Handle HTTP/HTTPS URLs
-            src.startsWith("http://") || src.startsWith("https://") -> {
-                val url = URL(src)
-                val connection = url.openConnection() as HttpURLConnection
-                connection.connectTimeout = 10000
-                connection.readTimeout = 10000
-                
-                val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                val content = reader.use { it.readText() }
-                connection.disconnect()
-                content
-            }
-            
-            // Handle file:// URIs
-            src.startsWith("file://") -> {
-                val file = File(URI(src))
-                file.readText()
-            }
-            
-            // Handle local file paths
-            else -> {
-                val file = File(src)
-                if (file.exists()) {
+actual suspend fun loadSubtitleContent(src: String): String =
+    withContext(Dispatchers.IO) {
+        try {
+            when {
+                // Handle HTTP/HTTPS URLs
+                src.startsWith("http://") || src.startsWith("https://") -> {
+                    val url = URL(src)
+                    val connection = url.openConnection() as HttpURLConnection
+                    connection.connectTimeout = 10000
+                    connection.readTimeout = 10000
+
+                    val reader = BufferedReader(InputStreamReader(connection.inputStream))
+                    val content = reader.use { it.readText() }
+                    connection.disconnect()
+                    content
+                }
+
+                // Handle file:// URIs
+                src.startsWith("file://") -> {
+                    val file = File(URI(src))
                     file.readText()
-                } else {
-                    // Try to interpret as a URI
-                    try {
-                        val uri = URI(src)
-                        val uriFile = File(uri)
-                        uriFile.readText()
-                    } catch (e: Exception) {
-                        println("Error loading subtitle file: ${e.message}")
-                        ""
+                }
+
+                // Handle local file paths
+                else -> {
+                    val file = File(src)
+                    if (file.exists()) {
+                        file.readText()
+                    } else {
+                        // Try to interpret as a URI
+                        try {
+                            val uri = URI(src)
+                            val uriFile = File(uri)
+                            uriFile.readText()
+                        } catch (e: Exception) {
+                            println("Error loading subtitle file: ${e.message}")
+                            ""
+                        }
                     }
                 }
             }
+        } catch (e: Exception) {
+            println("Error loading subtitle content: ${e.message}")
+            ""
         }
-    } catch (e: Exception) {
-        println("Error loading subtitle content: ${e.message}")
-        ""
     }
-}

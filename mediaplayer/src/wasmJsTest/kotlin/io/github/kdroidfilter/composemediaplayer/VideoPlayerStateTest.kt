@@ -2,15 +2,14 @@ package io.github.kdroidfilter.composemediaplayer
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlin.test.assertFalse
 
 /**
  * Tests for the WebAssembly/JavaScript implementation of VideoPlayerState
  */
 class VideoPlayerStateTest {
-
     /**
      * Test the creation of VideoPlayerState
      */
@@ -27,8 +26,6 @@ class VideoPlayerStateTest {
         assertFalse(playerState.loop)
         assertEquals("00:00", playerState.positionText)
         assertEquals("00:00", playerState.durationText)
-        assertEquals(0f, playerState.leftLevel)
-        assertEquals(0f, playerState.rightLevel)
         assertFalse(playerState.isFullscreen)
 
         // Clean up
@@ -140,11 +137,12 @@ class VideoPlayerStateTest {
         assertTrue(playerState.availableSubtitleTracks.isEmpty())
 
         // Create a test subtitle track
-        val testTrack = SubtitleTrack(
-            label = "English",
-            language = "en",
-            src = "test.vtt"
-        )
+        val testTrack =
+            SubtitleTrack(
+                label = "English",
+                language = "en",
+                src = "test.vtt",
+            )
 
         // Select the subtitle track
         playerState.selectSubtitleTrack(testTrack)

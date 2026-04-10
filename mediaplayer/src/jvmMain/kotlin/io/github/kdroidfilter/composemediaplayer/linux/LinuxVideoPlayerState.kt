@@ -8,14 +8,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Logger.Companion.setMinSeverity
-import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
@@ -29,10 +27,8 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
-import kotlin.math.log10
 
-internal val linuxLogger = Logger.withTag("LinuxVideoPlayerState")
-    .apply { setMinSeverity(Severity.Warn) }
+internal val linuxLogger = TaggedLogger("LinuxVideoPlayerState")
 
 /**
  * LinuxVideoPlayerState — JNI-based implementation using a native C GStreamer player.
@@ -42,7 +38,6 @@ internal val linuxLogger = Logger.withTag("LinuxVideoPlayerState")
  */
 @Stable
 class LinuxVideoPlayerState : VideoPlayerState {
-
     // Native player pointer (AtomicLong for lock-free reads from the frame hot path)
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
@@ -58,12 +53,6 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private var skiaBitmapA: Bitmap? = null
     private var skiaBitmapB: Bitmap? = null
     private var nextSkiaBitmapA: Boolean = true
-
-    // Audio levels
-    private val _leftLevel = mutableStateOf(0.0f)
-    private val _rightLevel = mutableStateOf(0.0f)
-    override val leftLevel: Float get() = _leftLevel.value
-    override val rightLevel: Float get() = _rightLevel.value
 
     // Surface display size (pixels) for output scaling
     private var surfaceWidth = 0
@@ -102,8 +91,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
             color = Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.Normal,
-            textAlign = TextAlign.Center
-        )
+            textAlign = TextAlign.Center,
+        ),
     )
     override var subtitleBackgroundColor: Color by mutableStateOf(Color.Black.copy(alpha = 0.5f))
     override val metadata: VideoMetadata = VideoMetadata()
@@ -117,9 +106,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override val durationText: String get() = _durationText.value
 
     override val currentTime: Double
-        get() = runBlocking {
-            if (hasMedia) getPositionSafely() else 0.0
-        }
+        get() =
+            runBlocking {
+                if (hasMedia) getPositionSafely() else 0.0
+            }
 
     private val _aspectRatio = mutableStateOf(16f / 9f)
     override val aspectRatio: Float get() = _aspectRatio.value
@@ -149,11 +139,12 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
 
     private val updateInterval: Long
-        get() = if (captureFrameRate > 0) {
-            (1000.0f / captureFrameRate).toLong()
-        } else {
-            33L // ~30fps default
-        }
+        get() =
+            if (captureFrameRate > 0) {
+                (1000.0f / captureFrameRate).toLong()
+            } else {
+                33L // ~30fps default
+            }
 
     private val bufferingCheckInterval = 200L
     private val bufferingTimeoutThreshold = 500L
@@ -169,39 +160,42 @@ class LinuxVideoPlayerState : VideoPlayerState {
     @OptIn(FlowPreview::class)
     private fun startUIUpdateJob() {
         uiUpdateJob?.cancel()
-        uiUpdateJob = ioScope.launch {
-            _currentFrameState.debounce(1).collect { newFrame ->
-                ensureActive()
-                withContext(Dispatchers.Main) {
-                    (currentFrameState as MutableState).value = newFrame
+        uiUpdateJob =
+            ioScope.launch {
+                _currentFrameState.debounce(1).collect { newFrame ->
+                    ensureActive()
+                    withContext(Dispatchers.Main) {
+                        (currentFrameState as MutableState).value = newFrame
+                    }
                 }
             }
-        }
     }
 
-    private suspend fun initPlayer() = ioScope.launch {
-        linuxLogger.d { "initPlayer() - Creating native player" }
-        try {
-            val ptr = SharedVideoPlayer.nCreatePlayer()
-            if (ptr != 0L) {
-                playerPtrAtomic.set(ptr)
-                linuxLogger.d { "Native player created successfully" }
-                applyVolume()
-                applyPlaybackSpeed()
-            } else {
-                linuxLogger.e { "Failed to create native player" }
-                withContext(Dispatchers.Main) {
-                    error = VideoPlayerError.UnknownError("Failed to create native player")
+    private suspend fun initPlayer() =
+        ioScope
+            .launch {
+                linuxLogger.d { "initPlayer() - Creating native player" }
+                try {
+                    val ptr = LinuxNativeBridge.nCreatePlayer()
+                    if (ptr != 0L) {
+                        playerPtrAtomic.set(ptr)
+                        linuxLogger.d { "Native player created successfully" }
+                        applyVolume()
+                        applyPlaybackSpeed()
+                    } else {
+                        linuxLogger.e { "Failed to create native player" }
+                        withContext(Dispatchers.Main) {
+                            error = VideoPlayerError.UnknownError("Failed to create native player")
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    linuxLogger.e { "Exception in initPlayer: ${e.message}" }
+                    withContext(Dispatchers.Main) {
+                        error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
+                    }
                 }
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            linuxLogger.e { "Exception in initPlayer: ${e.message}" }
-            withContext(Dispatchers.Main) {
-                error = VideoPlayerError.UnknownError("Failed to initialize player: ${e.message}")
-            }
-        }
-    }.join()
+            }.join()
 
     private fun checkExistsIfLocalFile(uri: String): Boolean {
         val schemeDelimiter = uri.indexOf("://")
@@ -215,7 +209,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
-    override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
+    override fun openUri(
+        uri: String,
+        initializeplayerState: InitialPlayerState,
+    ) {
         linuxLogger.d { "openUri() - Opening URI: $uri" }
         lastUri = uri
 
@@ -278,7 +275,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
-    override fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
+    override fun openFile(
+        file: PlatformFile,
+        initializeplayerState: InitialPlayerState,
+    ) {
         openUri(file.file.path, initializeplayerState)
     }
 
@@ -287,13 +287,14 @@ class LinuxVideoPlayerState : VideoPlayerState {
         stopFrameUpdates()
         stopBufferingCheck()
 
-        val ptrToDispose = withContext(frameDispatcher) {
-            playerPtrAtomic.getAndSet(0L)
-        }
+        val ptrToDispose =
+            withContext(frameDispatcher) {
+                playerPtrAtomic.getAndSet(0L)
+            }
 
         if (ptrToDispose != 0L) {
             try {
-                SharedVideoPlayer.nDisposePlayer(ptrToDispose)
+                LinuxNativeBridge.nDisposePlayer(ptrToDispose)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 linuxLogger.e { "Error disposing player: ${e.message}" }
@@ -307,10 +308,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
 
         if (playerPtr == 0L) {
-            val ptr = SharedVideoPlayer.nCreatePlayer()
+            val ptr = LinuxNativeBridge.nCreatePlayer()
             if (ptr != 0L) {
                 if (!playerPtrAtomic.compareAndSet(0L, ptr)) {
-                    SharedVideoPlayer.nDisposePlayer(ptr)
+                    LinuxNativeBridge.nDisposePlayer(ptr)
                 } else {
                     applyVolume()
                     applyPlaybackSpeed()
@@ -331,7 +332,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
 
         return try {
-            SharedVideoPlayer.nOpenUri(ptr, uri)
+            LinuxNativeBridge.nOpenUri(ptr, uri)
             pollDimensionsUntilReady(ptr)
             updateMetadata()
             true
@@ -342,10 +343,13 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
-    private suspend fun pollDimensionsUntilReady(ptr: Long, maxAttempts: Int = 20) {
+    private suspend fun pollDimensionsUntilReady(
+        ptr: Long,
+        maxAttempts: Int = 20,
+    ) {
         for (attempt in 1..maxAttempts) {
-            val width = SharedVideoPlayer.nGetFrameWidth(ptr)
-            val height = SharedVideoPlayer.nGetFrameHeight(ptr)
+            val width = LinuxNativeBridge.nGetFrameWidth(ptr)
+            val height = LinuxNativeBridge.nGetFrameHeight(ptr)
             if (width > 0 && height > 0) {
                 linuxLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
                 return
@@ -360,7 +364,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return
         try {
-            captureFrameRate = SharedVideoPlayer.nGetFrameRate(ptr)
+            captureFrameRate = LinuxNativeBridge.nGetFrameRate(ptr)
             linuxLogger.d { "Frame rate: $captureFrameRate" }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -373,21 +377,22 @@ class LinuxVideoPlayerState : VideoPlayerState {
         if (ptr == 0L) return
 
         try {
-            val width = SharedVideoPlayer.nGetFrameWidth(ptr)
-            val height = SharedVideoPlayer.nGetFrameHeight(ptr)
-            val duration = SharedVideoPlayer.nGetVideoDuration(ptr).toLong()
-            val frameRate = SharedVideoPlayer.nGetFrameRate(ptr)
-            val newAspectRatio = if (width > 0 && height > 0) {
-                width.toFloat() / height.toFloat()
-            } else {
-                _aspectRatio.value
-            }
+            val width = LinuxNativeBridge.nGetFrameWidth(ptr)
+            val height = LinuxNativeBridge.nGetFrameHeight(ptr)
+            val duration = LinuxNativeBridge.nGetVideoDuration(ptr).toLong()
+            val frameRate = LinuxNativeBridge.nGetFrameRate(ptr)
+            val newAspectRatio =
+                if (width > 0 && height > 0) {
+                    width.toFloat() / height.toFloat()
+                } else {
+                    _aspectRatio.value
+                }
 
-            val title = SharedVideoPlayer.nGetVideoTitle(ptr)
-            val bitrate = SharedVideoPlayer.nGetVideoBitrate(ptr)
-            val mimeType = SharedVideoPlayer.nGetVideoMimeType(ptr)
-            val audioChannels = SharedVideoPlayer.nGetAudioChannels(ptr)
-            val audioSampleRate = SharedVideoPlayer.nGetAudioSampleRate(ptr)
+            val title = LinuxNativeBridge.nGetVideoTitle(ptr)
+            val bitrate = LinuxNativeBridge.nGetVideoBitrate(ptr)
+            val mimeType = LinuxNativeBridge.nGetVideoMimeType(ptr)
+            val audioChannels = LinuxNativeBridge.nGetAudioChannels(ptr)
+            val audioSampleRate = LinuxNativeBridge.nGetAudioSampleRate(ptr)
 
             withContext(Dispatchers.Main) {
                 metadata.duration = duration
@@ -411,17 +416,17 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     private fun startFrameUpdates() {
         stopFrameUpdates()
-        frameUpdateJob = ioScope.launch {
-            while (isActive) {
-                ensureActive()
-                updateFrameAsync()
-                if (!userDragging) {
-                    updatePositionAsync()
-                    updateAudioLevelsAsync()
+        frameUpdateJob =
+            ioScope.launch {
+                while (isActive) {
+                    ensureActive()
+                    updateFrameAsync()
+                    if (!userDragging) {
+                        updatePositionAsync()
+                    }
+                    delay(updateInterval)
                 }
-                delay(updateInterval)
             }
-        }
     }
 
     private fun stopFrameUpdates() {
@@ -431,13 +436,14 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     private fun startBufferingCheck() {
         stopBufferingCheck()
-        bufferingCheckJob = ioScope.launch {
-            while (isActive) {
-                ensureActive()
-                checkBufferingState()
-                delay(bufferingCheckInterval)
+        bufferingCheckJob =
+            ioScope.launch {
+                while (isActive) {
+                    ensureActive()
+                    checkBufferingState()
+                    delay(bufferingCheckInterval)
+                }
             }
-        }
     }
 
     private suspend fun checkBufferingState() {
@@ -460,11 +466,11 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 val ptr = playerPtr
                 if (ptr == 0L) return@withContext
 
-                val width = SharedVideoPlayer.nGetFrameWidth(ptr)
-                val height = SharedVideoPlayer.nGetFrameHeight(ptr)
+                val width = LinuxNativeBridge.nGetFrameWidth(ptr)
+                val height = LinuxNativeBridge.nGetFrameHeight(ptr)
                 if (width <= 0 || height <= 0) return@withContext
 
-                val frameAddress = SharedVideoPlayer.nGetLatestFrameAddress(ptr)
+                val frameAddress = LinuxNativeBridge.nGetLatestFrameAddress(ptr)
                 if (frameAddress == 0L) return@withContext
 
                 val pixelCount = width * height
@@ -472,8 +478,9 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 var framePublished = false
 
                 withContext(Dispatchers.Default) {
-                    val srcBuf = SharedVideoPlayer.nWrapPointer(frameAddress, frameSizeBytes)
-                        ?: return@withContext
+                    val srcBuf =
+                        LinuxNativeBridge.nWrapPointer(frameAddress, frameSizeBytes)
+                            ?: return@withContext
 
                     // Allocate/reuse double-buffered bitmaps
                     if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
@@ -499,8 +506,9 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     srcBuf.rewind()
                     val destRowBytes = pixmap.rowBytes.toInt()
                     val destSizeBytes = destRowBytes.toLong() * height.toLong()
-                    val destBuf = SharedVideoPlayer.nWrapPointer(pixelsAddr, destSizeBytes)
-                        ?: return@withContext
+                    val destBuf =
+                        LinuxNativeBridge.nWrapPointer(pixelsAddr, destSizeBytes)
+                            ?: return@withContext
                     copyBgraFrame(srcBuf, destBuf, width, height, destRowBytes)
 
                     _currentFrameState.value = targetBitmap.asComposeImageBitmap()
@@ -517,32 +525,6 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 if (e is CancellationException) throw e
                 linuxLogger.e { "updateFrameAsync() - Exception: ${e.message}" }
             }
-        }
-    }
-
-    private suspend fun updateAudioLevelsAsync() {
-        if (!hasMedia) return
-        try {
-            val ptr = playerPtr
-            if (ptr != 0L) {
-                val newLeft = SharedVideoPlayer.nGetLeftAudioLevel(ptr)
-                val newRight = SharedVideoPlayer.nGetRightAudioLevel(ptr)
-
-                fun convertToPercentage(level: Float): Float {
-                    if (level <= 0f) return 0f
-                    val db = 20 * log10(level)
-                    val normalized = ((db + 60) / 60).coerceIn(0f, 1f)
-                    return normalized * 100f
-                }
-
-                withContext(Dispatchers.Main) {
-                    _leftLevel.value = convertToPercentage(newLeft)
-                    _rightLevel.value = convertToPercentage(newRight)
-                }
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            linuxLogger.e { "Error updating audio levels: ${e.message}" }
         }
     }
 
@@ -577,9 +559,12 @@ class LinuxVideoPlayerState : VideoPlayerState {
         }
     }
 
-    private suspend fun checkLoopingAsync(current: Double, duration: Double) {
+    private suspend fun checkLoopingAsync(
+        current: Double,
+        duration: Double,
+    ) {
         val ptr = playerPtr
-        val ended = ptr != 0L && SharedVideoPlayer.nConsumeDidPlayToEnd(ptr)
+        val ended = ptr != 0L && LinuxNativeBridge.nConsumeDidPlayToEnd(ptr)
         if (!ended && (duration <= 0 || current < duration - 0.5)) return
 
         if (loop) {
@@ -611,7 +596,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return
         try {
-            SharedVideoPlayer.nPlay(ptr)
+            LinuxNativeBridge.nPlay(ptr)
             withContext(Dispatchers.Main) { isPlaying = true }
             startFrameUpdates()
             startBufferingCheck()
@@ -630,7 +615,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return
         try {
-            SharedVideoPlayer.nPause(ptr)
+            LinuxNativeBridge.nPause(ptr)
             withContext(Dispatchers.Main) {
                 isPlaying = false
                 isLoading = false
@@ -685,10 +670,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
             val ptr = playerPtr
             if (ptr == 0L) return
-            SharedVideoPlayer.nSeekTo(ptr, seekTime.toDouble())
+            LinuxNativeBridge.nSeekTo(ptr, seekTime.toDouble())
 
             if (isPlaying) {
-                SharedVideoPlayer.nPlay(ptr)
+                LinuxNativeBridge.nPlay(ptr)
                 delay(10)
                 updateFrameAsync()
                 ioScope.launch {
@@ -728,23 +713,24 @@ class LinuxVideoPlayerState : VideoPlayerState {
         playerScope.cancel()
 
         ioScope.launch {
-            val ptrToDispose = withContext(frameDispatcher) {
-                val ptr = playerPtrAtomic.getAndSet(0L)
+            val ptrToDispose =
+                withContext(frameDispatcher) {
+                    val ptr = playerPtrAtomic.getAndSet(0L)
 
-                skiaBitmapA?.close()
-                skiaBitmapB?.close()
-                skiaBitmapA = null
-                skiaBitmapB = null
-                skiaBitmapWidth = 0
-                skiaBitmapHeight = 0
-                nextSkiaBitmapA = true
+                    skiaBitmapA?.close()
+                    skiaBitmapB?.close()
+                    skiaBitmapA = null
+                    skiaBitmapB = null
+                    skiaBitmapWidth = 0
+                    skiaBitmapHeight = 0
+                    nextSkiaBitmapA = true
 
-                ptr
-            }
+                    ptr
+                }
 
             if (ptrToDispose != 0L) {
                 try {
-                    SharedVideoPlayer.nDisposePlayer(ptrToDispose)
+                    LinuxNativeBridge.nDisposePlayer(ptrToDispose)
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
                     linuxLogger.e { "Error disposing player: ${e.message}" }
@@ -779,7 +765,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     // --- Output scaling ---
 
-    fun onResized(width: Int, height: Int) {
+    fun onResized(
+        width: Int,
+        height: Int,
+    ) {
         if (width <= 0 || height <= 0) return
         if (width == surfaceWidth && height == surfaceHeight) return
 
@@ -788,14 +777,15 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
         isResizing.set(true)
         resizeJob?.cancel()
-        resizeJob = ioScope.launch {
-            delay(120)
-            try {
-                applyOutputScaling()
-            } finally {
-                isResizing.set(false)
+        resizeJob =
+            ioScope.launch {
+                delay(120)
+                try {
+                    applyOutputScaling()
+                } finally {
+                    isResizing.set(false)
+                }
             }
-        }
     }
 
     private suspend fun applyOutputScaling() {
@@ -804,7 +794,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         if (sw <= 0 || sh <= 0) return
         val ptr = playerPtr
         if (ptr == 0L) return
-        SharedVideoPlayer.nSetOutputSize(ptr, sw, sh)
+        LinuxNativeBridge.nSetOutputSize(ptr, sw, sh)
     }
 
     // --- Internal helpers ---
@@ -842,7 +832,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return 0.0
         return try {
-            SharedVideoPlayer.nGetCurrentTime(ptr)
+            LinuxNativeBridge.nGetCurrentTime(ptr)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             0.0
@@ -853,7 +843,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         val ptr = playerPtr
         if (ptr == 0L) return 0.0
         return try {
-            SharedVideoPlayer.nGetVideoDuration(ptr)
+            LinuxNativeBridge.nGetVideoDuration(ptr)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             0.0
@@ -862,19 +852,23 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     private suspend fun applyVolume() {
         val ptr = playerPtr
-        if (ptr != 0L) try {
-            SharedVideoPlayer.nSetVolume(ptr, _volumeState.value)
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
+        if (ptr != 0L) {
+            try {
+                LinuxNativeBridge.nSetVolume(ptr, _volumeState.value)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
         }
     }
 
     private suspend fun applyPlaybackSpeed() {
         val ptr = playerPtr
-        if (ptr != 0L) try {
-            SharedVideoPlayer.nSetPlaybackSpeed(ptr, _playbackSpeedState.value)
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
+        if (ptr != 0L) {
+            try {
+                LinuxNativeBridge.nSetPlaybackSpeed(ptr, _playbackSpeedState.value)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
         }
     }
 }

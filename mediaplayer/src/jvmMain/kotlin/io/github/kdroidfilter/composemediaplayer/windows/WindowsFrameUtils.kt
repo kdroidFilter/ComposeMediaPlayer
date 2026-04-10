@@ -10,7 +10,10 @@ import java.nio.ByteBuffer
  * @param pixelCount Total number of pixels in the frame
  * @return A hash value representing the frame content
  */
-internal fun calculateFrameHash(buffer: ByteBuffer, pixelCount: Int): Int {
+internal fun calculateFrameHash(
+    buffer: ByteBuffer,
+    pixelCount: Int,
+): Int {
     if (pixelCount <= 0) return 0
 
     var hash = 1

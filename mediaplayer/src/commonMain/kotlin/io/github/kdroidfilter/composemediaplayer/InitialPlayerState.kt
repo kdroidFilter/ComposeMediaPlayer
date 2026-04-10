@@ -12,5 +12,5 @@ enum class InitialPlayerState {
     /**
      * The player will remain paused after opening the media.
      */
-    PAUSE
+    PAUSE,
 }
