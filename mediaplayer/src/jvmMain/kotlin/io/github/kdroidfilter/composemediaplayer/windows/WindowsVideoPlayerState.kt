@@ -169,7 +169,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     override var playbackSpeed: Float
         get() = _playbackSpeed
         set(value) {
-            val newSpeed = value.coerceIn(0.5f, 2.0f)
+            val newSpeed = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             if (_playbackSpeed != newSpeed) {
                 _playbackSpeed = newSpeed
                 scope.launch {

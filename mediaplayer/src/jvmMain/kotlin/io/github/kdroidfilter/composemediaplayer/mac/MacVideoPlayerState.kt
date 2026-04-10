@@ -147,7 +147,7 @@ class MacVideoPlayerState : VideoPlayerState {
     override var playbackSpeed: Float
         get() = _playbackSpeedState.value
         set(value) {
-            val newValue = value.coerceIn(0.5f, 2.0f)
+            val newValue = value.coerceIn(VideoPlayerState.MIN_PLAYBACK_SPEED, VideoPlayerState.MAX_PLAYBACK_SPEED)
             if (_playbackSpeedState.value != newValue) {
                 _playbackSpeedState.value = newValue
                 // Launch a coroutine to apply the playback speed if the native player is available.
