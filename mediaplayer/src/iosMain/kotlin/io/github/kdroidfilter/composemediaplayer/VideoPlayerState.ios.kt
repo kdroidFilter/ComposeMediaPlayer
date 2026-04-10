@@ -10,7 +10,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import co.touchlab.kermit.Logger
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.PlatformFile
@@ -46,6 +46,8 @@ import platform.darwin.dispatch_get_main_queue
 
 actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState()
 
+private val iosLogger = TaggedLogger("iOSVideoPlayerState")
+
 @Stable
 open class DefaultVideoPlayerState: VideoPlayerState {
 
@@ -68,7 +70,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
         get() = _loop
         set(value) {
             _loop = value
-            Logger.d { "Loop setting changed to: $value" }
+            iosLogger.d { "Loop setting changed to: $value" }
         }
 
     // Playback speed control
@@ -162,7 +164,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             session.setCategory(AVAudioSessionCategoryPlayback, mode = AVAudioSessionModeMoviePlayback, options = 0u, error = null)
             session.setActive(true, error = null)
         } catch (e: Exception) {
-            Logger.e { "Failed to configure audio session: ${e.message}" }
+            iosLogger.e { "Failed to configure audio session: ${e.message}" }
         }
     }
 
@@ -199,7 +201,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
                         if (_metadata.width == null || _metadata.width == 0 || _metadata.height == null || _metadata.height == 0) {
                             _metadata.width = width.toInt()
                             _metadata.height = height.toInt()
-                            Logger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
+                            iosLogger.d { "Video resolution updated during playback: ${width.toInt()}x${height.toInt()}" }
                         }
                     }
                 }
@@ -232,12 +234,12 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             when (item.status) {
                 AVPlayerItemStatusReadyToPlay -> {
                     _isLoading = false
-                    Logger.d { "Player Item Ready" }
+                    iosLogger.d { "Player Item Ready" }
                 }
                 AVPlayerItemStatusFailed -> {
                     _isLoading = false
                     _isPlaying = false
-                    Logger.e { "Player Item Failed: ${item.error?.localizedDescription}" }
+                    iosLogger.e { "Player Item Failed: ${item.error?.localizedDescription}" }
                 }
             }
         }
@@ -290,14 +292,14 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             `object` = UIApplication.sharedApplication,
             queue = null
         ) { _ ->
-            Logger.d { "App entered background (screen locked)" }
+            iosLogger.d { "App entered background (screen locked)" }
             // Store current playing state before background
             wasPlayingBeforeBackground = _isPlaying
             
             // If player is paused by the system, update our state to match
             player?.let { player ->
                 if (player.rate == 0.0f) {
-                    Logger.d { "Player was paused by system, updating isPlaying state" }
+                    iosLogger.d { "Player was paused by system, updating isPlaying state" }
                     _isPlaying = false
                 }
             }
@@ -309,10 +311,10 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             `object` = UIApplication.sharedApplication,
             queue = null
         ) { _ ->
-            Logger.d { "App will enter foreground (screen unlocked)" }
+            iosLogger.d { "App will enter foreground (screen unlocked)" }
             // If player was playing before going to background, resume playback
             if (wasPlayingBeforeBackground) {
-                Logger.d { "Player was playing before background, resuming" }
+                iosLogger.d { "Player was playing before background, resuming" }
                 player?.let { player ->
                     // Only resume if the player is overridely paused
                     if (player.rate == 0.0f) {
@@ -322,7 +324,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             }
         }
         
-        Logger.d { "App lifecycle observers set up" }
+        iosLogger.d { "App lifecycle observers set up" }
     }
     
     private fun removeAppLifecycleObservers() {
@@ -382,9 +384,9 @@ open class DefaultVideoPlayerState: VideoPlayerState {
      * @param initializeplayerState Controls whether playback should start automatically after opening
      */
     override fun openUri(uri: String, initializeplayerState: InitialPlayerState) {
-        Logger.d { "openUri called with uri: $uri, initializeplayerState: $initializeplayerState" }
+        iosLogger.d { "openUri called with uri: $uri, initializeplayerState: $initializeplayerState" }
         val nsUrl = NSURL.URLWithString(uri) ?: run {
-            Logger.d { "Failed to create NSURL from uri: $uri" }
+            iosLogger.d { "Failed to create NSURL from uri: $uri" }
             return
         }
 
@@ -440,7 +442,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
                             heightTemp = height.toInt()
                             // Try to use real aspect ratio if available, fallback to 16:9
                             videoAspectRatioTemp = width / height
-                            Logger.d { "Video resolution from track: ${width.toInt()}x${height.toInt()}" }
+                            iosLogger.d { "Video resolution from track: ${width.toInt()}x${height.toInt()}" }
                         }
                     }
                 }
@@ -472,7 +474,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
             dispatch_async(dispatch_get_main_queue()) {
                 // Check if disposed
                 if (isDisposed) {
-                    Logger.d { "player disposed, canceling initialization" }
+                    iosLogger.d { "player disposed, canceling initialization" }
                     return@dispatch_async
                 }
 
@@ -517,9 +519,9 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     override fun play() {
-        Logger.d { "play called" }
+        iosLogger.d { "play called" }
         if (player == null) {
-            Logger.d { "play: player is null" }
+            iosLogger.d { "play: player is null" }
             return
         }
         // Configure audio session
@@ -529,7 +531,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     override fun pause() {
-        Logger.d { "pause called" }
+        iosLogger.d { "pause called" }
         // Ensure the pause call is on the main thread:
         dispatch_async(dispatch_get_main_queue()) {
             player?.pause()
@@ -538,7 +540,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     override fun stop() {
-        Logger.d { "stop called" }
+        iosLogger.d { "stop called" }
         player?.pause()
         player?.seekToTime(CMTimeMakeWithSeconds(0.0, 1))
         _isPlaying = false
@@ -580,19 +582,19 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     override fun clearError() {
-        Logger.d { "clearError called" }
+        iosLogger.d { "clearError called" }
     }
 
     /**
      * Toggles the fullscreen state of the video player
      */
     override fun toggleFullscreen() {
-        Logger.d { "toggleFullscreen called" }
+        iosLogger.d { "toggleFullscreen called" }
         _isFullscreen = !_isFullscreen
     }
 
     override fun dispose() {
-        Logger.d { "dispose called" }
+        iosLogger.d { "dispose called" }
         isDisposed = true
         cleanupCurrentPlayer()
         _hasMedia = false
@@ -603,10 +605,10 @@ open class DefaultVideoPlayerState: VideoPlayerState {
     }
 
     override fun openFile(file: PlatformFile, initializeplayerState: InitialPlayerState) {
-        Logger.d { "openFile called with file: $file, initializeplayerState: $initializeplayerState" }
+        iosLogger.d { "openFile called with file: $file, initializeplayerState: $initializeplayerState" }
         // Use the getUri extension function to get a proper file URL
         val fileUrl = file.getUri()
-        Logger.d { "Opening file with URL: $fileUrl" }
+        iosLogger.d { "Opening file with URL: $fileUrl" }
         openUri(fileUrl, initializeplayerState)
     }
 
@@ -647,7 +649,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
      * @param track The subtitle track to select, or null to disable subtitles
      */
     override fun selectSubtitleTrack(track: SubtitleTrack?) {
-        Logger.d { "selectSubtitleTrack called with track: $track" }
+        iosLogger.d { "selectSubtitleTrack called with track: $track" }
         if (track == null) {
             disableSubtitles()
             return
@@ -665,7 +667,7 @@ open class DefaultVideoPlayerState: VideoPlayerState {
      * Disables subtitle display.
      */
     override fun disableSubtitles() {
-        Logger.d { "disableSubtitles called" }
+        iosLogger.d { "disableSubtitles called" }
         // Update state
         currentSubtitleTrack = null
         subtitlesEnabled = false

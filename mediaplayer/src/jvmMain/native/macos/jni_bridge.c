@@ -232,7 +232,7 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
         return -1;
 
     jclass cls = (*env)->FindClass(
-        env, "io/github/kdroidfilter/composemediaplayer/mac/SharedVideoPlayer");
+        env, "io/github/kdroidfilter/composemediaplayer/mac/MacNativeBridge");
     if (!cls) return -1;
 
     int count = (int)(sizeof(g_methods) / sizeof(g_methods[0]));

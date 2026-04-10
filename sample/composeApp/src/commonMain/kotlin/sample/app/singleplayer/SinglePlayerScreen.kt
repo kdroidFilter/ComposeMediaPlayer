@@ -74,7 +74,6 @@ private fun SinglePlayerScreenCore(playerState: VideoPlayerState) {
         // Launcher for selecting a local video file
         val videoFileLauncher = rememberFilePickerLauncher(
             type = FileKitType.Video,
-            title = "Select a video"
         ) { file ->
             file?.let {
                 playerState.openFile(it, initialPlayerState)
@@ -84,7 +83,6 @@ private fun SinglePlayerScreenCore(playerState: VideoPlayerState) {
         // Launcher for selecting a local subtitle file (VTT format)
         val subtitleFileLauncher = rememberFilePickerLauncher(
             type = FileKitType.File("vtt", "srt"),
-            title = "Select a subtitle file"
         ) { file ->
             file?.let {
                 val subtitleUri = it.getUri()

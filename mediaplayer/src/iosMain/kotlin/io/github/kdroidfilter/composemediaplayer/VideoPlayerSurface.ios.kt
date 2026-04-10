@@ -10,7 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.viewinterop.UIKitView
-import co.touchlab.kermit.Logger
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
@@ -29,6 +29,8 @@ import platform.Foundation.NSCoder
 import platform.UIKit.UIColor
 import platform.UIKit.UIView
 import platform.UIKit.UIViewMeta
+
+private val iosSurfaceLogger = TaggedLogger("iOSVideoPlayerSurface")
 
 @OptIn(ExperimentalForeignApi::class)
 @Composable
@@ -55,13 +57,13 @@ fun VideoPlayerSurfaceImpl(
     // Cleanup when deleting the view
     DisposableEffect(Unit) {
         onDispose {
-            Logger.d { "[VideoPlayerSurface] Disposing" }
+            iosSurfaceLogger.d { "[VideoPlayerSurface] Disposing" }
             // Only pause if pauseOnDispose is true (prevents pausing during rotation or fullscreen transitions)
             if (pauseOnDispose) {
-                Logger.d { "[VideoPlayerSurface] Pausing on dispose" }
+                iosSurfaceLogger.d { "[VideoPlayerSurface] Pausing on dispose" }
                 playerState.pause()
             } else {
-                Logger.d { "[VideoPlayerSurface] Not pausing on dispose (rotation or fullscreen transition)" }
+                iosSurfaceLogger.d { "[VideoPlayerSurface] Not pausing on dispose (rotation or fullscreen transition)" }
             }
         }
     }
@@ -107,7 +109,7 @@ fun VideoPlayerSurfaceImpl(
                     }
                     playerView.videoGravity = videoGravity
 
-                    Logger.d { "View configured with contentScale: $contentScale, videoGravity: $videoGravity" }
+                    iosSurfaceLogger.d { "View configured with contentScale: $contentScale, videoGravity: $videoGravity" }
                 },
                 onRelease = { playerView ->
                     playerView.player = null

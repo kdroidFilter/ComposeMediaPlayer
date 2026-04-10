@@ -51,7 +51,6 @@ kotlin {
         binaries.executable()
     }
     listOf(
-        iosX64(),
         iosArm64(),
         iosSimulatorArm64()
     ).forEach {
@@ -63,14 +62,13 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.components.uiToolingPreview)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material3)
+            implementation(libs.compose.ui.tooling.preview)
+            implementation(libs.compose.material.icons.extended)
             implementation(project(":mediaplayer"))
-            implementation(compose.materialIconsExtended)
             implementation(libs.filekit.dialogs.compose)
-            implementation(libs.platformtools.darkmodedetector)
         }
 
         androidMain.dependencies {
@@ -83,13 +81,8 @@ kotlin {
         }
         webMain.dependencies {
             implementation(libs.kotlinx.browser)
-
         }
     }
-}
-
-dependencies {
-    debugImplementation(compose.uiTooling)
 }
 
 android {
@@ -104,6 +97,10 @@ android {
         versionCode = 1
         versionName = "1.0.0"
     }
+}
+
+dependencies {
+    debugImplementation(libs.compose.ui.tooling)
 }
 
 compose.desktop {
@@ -143,9 +140,5 @@ tasks.register<Exec>("runIos") {
     doFirst {
         println("Running iOS app in simulator...")
     }
-}
-
-dependencies {
-    debugImplementation(compose.uiTooling)
 }
 

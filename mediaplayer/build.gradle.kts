@@ -1,7 +1,6 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
 import org.apache.tools.ant.taskdefs.condition.Os
-import org.jetbrains.dokka.gradle.DokkaTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.plugin.mpp.NativeBuildType
 
@@ -18,16 +17,10 @@ plugins {
 group = "io.github.kdroidfilter.composemediaplayer"
 
 val ref = System.getenv("GITHUB_REF") ?: ""
-val version = if (ref.startsWith("refs/tags/")) {
+val projectVersion = if (ref.startsWith("refs/tags/")) {
     val tag = ref.removePrefix("refs/tags/")
     if (tag.startsWith("v")) tag.substring(1) else tag
 } else "dev"
-
-
-tasks.withType<DokkaTask>().configureEach {
-    moduleName.set("Compose Media Player")
-    offlineMode.set(true)
-}
 
 
 kotlin {
@@ -49,7 +42,6 @@ kotlin {
     listOf(
         iosArm64(),
         iosSimulatorArm64(),
-        iosX64(),
     ).forEach { target ->
         target.compilations.getByName("main") {
             // The default file path is src/nativeInterop/cinterop/<interop-name>.def
@@ -59,7 +51,7 @@ kotlin {
 
 
     cocoapods {
-        version = version.toString()
+        version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
         summary = "A multiplatform video player library for Compose applications"
         homepage = "https://github.com/kdroidFilter/Compose-Media-Player"
         name = "ComposeMediaPlayer"
@@ -78,13 +70,12 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.coroutines.test)
             api(libs.filekit.core)
             implementation(libs.kotlinx.datetime)
-            implementation(libs.kermit)
         }
 
         commonTest.dependencies {
@@ -108,7 +99,7 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
-            implementation(libs.slf4j.simple)
+            implementation(libs.nucleus.core.runtime)
         }
 
         jvmTest.dependencies {
@@ -127,8 +118,7 @@ kotlin {
 
         webMain.dependencies {
             implementation(libs.kotlinx.browser)
-            implementation(compose.ui)
-
+            implementation(libs.compose.ui)
         }
 
         wasmJsTest.dependencies {
@@ -158,7 +148,7 @@ android {
     }
 }
 
-val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources")
+val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources/composemediaplayer/native")
 
 val buildNativeMacOs by tasks.registering(Exec::class) {
     description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
@@ -226,7 +216,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.kdroidfilter",
         artifactId = "composemediaplayer",
-        version = version.toString()
+        version = projectVersion
     )
 
     pom {

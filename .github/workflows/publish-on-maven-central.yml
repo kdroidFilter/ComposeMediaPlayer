@@ -17,27 +17,51 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download Windows natives
+      - name: Download macOS ARM64 library
         uses: actions/download-artifact@v4
         with:
-          name: windows-natives
-          path: mediaplayer/src/jvmMain/resources/
-          merge-multiple: true
+          name: native-darwin-aarch64
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-aarch64/
 
-      - name: Download macOS natives
+      - name: Download macOS x86_64 library
         uses: actions/download-artifact@v4
         with:
-          name: macos-natives
-          path: mediaplayer/src/jvmMain/resources/
-          merge-multiple: true
+          name: native-darwin-x86-64
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64/
+
+      - name: Download Linux x86_64 library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x86-64
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-x86-64/
+
+      - name: Download Linux aarch64 library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-aarch64
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-aarch64/
+
+      - name: Download Windows x64 library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-win32-x86-64
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-x86-64/
+
+      - name: Download Windows ARM64 library
+        uses: actions/download-artifact@v4
+        with:
+          name: native-win32-arm64
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-arm64/
 
       - name: Verify all natives present
         run: |
           EXPECTED=(
-            "mediaplayer/src/jvmMain/resources/win32-x86-64/NativeVideoPlayer.dll"
-            "mediaplayer/src/jvmMain/resources/win32-arm64/NativeVideoPlayer.dll"
-            "mediaplayer/src/jvmMain/resources/darwin-aarch64/libNativeVideoPlayer.dylib"
-            "mediaplayer/src/jvmMain/resources/darwin-x86-64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-aarch64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-x86-64/libNativeVideoPlayer.so"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-aarch64/libNativeVideoPlayer.so"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-x86-64/NativeVideoPlayer.dll"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-arm64/NativeVideoPlayer.dll"
           )
           MISSING=0
           for f in "${EXPECTED[@]}"; do

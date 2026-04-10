@@ -43,7 +43,7 @@ rem Clean up build directories
 if exist build-x64 rmdir /s /q build-x64
 if exist build-arm64 rmdir /s /q build-arm64
 
-echo x64 DLL: ..\..\resources\win32-x86-64\NativeVideoPlayer.dll
-echo ARM64 DLL: ..\..\resources\win32-arm64\NativeVideoPlayer.dll
+echo x64 DLL: ..\..\resources\composemediaplayer\native\win32-x86-64\NativeVideoPlayer.dll
+echo ARM64 DLL: ..\..\resources\composemediaplayer\native\win32-arm64\NativeVideoPlayer.dll
 
 endlocal

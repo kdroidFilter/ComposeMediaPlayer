@@ -243,7 +243,7 @@ extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void*) {
     if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK)
         return -1;
 
-    jclass cls = env->FindClass("io/github/kdroidfilter/composemediaplayer/windows/MediaFoundationLib");
+    jclass cls = env->FindClass("io/github/kdroidfilter/composemediaplayer/windows/WindowsNativeBridge");
     if (!cls) return -1;
 
     if (env->RegisterNatives(cls, g_methods, sizeof(g_methods) / sizeof(g_methods[0])) < 0)

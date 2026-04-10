@@ -1,38 +1,20 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
-import java.io.File
+import io.github.kdroidfilter.nucleus.core.runtime.NativeLibraryLoader
 import java.nio.ByteBuffer
-import java.nio.file.Files
 
-internal object MediaFoundationLib {
+internal object WindowsNativeBridge {
     /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the DLL. */
     private const val EXPECTED_NATIVE_VERSION = 2
 
     init {
-        loadNativeLibrary()
+        NativeLibraryLoader.load("NativeVideoPlayer", WindowsNativeBridge::class.java, "composemediaplayer/native")
         val nativeVersion = nGetNativeVersion()
         require(nativeVersion == EXPECTED_NATIVE_VERSION) {
             "NativeVideoPlayer DLL version mismatch: expected $EXPECTED_NATIVE_VERSION but got $nativeVersion. " +
                 "Please rebuild the native DLL or update the Kotlin bindings."
         }
-    }
-
-    private fun loadNativeLibrary() {
-        val osArch = System.getProperty("os.arch", "").lowercase()
-        val resourceDir =
-            if (osArch == "aarch64" || osArch == "arm64") "win32-arm64" else "win32-x86-64"
-        val libName = "NativeVideoPlayer.dll"
-
-        val stream = MediaFoundationLib::class.java.getResourceAsStream("/$resourceDir/$libName")
-            ?: throw UnsatisfiedLinkError("Native library not found in resources: /$resourceDir/$libName")
-
-        val tempDir = Files.createTempDirectory("nativevideoplayer").toFile()
-        val tempFile = File(tempDir, libName)
-        stream.use { input -> tempFile.outputStream().use { input.copyTo(it) } }
-        System.load(tempFile.absolutePath)
-        tempFile.deleteOnExit()
-        tempDir.deleteOnExit()
     }
 
     // ----- Helpers -----

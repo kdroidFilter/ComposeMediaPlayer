@@ -14,7 +14,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import co.touchlab.kermit.Logger
 import io.github.kdroidfilter.composemediaplayer.util.FullScreenLayout
 import io.github.kdroidfilter.composemediaplayer.util.VideoPlayerStateRegistry
 import kotlinx.cinterop.ExperimentalForeignApi

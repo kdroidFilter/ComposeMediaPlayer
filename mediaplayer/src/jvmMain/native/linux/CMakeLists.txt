@@ -41,13 +41,19 @@ target_compile_options(NativeVideoPlayer PRIVATE
 )
 
 # Determine output directory based on architecture
+if(DEFINED ENV{NATIVE_LIBS_OUTPUT_DIR})
+    set(BASE_OUTPUT_DIR "$ENV{NATIVE_LIBS_OUTPUT_DIR}")
+else()
+    set(BASE_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/composemediaplayer/native")
+endif()
+
 execute_process(COMMAND uname -m OUTPUT_VARIABLE ARCH OUTPUT_STRIP_TRAILING_WHITESPACE)
 if(ARCH STREQUAL "x86_64" OR ARCH STREQUAL "amd64")
-    set(RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/linux-x86-64")
+    set(RESOURCE_DIR "${BASE_OUTPUT_DIR}/linux-x86-64")
 elseif(ARCH STREQUAL "aarch64" OR ARCH STREQUAL "arm64")
-    set(RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/linux-aarch64")
+    set(RESOURCE_DIR "${BASE_OUTPUT_DIR}/linux-aarch64")
 else()
-    set(RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../resources/linux-${ARCH}")
+    set(RESOURCE_DIR "${BASE_OUTPUT_DIR}/linux-${ARCH}")
 endif()
 
 # Copy library to resources after build

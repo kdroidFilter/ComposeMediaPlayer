@@ -26,8 +26,6 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Severity
 import com.kdroid.androidcontextprovider.ContextProvider
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.AndroidFile
@@ -67,11 +65,9 @@ actual fun createVideoPlayerState(): VideoPlayerState =
         )
     }
 
-/**
- * Logger for WebAssembly video player surface
- */
-internal val androidVideoLogger = Logger.withTag("AndroidVideoPlayerSurface")
-    .apply { Logger.setMinSeverity(Severity.Warn) }
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
+
+internal val androidVideoLogger = TaggedLogger("AndroidVideoPlayerSurface")
 
 @UnstableApi
 @Stable

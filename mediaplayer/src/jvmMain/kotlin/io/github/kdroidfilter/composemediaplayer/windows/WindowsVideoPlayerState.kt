@@ -11,9 +11,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
-import co.touchlab.kermit.Logger
-import co.touchlab.kermit.Logger.Companion.setMinSeverity
-import co.touchlab.kermit.Severity
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
@@ -55,11 +52,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.write
 import kotlin.math.min
 
-/**
- * Logger for Windows video player implementation
- */
-internal val windowsLogger = Logger.withTag("WindowsVideoPlayerState")
-    .apply { setMinSeverity(Severity.Warn) }
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
+
+internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
 
 /**
  * Windows implementation of the video player state.
@@ -78,7 +73,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
          */
         private fun ensureMfInitialized() {
             if (!isMfBootstrapped.getAndSet(true)) {
-                val hr = MediaFoundationLib.InitMediaFoundation()
+                val hr = WindowsNativeBridge.InitMediaFoundation()
                 if (hr < 0) {
                     windowsLogger.e { "Media Foundation initialization failed (hr=0x${hr.toString(16)})" }
                 }
@@ -92,7 +87,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     }
 
     /** Instance of the native Media Foundation player */
-    private val player = MediaFoundationLib
+    private val player = WindowsNativeBridge
 
     /** Coroutine scope for all async operations */
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -272,7 +267,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
         // Kick off native initialization immediately
         scope.launch {
             try {
-                val handle = MediaFoundationLib.createInstance()
+                val handle = WindowsNativeBridge.createInstance()
                 if (handle == 0L) {
                     setError("Failed to create video player instance")
                     return@launch
@@ -335,7 +330,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
                         // Destroy the player instance
                         try {
-                            MediaFoundationLib.destroyInstance(instance)
+                            WindowsNativeBridge.destroyInstance(instance)
                         } catch (e: Exception) {
                             windowsLogger.e { "Exception destroying instance: ${e.message}" }
                         }
@@ -578,7 +573,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     _duration = durArr[0] / 10000000.0
 
                     // Retrieve metadata using the native function
-                    val retrievedMetadata = MediaFoundationLib.getVideoMetadata(instance)
+                    val retrievedMetadata = WindowsNativeBridge.getVideoMetadata(instance)
                     if (retrievedMetadata != null) {
                         _metadata = retrievedMetadata
                     } else {
@@ -810,7 +805,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // Single memory copy: native buffer → Skia bitmap
                 val dstRowBytes = pixmap.rowBytes
                 val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
-                val dstBuffer = MediaFoundationLib.nWrapPointer(pixelsAddr, dstSizeBytes)
+                val dstBuffer = WindowsNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
                     ?: run {
                         player.UnlockVideoFrame(instance)
                         yield()

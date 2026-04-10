@@ -7,7 +7,7 @@ import AppKit
 /// Class that manages video playback and frame capture into an optimized shared buffer.
 /// Frame capture rate adapts to the lower of screen refresh rate and video frame rate.
 /// Includes full HLS (HTTP Live Streaming) support with adaptive bitrate streaming.
-class SharedVideoPlayer {
+class MacVideoPlayer {
     private var player: AVPlayer?
     private var videoOutput: AVPlayerItemVideoOutput?
 
@@ -993,9 +993,9 @@ class SharedVideoPlayer {
     private let tapProcess: MTAudioProcessingTapProcessCallback = {
         (tap, numberFrames, flags, bufferListInOut, numberFramesOut, flagsOut) in
 
-        // Get the tap context (the SharedVideoPlayer instance)
+        // Get the tap context (the MacVideoPlayer instance)
         let opaqueSelf = MTAudioProcessingTapGetStorage(tap)
-        let mySelf = Unmanaged<SharedVideoPlayer>.fromOpaque(opaqueSelf).takeUnretainedValue()
+        let mySelf = Unmanaged<MacVideoPlayer>.fromOpaque(opaqueSelf).takeUnretainedValue()
 
         var localFrames = numberFrames
 
@@ -1367,7 +1367,7 @@ class SharedVideoPlayer {
 
 @_cdecl("createVideoPlayer")
 public func createVideoPlayer() -> UnsafeMutableRawPointer? {
-    let player = SharedVideoPlayer()
+    let player = MacVideoPlayer()
     return Unmanaged.passRetained(player).toOpaque()
 }
 
@@ -1380,7 +1380,7 @@ public func openUri(_ context: UnsafeMutableRawPointer?, _ uri: UnsafePointer<CC
         print("Invalid parameters for openUri")
         return
     }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     // Use a background queue for heavy operations to avoid blocking the main thread
     DispatchQueue.global(qos: .userInitiated).async {
         player.openUri(swiftUri)
@@ -1390,7 +1390,7 @@ public func openUri(_ context: UnsafeMutableRawPointer?, _ uri: UnsafePointer<CC
 @_cdecl("playVideo")
 public func playVideo(_ context: UnsafeMutableRawPointer?) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     DispatchQueue.main.async {
         player.play()
     }
@@ -1399,7 +1399,7 @@ public func playVideo(_ context: UnsafeMutableRawPointer?) {
 @_cdecl("pauseVideo")
 public func pauseVideo(_ context: UnsafeMutableRawPointer?) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     DispatchQueue.main.async {
         player.pause()
     }
@@ -1408,7 +1408,7 @@ public func pauseVideo(_ context: UnsafeMutableRawPointer?) {
 @_cdecl("setVolume")
 public func setVolume(_ context: UnsafeMutableRawPointer?, _ volume: Float) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     DispatchQueue.main.async {
         player.setVolume(level: volume)
     }
@@ -1417,84 +1417,84 @@ public func setVolume(_ context: UnsafeMutableRawPointer?, _ volume: Float) {
 @_cdecl("getVolume")
 public func getVolume(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getVolume()
 }
 
 @_cdecl("lockLatestFrame")
 public func lockLatestFrame(_ context: UnsafeMutableRawPointer?, _ outInfo: UnsafeMutablePointer<Int32>?) -> UnsafeMutableRawPointer? {
     guard let context = context, let outInfo = outInfo else { return nil }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.lockLatestFrame(outInfo)
 }
 
 @_cdecl("unlockLatestFrame")
 public func unlockLatestFrame(_ context: UnsafeMutableRawPointer?) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     player.unlockLatestFrame()
 }
 
 @_cdecl("getFrameWidth")
 public func getFrameWidth(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getFrameWidth())
 }
 
 @_cdecl("getFrameHeight")
 public func getFrameHeight(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getFrameHeight())
 }
 
 @_cdecl("setOutputSize")
 public func setOutputSize(_ context: UnsafeMutableRawPointer?, _ width: Int32, _ height: Int32) -> Int32 {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.setOutputSize(width: Int(width), height: Int(height)) ? 1 : 0
 }
 
 @_cdecl("getVideoFrameRate")
 public func getVideoFrameRate(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getVideoFrameRate()
 }
 
 @_cdecl("getScreenRefreshRate")
 public func getScreenRefreshRate(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getScreenRefreshRate()
 }
 
 @_cdecl("getCaptureFrameRate")
 public func getCaptureFrameRate(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getCaptureFrameRate()
 }
 
 @_cdecl("getVideoDuration")
 public func getVideoDuration(_ context: UnsafeMutableRawPointer?) -> Double {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getDuration()
 }
 
 @_cdecl("getCurrentTime")
 public func getCurrentTime(_ context: UnsafeMutableRawPointer?) -> Double {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getCurrentTime()
 }
 
 @_cdecl("seekTo")
 public func seekTo(_ context: UnsafeMutableRawPointer?, _ time: Double) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     DispatchQueue.main.async {
         player.seekTo(time: time)
     }
@@ -1503,7 +1503,7 @@ public func seekTo(_ context: UnsafeMutableRawPointer?, _ time: Double) {
 @_cdecl("disposeVideoPlayer")
 public func disposeVideoPlayer(_ context: UnsafeMutableRawPointer?) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeRetainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeRetainedValue()
     DispatchQueue.main.async {
         player.dispose()
     }
@@ -1512,21 +1512,21 @@ public func disposeVideoPlayer(_ context: UnsafeMutableRawPointer?) {
 @_cdecl("getLeftAudioLevel")
 public func getLeftAudioLevel(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getLeftAudioLevel()
 }
 
 @_cdecl("getRightAudioLevel")
 public func getRightAudioLevel(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0.0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getRightAudioLevel()
 }
 
 @_cdecl("setPlaybackSpeed")
 public func setPlaybackSpeed(_ context: UnsafeMutableRawPointer?, _ speed: Float) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     DispatchQueue.main.async {
         player.setPlaybackSpeed(speed: speed)
     }
@@ -1535,14 +1535,14 @@ public func setPlaybackSpeed(_ context: UnsafeMutableRawPointer?, _ speed: Float
 @_cdecl("getPlaybackSpeed")
 public func getPlaybackSpeed(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 1.0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getPlaybackSpeed()
 }
 
 @_cdecl("getVideoTitle")
 public func getVideoTitle(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
     guard let context = context else { return nil }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     if let title = player.getVideoTitle() {
         let cString = strdup(title)
         return UnsafePointer<CChar>(cString)
@@ -1553,14 +1553,14 @@ public func getVideoTitle(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<
 @_cdecl("getVideoBitrate")
 public func getVideoBitrate(_ context: UnsafeMutableRawPointer?) -> Int64 {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getVideoBitrate()
 }
 
 @_cdecl("getVideoMimeType")
 public func getVideoMimeType(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
     guard let context = context else { return nil }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     if let mimeType = player.getVideoMimeType() {
         let cString = strdup(mimeType)
         return UnsafePointer<CChar>(cString)
@@ -1571,21 +1571,21 @@ public func getVideoMimeType(_ context: UnsafeMutableRawPointer?) -> UnsafePoint
 @_cdecl("getAudioChannels")
 public func getAudioChannels(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getAudioChannels())
 }
 
 @_cdecl("getAudioSampleRate")
 public func getAudioSampleRate(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getAudioSampleRate())
 }
 
 @_cdecl("consumeDidPlayToEnd")
 public func consumeDidPlayToEnd(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.consumeDidPlayToEnd() ? 1 : 0
 }
 
@@ -1593,14 +1593,14 @@ public func consumeDidPlayToEnd(_ context: UnsafeMutableRawPointer?) -> Int32 {
 @_cdecl("getIsHLSStream")
 public func getIsHLSStream(_ context: UnsafeMutableRawPointer?) -> Bool {
     guard let context = context else { return false }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getIsHLSStream()
 }
 
 @_cdecl("getAvailableBitrates")
 public func getAvailableBitrates(_ context: UnsafeMutableRawPointer?, _ buffer: UnsafeMutablePointer<Float>?, _ maxCount: Int32) -> Int32 {
     guard let context = context, let buffer = buffer else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     let bitrates = player.getAvailableBitrates()
     let count = min(Int(maxCount), bitrates.count)
     for i in 0..<count {
@@ -1612,14 +1612,14 @@ public func getAvailableBitrates(_ context: UnsafeMutableRawPointer?, _ buffer: 
 @_cdecl("getCurrentBitrate")
 public func getCurrentBitrate(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getCurrentBitrate()
 }
 
 @_cdecl("setPreferredMaxBitrate")
 public func setPreferredMaxBitrate(_ context: UnsafeMutableRawPointer?, _ bitrate: Double) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     DispatchQueue.main.async {
         player.setPreferredMaxBitrate(bitrate)
     }
@@ -1628,7 +1628,7 @@ public func setPreferredMaxBitrate(_ context: UnsafeMutableRawPointer?, _ bitrat
 @_cdecl("forceQuality")
 public func forceQuality(_ context: UnsafeMutableRawPointer?, _ bitrate: Float) {
     guard let context = context else { return }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     DispatchQueue.main.async {
         player.forceQuality(bitrate: bitrate)
     }
@@ -1637,21 +1637,21 @@ public func forceQuality(_ context: UnsafeMutableRawPointer?, _ bitrate: Float) 
 @_cdecl("getBufferStatus")
 public func getBufferStatus(_ context: UnsafeMutableRawPointer?) -> Float {
     guard let context = context else { return 0 }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getBufferStatus()
 }
 
 @_cdecl("getIsBuffering")
 public func getIsBuffering(_ context: UnsafeMutableRawPointer?) -> Bool {
     guard let context = context else { return false }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getIsBuffering()
 }
 
 @_cdecl("getNetworkStatus")
 public func getNetworkStatus(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
     guard let context = context else { return nil }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     let status = player.getNetworkStatus()
     let cString = strdup(status)
     return UnsafePointer<CChar>(cString)
@@ -1660,7 +1660,7 @@ public func getNetworkStatus(_ context: UnsafeMutableRawPointer?) -> UnsafePoint
 @_cdecl("getLastError")
 public func getLastError(_ context: UnsafeMutableRawPointer?) -> UnsafePointer<CChar>? {
     guard let context = context else { return nil }
-    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     if let error = player.getLastError() {
         let cString = strdup(error)
         return UnsafePointer<CChar>(cString)
