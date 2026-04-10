@@ -684,6 +684,12 @@ class LinuxVideoPlayerState : VideoPlayerState {
                         withContext(Dispatchers.Main) { isLoading = false }
                     }
                 }
+            } else {
+                delay(50)
+                updateFrameAsync()
+                seekInProgress = false
+                targetSeekTime = null
+                withContext(Dispatchers.Main) { isLoading = false }
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -712,32 +718,25 @@ class LinuxVideoPlayerState : VideoPlayerState {
         uiUpdateJob?.cancel()
         playerScope.cancel()
 
-        ioScope.launch {
-            val ptrToDispose =
-                withContext(frameDispatcher) {
-                    val ptr = playerPtrAtomic.getAndSet(0L)
+        // Dispose the native player synchronously to guarantee cleanup before
+        // ioScope is cancelled — otherwise GStreamer keeps running (audio leak).
+        val ptrToDispose = playerPtrAtomic.getAndSet(0L)
 
-                    skiaBitmapA?.close()
-                    skiaBitmapB?.close()
-                    skiaBitmapA = null
-                    skiaBitmapB = null
-                    skiaBitmapWidth = 0
-                    skiaBitmapHeight = 0
-                    nextSkiaBitmapA = true
+        skiaBitmapA?.close()
+        skiaBitmapB?.close()
+        skiaBitmapA = null
+        skiaBitmapB = null
+        skiaBitmapWidth = 0
+        skiaBitmapHeight = 0
+        nextSkiaBitmapA = true
 
-                    ptr
-                }
-
-            if (ptrToDispose != 0L) {
-                try {
-                    LinuxNativeBridge.nDisposePlayer(ptrToDispose)
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    linuxLogger.e { "Error disposing player: ${e.message}" }
-                }
+        if (ptrToDispose != 0L) {
+            try {
+                LinuxNativeBridge.nDisposePlayer(ptrToDispose)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                linuxLogger.e { "Error disposing player: ${e.message}" }
             }
-
-            resetState()
         }
 
         ioScope.cancel()
@@ -794,7 +793,23 @@ class LinuxVideoPlayerState : VideoPlayerState {
         if (sw <= 0 || sh <= 0) return
         val ptr = playerPtr
         if (ptr == 0L) return
-        LinuxNativeBridge.nSetOutputSize(ptr, sw, sh)
+
+        // Compute output dimensions that fit within the surface while preserving
+        // the video's native aspect ratio. Passing the raw surface size would let
+        // GStreamer stretch the frame to an arbitrary ratio.
+        val videoRatio = _aspectRatio.value
+        val surfaceRatio = sw.toFloat() / sh.toFloat()
+
+        val (outW, outH) =
+            if (videoRatio > surfaceRatio) {
+                // Video is wider than surface → fit to width
+                sw to (sw / videoRatio).toInt().coerceAtLeast(1)
+            } else {
+                // Video is taller than surface → fit to height
+                (sh * videoRatio).toInt().coerceAtLeast(1) to sh
+            }
+
+        LinuxNativeBridge.nSetOutputSize(ptr, outW, outH)
     }
 
     // --- Internal helpers ---
