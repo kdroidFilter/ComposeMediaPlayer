@@ -13,6 +13,7 @@ androidx-core = "1.18.0"
 media3Exoplayer = "1.10.0"
 detekt = "1.23.8"
 ktlint = "14.2.0"
+androidx-lifecycle-runtime-ktx = "2.10.0"
 
 # minSdk = 21 failed to compile because the project indirectly depends on the library [androidx.navigationevent:navigationevent-android:1.0.1] which requires minSdk = 23
 android-minSdk="23"
@@ -40,7 +41,7 @@ compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose" }
 compose-ui-tooling = { module = "org.jetbrains.compose.ui:ui-tooling", version.ref = "compose" }
 compose-ui-tooling-preview = { module = "org.jetbrains.compose.components:components-ui-tooling-preview", version.ref = "compose" }
 compose-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version = "1.7.3" }
-androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "kotlin" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "androidx-lifecycle-runtime-ktx" }
 
 [plugins]
 

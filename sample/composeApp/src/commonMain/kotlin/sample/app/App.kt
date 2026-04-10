@@ -1,61 +1,104 @@
 package sample.app
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.isSystemInDarkTheme
-import sample.app.singleplayer.SinglePlayerScreen
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import sample.app.feed.FeedScreen
+import sample.app.gallery.GalleryScreen
+import sample.app.player.PlayerScreen
+import sample.app.theme.AppTheme
+
+private enum class Screen(val label: String, val icon: ImageVector) {
+    Player("Player", Icons.Default.PlayCircle),
+    Gallery("Gallery", Icons.AutoMirrored.Filled.List),
+    Feed("Feed", Icons.AutoMirrored.Filled.Article),
+}
 
 @Composable
 fun App() {
-    MaterialTheme(colorScheme = if(isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-        // Navigation state
-        var currentScreen by remember { mutableStateOf(Screen.SinglePlayer) }
+    AppTheme {
+        var currentScreen by remember { mutableStateOf(Screen.Player) }
 
-        Scaffold(
-            bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
-                        icon = { Icon(Icons.Default.Home, contentDescription = "Single Player") },
-                        label = { Text("Single Player") },
-                        selected = currentScreen == Screen.SinglePlayer,
-                        onClick = { currentScreen = Screen.SinglePlayer }
-                    )
-                    NavigationBarItem(
-                        icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Multi Player") },
-                        label = { Text("Multi Player") },
-                        selected = currentScreen == Screen.MultiPlayer,
-                        onClick = { currentScreen = Screen.MultiPlayer }
-                    )
-                    NavigationBarItem(
-                        icon = { Icon(Icons.Default.Subtitles, contentDescription = "Video Attachment") },
-                        label = { Text("Video Attachment") },
-                        selected = currentScreen == Screen.VideoAttachmentPlayer,
-                        onClick = { currentScreen = Screen.VideoAttachmentPlayer }
-                    )
-                }
-            }
-        ) { paddingValues ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .background(MaterialTheme.colorScheme.background)
-            ) {
-                when (currentScreen) {
-                    Screen.SinglePlayer -> SinglePlayerScreen()
-                    Screen.MultiPlayer -> MultiPlayerScreen()
-                    Screen.VideoAttachmentPlayer -> VideoAttachmentPlayerScreen()
-                }
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val useRail = maxWidth >= 600.dp
+
+            if (useRail) {
+                RailLayout(currentScreen, onScreenChange = { currentScreen = it })
+            } else {
+                BarLayout(currentScreen, onScreenChange = { currentScreen = it })
             }
         }
+    }
+}
+
+// Compact: bottom NavigationBar
+@Composable
+private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit) {
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                Screen.entries.forEach { screen ->
+                    NavigationBarItem(
+                        icon = { Icon(screen.icon, contentDescription = screen.label) },
+                        label = { Text(screen.label) },
+                        selected = current == screen,
+                        onClick = { onScreenChange(screen) },
+                    )
+                }
+            }
+        },
+    ) { padding ->
+        ScreenContent(current, Modifier.fillMaxSize().padding(padding))
+    }
+}
+
+// Medium+: side NavigationRail
+@Composable
+private fun RailLayout(current: Screen, onScreenChange: (Screen) -> Unit) {
+    Row(modifier = Modifier.fillMaxSize()) {
+        NavigationRail {
+            Spacer(Modifier.weight(1f))
+            Screen.entries.forEach { screen ->
+                NavigationRailItem(
+                    icon = { Icon(screen.icon, contentDescription = screen.label) },
+                    label = { Text(screen.label) },
+                    selected = current == screen,
+                    onClick = { onScreenChange(screen) },
+                )
+            }
+            Spacer(Modifier.weight(1f))
+        }
+        ScreenContent(current, Modifier.weight(1f).fillMaxHeight())
+    }
+}
+
+@Composable
+private fun ScreenContent(screen: Screen, modifier: Modifier) {
+    when (screen) {
+        Screen.Player -> PlayerScreen(modifier)
+        Screen.Gallery -> GalleryScreen(modifier)
+        Screen.Feed -> FeedScreen(modifier)
     }
 }
