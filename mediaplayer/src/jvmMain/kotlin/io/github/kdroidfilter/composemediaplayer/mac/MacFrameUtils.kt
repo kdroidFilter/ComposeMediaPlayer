@@ -2,7 +2,10 @@ package io.github.kdroidfilter.composemediaplayer.mac
 
 import java.nio.ByteBuffer
 
-internal fun calculateFrameHash(buffer: ByteBuffer, pixelCount: Int): Int {
+internal fun calculateFrameHash(
+    buffer: ByteBuffer,
+    pixelCount: Int,
+): Int {
     if (pixelCount <= 0) return 0
 
     var hash = 1

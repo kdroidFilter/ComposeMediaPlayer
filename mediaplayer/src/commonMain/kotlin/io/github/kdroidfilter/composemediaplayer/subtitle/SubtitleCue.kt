@@ -13,7 +13,7 @@ import androidx.compose.runtime.Immutable
 data class SubtitleCue(
     val startTime: Long,
     val endTime: Long,
-    val text: String
+    val text: String,
 ) {
     /**
      * Checks if this subtitle cue should be displayed at the given time.
@@ -21,9 +21,7 @@ data class SubtitleCue(
      * @param currentTimeMs The current playback time in milliseconds
      * @return True if the cue should be displayed, false otherwise
      */
-    fun isActive(currentTimeMs: Long): Boolean {
-        return currentTimeMs in startTime..endTime
-    }
+    fun isActive(currentTimeMs: Long): Boolean = currentTimeMs in startTime..endTime
 }
 
 /**
@@ -33,7 +31,7 @@ data class SubtitleCue(
  */
 @Immutable
 data class SubtitleCueList(
-    val cues: List<SubtitleCue> = emptyList()
+    val cues: List<SubtitleCue> = emptyList(),
 ) {
     /**
      * Gets the active subtitle cues at the given time.
@@ -41,7 +39,5 @@ data class SubtitleCueList(
      * @param currentTimeMs The current playback time in milliseconds
      * @return The list of active subtitle cues
      */
-    fun getActiveCues(currentTimeMs: Long): List<SubtitleCue> {
-        return cues.filter { it.isActive(currentTimeMs) }
-    }
+    fun getActiveCues(currentTimeMs: Long): List<SubtitleCue> = cues.filter { it.isActive(currentTimeMs) }
 }

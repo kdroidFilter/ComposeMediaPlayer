@@ -16,7 +16,6 @@ import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
 
-
 /**
  * A composable function that renders a video player surface using a native GStreamer
  * player via JNI with offscreen rendering.
@@ -33,13 +32,14 @@ fun LinuxVideoPlayerSurface(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     overlay: @Composable () -> Unit = {},
-    isInFullscreenWindow: Boolean = false
+    isInFullscreenWindow: Boolean = false,
 ) {
     Box(
-        modifier = modifier.onSizeChanged { size ->
-            playerState.onResized(size.width, size.height)
-        },
-        contentAlignment = Alignment.Center
+        modifier =
+            modifier.onSizeChanged { size ->
+                playerState.onResized(size.width, size.height)
+            },
+        contentAlignment = Alignment.Center,
     ) {
         // Only render video in this surface if we're not in fullscreen mode or if this is the fullscreen window
         if (playerState.hasMedia && (!playerState.isFullscreen || isInFullscreenWindow)) {
@@ -48,24 +48,28 @@ fun LinuxVideoPlayerSurface(
 
             currentFrame?.let { frame ->
                 Canvas(
-                    modifier = contentScale.toCanvasModifier(
-                        playerState.aspectRatio,
-                        playerState.metadata.width,
-                        playerState.metadata.height
-                    ),
+                    modifier =
+                        contentScale.toCanvasModifier(
+                            playerState.aspectRatio,
+                            playerState.metadata.width,
+                            playerState.metadata.height,
+                        ),
                 ) {
                     drawScaledImage(
                         image = frame,
                         dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-                        contentScale = contentScale
+                        contentScale = contentScale,
                     )
                 }
             }
 
             // Add Compose-based subtitle layer
             if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
-                val currentTimeMs = (playerState.sliderPos / 1000f *
-                        playerState.durationText.toTimeMs()).toLong()
+                val currentTimeMs =
+                    (
+                        playerState.sliderPos / 1000f *
+                            playerState.durationText.toTimeMs()
+                    ).toLong()
                 val durationMs = playerState.durationText.toTimeMs()
 
                 ComposeSubtitleLayer(
@@ -75,7 +79,7 @@ fun LinuxVideoPlayerSurface(
                     subtitleTrack = playerState.currentSubtitleTrack,
                     subtitlesEnabled = playerState.subtitlesEnabled,
                     textStyle = playerState.subtitleTextStyle,
-                    backgroundColor = playerState.subtitleBackgroundColor
+                    backgroundColor = playerState.subtitleBackgroundColor,
                 )
             }
         }

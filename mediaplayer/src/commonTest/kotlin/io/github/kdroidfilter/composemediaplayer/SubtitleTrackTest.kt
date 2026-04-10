@@ -6,14 +6,14 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class SubtitleTrackTest {
-
     @Test
     fun testSubtitleTrackCreation() {
-        val track = SubtitleTrack(
-            label = "English",
-            language = "en",
-            src = "subtitles/en.vtt"
-        )
+        val track =
+            SubtitleTrack(
+                label = "English",
+                language = "en",
+                src = "subtitles/en.vtt",
+            )
 
         assertEquals("English", track.label)
         assertEquals("en", track.language)
@@ -22,23 +22,26 @@ class SubtitleTrackTest {
 
     @Test
     fun testSubtitleTrackEquality() {
-        val track1 = SubtitleTrack(
-            label = "English",
-            language = "en",
-            src = "subtitles/en.vtt"
-        )
+        val track1 =
+            SubtitleTrack(
+                label = "English",
+                language = "en",
+                src = "subtitles/en.vtt",
+            )
 
-        val track2 = SubtitleTrack(
-            label = "English",
-            language = "en",
-            src = "subtitles/en.vtt"
-        )
+        val track2 =
+            SubtitleTrack(
+                label = "English",
+                language = "en",
+                src = "subtitles/en.vtt",
+            )
 
-        val track3 = SubtitleTrack(
-            label = "French",
-            language = "fr",
-            src = "subtitles/fr.vtt"
-        )
+        val track3 =
+            SubtitleTrack(
+                label = "French",
+                language = "fr",
+                src = "subtitles/fr.vtt",
+            )
 
         assertEquals(track1, track2, "Identical subtitle tracks should be equal")
         assertNotEquals(track1, track3, "Different subtitle tracks should not be equal")
@@ -46,11 +49,12 @@ class SubtitleTrackTest {
 
     @Test
     fun testSubtitleTrackCopy() {
-        val original = SubtitleTrack(
-            label = "English",
-            language = "en",
-            src = "subtitles/en.vtt"
-        )
+        val original =
+            SubtitleTrack(
+                label = "English",
+                language = "en",
+                src = "subtitles/en.vtt",
+            )
 
         val copy = original.copy(label = "English (US)")
 
@@ -64,11 +68,12 @@ class SubtitleTrackTest {
 
     @Test
     fun testSubtitleTrackToString() {
-        val track = SubtitleTrack(
-            label = "English",
-            language = "en",
-            src = "subtitles/en.vtt"
-        )
+        val track =
+            SubtitleTrack(
+                label = "English",
+                language = "en",
+                src = "subtitles/en.vtt",
+            )
 
         val toString = track.toString()
 

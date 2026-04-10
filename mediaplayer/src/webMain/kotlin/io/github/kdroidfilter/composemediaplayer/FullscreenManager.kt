@@ -35,7 +35,10 @@ object FullscreenManager {
      * @param isCurrentlyFullscreen Whether the player is currently in fullscreen mode
      * @param onFullscreenChange Callback to update the fullscreen state
      */
-    fun toggleFullscreen(isCurrentlyFullscreen: Boolean, onFullscreenChange: (Boolean) -> Unit) {
+    fun toggleFullscreen(
+        isCurrentlyFullscreen: Boolean,
+        onFullscreenChange: (Boolean) -> Unit,
+    ) {
         if (!isCurrentlyFullscreen) {
             requestFullScreen()
             CoroutineScope(Dispatchers.Default).launch {

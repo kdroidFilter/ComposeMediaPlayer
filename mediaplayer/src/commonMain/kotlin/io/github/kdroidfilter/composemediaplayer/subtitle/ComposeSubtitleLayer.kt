@@ -36,64 +36,67 @@ fun ComposeSubtitleLayer(
     subtitleTrack: SubtitleTrack?,
     subtitlesEnabled: Boolean,
     modifier: Modifier = Modifier,
-    textStyle: TextStyle = TextStyle(
-        color = Color.White,
-        fontSize = 18.sp,
-        fontWeight = FontWeight.Normal,
-        textAlign = TextAlign.Center
-    ),
-    backgroundColor: Color = Color.Black.copy(alpha = 0.5f)
+    textStyle: TextStyle =
+        TextStyle(
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Normal,
+            textAlign = TextAlign.Center,
+        ),
+    backgroundColor: Color = Color.Black.copy(alpha = 0.5f),
 ) {
     // State to hold the parsed subtitle cues
     var subtitles by remember { mutableStateOf<SubtitleCueList?>(null) }
 
     // Load subtitles when the subtitle track changes
     LaunchedEffect(subtitleTrack) {
-        subtitles = if (subtitleTrack != null && subtitlesEnabled) {
-            try {
-                withContext(Dispatchers.Default) {
-                    // Load and parse the subtitle file
-                    val content = loadSubtitleContent(subtitleTrack.src)
+        subtitles =
+            if (subtitleTrack != null && subtitlesEnabled) {
+                try {
+                    withContext(Dispatchers.Default) {
+                        // Load and parse the subtitle file
+                        val content = loadSubtitleContent(subtitleTrack.src)
 
-                    // Determine the subtitle format based on file extension and content
-                    val isSrtByExtension = subtitleTrack.src.endsWith(".srt", ignoreCase = true)
+                        // Determine the subtitle format based on file extension and content
+                        val isSrtByExtension = subtitleTrack.src.endsWith(".srt", ignoreCase = true)
 
-                    // Check content for SRT format (typically starts with a number followed by timing)
-                    val isSrtByContent = content.trim().let { 
-                        val lines = it.lines()
-                        lines.size >= 2 && 
-                        lines[0].trim().toIntOrNull() != null && 
-                        lines[1].contains("-->") && 
-                        lines[1].contains(",") // SRT uses comma for milliseconds
+                        // Check content for SRT format (typically starts with a number followed by timing)
+                        val isSrtByContent =
+                            content.trim().let {
+                                val lines = it.lines()
+                                lines.size >= 2 &&
+                                    lines[0].trim().toIntOrNull() != null &&
+                                    lines[1].contains("-->") &&
+                                    lines[1].contains(",") // SRT uses comma for milliseconds
+                            }
+
+                        // Check content for WebVTT format (starts with WEBVTT)
+                        val isVttByContent = content.trim().startsWith("WEBVTT")
+
+                        // Use the appropriate parser based on format detection
+                        if (isSrtByExtension || (isSrtByContent && !isVttByContent)) {
+                            SrtParser.parse(content)
+                        } else {
+                            // Default to WebVTT parser for other formats
+                            WebVttParser.parse(content)
+                        }
                     }
-
-                    // Check content for WebVTT format (starts with WEBVTT)
-                    val isVttByContent = content.trim().startsWith("WEBVTT")
-
-                    // Use the appropriate parser based on format detection
-                    if (isSrtByExtension || (isSrtByContent && !isVttByContent)) {
-                        SrtParser.parse(content)
-                    } else {
-                        // Default to WebVTT parser for other formats
-                        WebVttParser.parse(content)
-                    }
+                } catch (e: Exception) {
+                    // If there's an error loading or parsing the subtitle file,
+                    // return an empty subtitle list
+                    SubtitleCueList()
                 }
-            } catch (e: Exception) {
-                // If there's an error loading or parsing the subtitle file,
-                // return an empty subtitle list
-                SubtitleCueList()
+            } else {
+                // If no subtitle track is selected or subtitles are disabled,
+                // return null to hide the subtitle display
+                null
             }
-        } else {
-            // If no subtitle track is selected or subtitles are disabled,
-            // return null to hide the subtitle display
-            null
-        }
     }
 
     // Display the subtitles if available
     Box(
         modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.BottomCenter
+        contentAlignment = Alignment.BottomCenter,
     ) {
         subtitles?.let { cueList ->
             if (subtitlesEnabled) {
@@ -102,13 +105,12 @@ fun ComposeSubtitleLayer(
                     currentTimeMs = currentTimeMs,
                     isPlaying = isPlaying,
                     textStyle = textStyle,
-                    backgroundColor = backgroundColor
+                    backgroundColor = backgroundColor,
                 )
             }
         }
     }
 }
-
 
 /**
  * Loads the content of a subtitle file from the given source.

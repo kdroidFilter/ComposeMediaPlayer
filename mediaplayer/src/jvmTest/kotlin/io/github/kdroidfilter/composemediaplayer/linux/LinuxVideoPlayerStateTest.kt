@@ -22,11 +22,13 @@ import kotlin.test.assertTrue
  * If the native library cannot be loaded, the tests will be skipped.
  */
 class LinuxVideoPlayerStateTest {
-
     @Before
     fun setup() {
         // Skip test if not running on Linux
-        Assume.assumeTrue("Skipping Linux-specific test on non-Linux platform", CurrentPlatform.os == CurrentPlatform.OS.LINUX)
+        Assume.assumeTrue(
+            "Skipping Linux-specific test on non-Linux platform",
+            CurrentPlatform.os == CurrentPlatform.OS.LINUX,
+        )
 
         // Try to load the native library
         try {

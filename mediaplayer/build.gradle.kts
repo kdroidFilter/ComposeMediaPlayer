@@ -17,11 +17,13 @@ plugins {
 group = "io.github.kdroidfilter.composemediaplayer"
 
 val ref = System.getenv("GITHUB_REF") ?: ""
-val projectVersion = if (ref.startsWith("refs/tags/")) {
-    val tag = ref.removePrefix("refs/tags/")
-    if (tag.startsWith("v")) tag.substring(1) else tag
-} else "dev"
-
+val projectVersion =
+    if (ref.startsWith("refs/tags/")) {
+        val tag = ref.removePrefix("refs/tags/")
+        if (tag.startsWith("v")) tag.substring(1) else tag
+    } else {
+        "dev"
+    }
 
 kotlin {
     jvmToolchain(17)
@@ -48,7 +50,6 @@ kotlin {
             val nskeyvalueobserving by cinterops.creating
         }
     }
-
 
     cocoapods {
         version = if (projectVersion == "dev") "0.0.1-dev" else projectVersion
@@ -124,10 +125,9 @@ kotlin {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
         }
-
     }
 
-    //https://kotlinlang.org/docs/native-objc-interop.html#export-of-kdoc-comments-to-generated-objective-c-headers
+    // https://kotlinlang.org/docs/native-objc-interop.html#export-of-kdoc-comments-to-generated-objective-c-headers
     targets.withType<org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget> {
         compilations["main"].compileTaskProvider.configure {
             compilerOptions {
@@ -135,7 +135,6 @@ kotlin {
             }
         }
     }
-
 }
 
 android {
@@ -143,7 +142,10 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
+        minSdk =
+            libs.versions.android.minSdk
+                .get()
+                .toInt()
     }
 }
 
@@ -152,11 +154,12 @@ val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources/compo
 val buildNativeMacOs by tasks.registering(Exec::class) {
     description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
     group = "build"
-    val hasPrebuilt = nativeResourceDir
-        .dir("darwin-aarch64")
-        .file("libNativeVideoPlayer.dylib")
-        .asFile
-        .exists()
+    val hasPrebuilt =
+        nativeResourceDir
+            .dir("darwin-aarch64")
+            .file("libNativeVideoPlayer.dylib")
+            .asFile
+            .exists()
     enabled = Os.isFamily(Os.FAMILY_MAC) && !hasPrebuilt
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/macos")
@@ -169,11 +172,12 @@ val buildNativeMacOs by tasks.registering(Exec::class) {
 val buildNativeWindows by tasks.registering(Exec::class) {
     description = "Compiles the C++ native library into Windows DLLs (x64 + ARM64)"
     group = "build"
-    val hasPrebuilt = nativeResourceDir
-        .dir("win32-x86-64")
-        .file("NativeVideoPlayer.dll")
-        .asFile
-        .exists()
+    val hasPrebuilt =
+        nativeResourceDir
+            .dir("win32-x86-64")
+            .file("NativeVideoPlayer.dll")
+            .asFile
+            .exists()
     enabled = Os.isFamily(Os.FAMILY_WINDOWS) && !hasPrebuilt
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/windows")
@@ -186,11 +190,12 @@ val buildNativeWindows by tasks.registering(Exec::class) {
 val buildNativeLinux by tasks.registering(Exec::class) {
     description = "Compiles the C native library into Linux .so (GStreamer + JNI)"
     group = "build"
-    val hasPrebuilt = nativeResourceDir
-        .dir("linux-x86-64")
-        .file("libNativeVideoPlayer.so")
-        .asFile
-        .exists()
+    val hasPrebuilt =
+        nativeResourceDir
+            .dir("linux-x86-64")
+            .file("libNativeVideoPlayer.so")
+            .asFile
+            .exists()
     enabled = Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC) && !hasPrebuilt
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/linux")
@@ -210,12 +215,11 @@ tasks.configureEach {
     }
 }
 
-
 mavenPublishing {
     coordinates(
         groupId = "io.github.kdroidfilter",
         artifactId = "composemediaplayer",
-        version = projectVersion
+        version = projectVersion,
     )
 
     pom {

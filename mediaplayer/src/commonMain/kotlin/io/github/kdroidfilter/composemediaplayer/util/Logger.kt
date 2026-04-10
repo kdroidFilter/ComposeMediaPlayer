@@ -11,15 +11,18 @@ import kotlin.time.Clock
 class ComposeMediaPlayerLoggingLevel private constructor(
     private val priority: Int,
 ) : Comparable<ComposeMediaPlayerLoggingLevel> {
-    override fun compareTo(other: ComposeMediaPlayerLoggingLevel): Int =
-        priority.compareTo(other.priority)
+    override fun compareTo(other: ComposeMediaPlayerLoggingLevel): Int = priority.compareTo(other.priority)
 
     companion object {
         @JvmField
         val VERBOSE = ComposeMediaPlayerLoggingLevel(0)
+
         @JvmField val DEBUG = ComposeMediaPlayerLoggingLevel(1)
+
         @JvmField val INFO = ComposeMediaPlayerLoggingLevel(2)
+
         @JvmField val WARN = ComposeMediaPlayerLoggingLevel(3)
+
         @JvmField val ERROR = ComposeMediaPlayerLoggingLevel(4)
     }
 }
@@ -32,7 +35,10 @@ var composeMediaPlayerLoggingLevel: ComposeMediaPlayerLoggingLevel =
     ComposeMediaPlayerLoggingLevel.VERBOSE
 
 private fun getCurrentTimestamp(): String {
-    val now = kotlin.time.Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    val now =
+        kotlin.time.Clock.System
+            .now()
+            .toLocalDateTime(TimeZone.currentSystemDefault())
     return "${now.date} ${now.hour.pad()}:${now.minute.pad()}:${now.second.pad()}" +
         ".${(now.nanosecond / 1_000_000).pad(3)}"
 }
@@ -41,11 +47,17 @@ private fun Int.pad(len: Int = 2): String = toString().padStart(len, '0')
 
 // -- Tagged logger ----------------------------------------------------------
 
-internal class TaggedLogger(private val tag: String) {
+internal class TaggedLogger(
+    private val tag: String,
+) {
     fun v(message: () -> String) = verboseln { "[$tag] ${message()}" }
+
     fun d(message: () -> String) = debugln { "[$tag] ${message()}" }
+
     fun i(message: () -> String) = infoln { "[$tag] ${message()}" }
+
     fun w(message: () -> String) = warnln { "[$tag] ${message()}" }
+
     fun e(message: () -> String) = errorln { "[$tag] ${message()}" }
 }
 

@@ -16,7 +16,7 @@ import io.github.kdroidfilter.composemediaplayer.common.openFullscreenWindow
 fun openFullscreenWindow(
     playerState: WindowsVideoPlayerState,
     contentScale: androidx.compose.ui.layout.ContentScale = androidx.compose.ui.layout.ContentScale.Fit,
-    overlay: @Composable () -> Unit = {}
+    overlay: @Composable () -> Unit = {},
 ) {
     openFullscreenWindow(
         playerState = playerState,
@@ -26,8 +26,8 @@ fun openFullscreenWindow(
                 modifier = modifier,
                 contentScale = contentScale,
                 overlay = overlay,
-                isInFullscreenWindow = isInFullscreenWindow
+                isInFullscreenWindow = isInFullscreenWindow,
             )
-        }
+        },
     )
 }

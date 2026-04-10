@@ -1,18 +1,19 @@
 package io.github.kdroidfilter.composemediaplayer
 
-import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.jsinterop.AnalyserNode
 import io.github.kdroidfilter.composemediaplayer.jsinterop.AudioContext
 import io.github.kdroidfilter.composemediaplayer.jsinterop.ChannelSplitterNode
 import io.github.kdroidfilter.composemediaplayer.jsinterop.MediaElementAudioSourceNode
+import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import org.khronos.webgl.Uint8Array
 import org.khronos.webgl.get
 import org.w3c.dom.HTMLVideoElement
 
 internal val wasmAudioLogger = TaggedLogger("WasmAudioProcessor")
 
-internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
-
+internal class AudioLevelProcessor(
+    private val video: HTMLVideoElement,
+) {
     private var audioContext: AudioContext? = null
     private var sourceNode: MediaElementAudioSourceNode? = null
     private var splitterNode: ChannelSplitterNode? = null
@@ -35,7 +36,7 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
      * Initializes Web Audio (creates a source, a splitter, etc.)
      * In case of error (CORS), we simply return false => the video remains managed by HTML
      * and audio levels will be set to 0
-     * 
+     *
      * @return true if initialization was successful, false if there was a CORS error
      */
     fun initialize(): Boolean {
@@ -44,14 +45,17 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
         val ctx = AudioContext()
         audioContext = ctx
 
-        val source = try {
-            ctx.createMediaElementSource(video)
-        } catch (e: Throwable) {
-            wasmAudioLogger.w { "CORS/format error: Video doesn't have CORS headers. Audio levels will be set to 0. Error: ${e.message}" }
-            // Clean up the audio context since we won't be using it
-            audioContext = null
-            return false
-        }
+        val source =
+            try {
+                ctx.createMediaElementSource(video)
+            } catch (e: Throwable) {
+                wasmAudioLogger.w {
+                    "CORS/format error: Video doesn't have CORS headers. Audio levels will be set to 0. Error: ${e.message}"
+                }
+                // Clean up the audio context since we won't be using it
+                audioContext = null
+                return false
+            }
 
         sourceNode = source
         splitterNode = ctx.createChannelSplitter(2)
@@ -75,14 +79,15 @@ internal class AudioLevelProcessor(private val video: HTMLVideoElement) {
         _audioSampleRate = ctx.sampleRate
         _audioChannels = source.channelCount
 
-
-        wasmAudioLogger.d { "Web Audio successfully initialized and capturing audio. Sample rate: $_audioSampleRate Hz, Channels: $_audioChannels" }
+        wasmAudioLogger.d {
+            "Web Audio successfully initialized and capturing audio. Sample rate: $_audioSampleRate Hz, Channels: $_audioChannels"
+        }
         return true
     }
 
     /**
      * Returns (left%, right%) in range 0..100
-     * 
+     *
      * Uses a logarithmic scale to match the Mac implementation:
      * 1. Calculate average level from frequency data
      * 2. Normalize to 0..1 range

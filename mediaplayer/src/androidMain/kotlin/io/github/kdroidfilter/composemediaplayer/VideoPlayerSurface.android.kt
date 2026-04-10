@@ -35,14 +35,14 @@ actual fun VideoPlayerSurface(
     playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
-    overlay: @Composable () -> Unit
+    overlay: @Composable () -> Unit,
 ) {
     VideoPlayerSurfaceInternal(
         playerState = playerState,
         modifier = modifier,
         contentScale = contentScale,
         overlay = overlay,
-        surfaceType = SurfaceType.TextureView
+        surfaceType = SurfaceType.TextureView,
     )
 }
 
@@ -53,14 +53,14 @@ fun VideoPlayerSurface(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
     surfaceType: SurfaceType = SurfaceType.TextureView,
-    overlay: @Composable () -> Unit = {}
+    overlay: @Composable () -> Unit = {},
 ) {
     VideoPlayerSurfaceInternal(
         playerState = playerState,
         modifier = modifier,
         contentScale = contentScale,
         overlay = overlay,
-        surfaceType = surfaceType
+        surfaceType = surfaceType,
     )
 }
 
@@ -71,7 +71,7 @@ private fun VideoPlayerSurfaceInternal(
     modifier: Modifier,
     contentScale: ContentScale,
     surfaceType: SurfaceType,
-    overlay: @Composable () -> Unit
+    overlay: @Composable () -> Unit,
 ) {
     if (LocalInspectionMode.current) {
         VideoPlayerSurfacePreview(modifier = modifier, overlay = overlay)
@@ -101,8 +101,9 @@ private fun VideoPlayerSurfaceInternal(
         onDispose {
             try {
                 // Détacher la vue du player
-                if (playerState is DefaultVideoPlayerState)
+                if (playerState is DefaultVideoPlayerState) {
                     playerState.attachPlayerView(null)
+                }
             } catch (e: Exception) {
                 androidVideoLogger.e { "Error detaching PlayerView on dispose: ${e.message}" }
             }
@@ -117,11 +118,14 @@ private fun VideoPlayerSurfaceInternal(
                 isFullscreen = false
                 // Call playerState.toggleFullscreen() to ensure proper cleanup
                 playerState.toggleFullscreen()
-            }
+            },
         ) {
-            Box(modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)) {
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black),
+            ) {
                 VideoPlayerContent(
                     playerState = playerState,
                     modifier = Modifier.fillMaxHeight(),
@@ -154,15 +158,16 @@ private fun VideoPlayerContent(
 ) {
     Box(
         modifier = modifier,
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.Center,
     ) {
         if (playerState.hasMedia) {
             AndroidView(
-                modifier = contentScale.toCanvasModifier(
-                    playerState.aspectRatio,
-                    playerState.metadata.width,
-                    playerState.metadata.height
-                ),
+                modifier =
+                    contentScale.toCanvasModifier(
+                        playerState.aspectRatio,
+                        playerState.metadata.width,
+                        playerState.metadata.height,
+                    ),
                 factory = { context ->
                     try {
                         // Créer PlayerView avec le type de surface approprié
@@ -188,7 +193,6 @@ private fun VideoPlayerContent(
 
                             // Désactiver la vue de sous-titres native car nous utilisons des sous-titres basés sur Compose
                             subtitleView?.visibility = android.view.View.GONE
-
                         }
                     } catch (e: Exception) {
                         androidVideoLogger.e { "Error creating PlayerView: ${e.message}" }
@@ -201,7 +205,10 @@ private fun VideoPlayerContent(
                 update = { playerView ->
                     try {
                         // Vérifier que le player est toujours valide avant la mise à jour
-                        if (playerState is DefaultVideoPlayerState && playerState.exoPlayer != null && playerView.player != null) {
+                        if (playerState is DefaultVideoPlayerState &&
+                            playerState.exoPlayer != null &&
+                            playerView.player != null
+                        ) {
                             // Mettre à jour le mode de redimensionnement lorsque contentScale change
                             playerView.resizeMode = mapContentScaleToResizeMode(contentScale)
                         }
@@ -225,20 +232,22 @@ private fun VideoPlayerContent(
                     } catch (e: Exception) {
                         androidVideoLogger.e { "Error releasing PlayerView: ${e.message}" }
                     }
-                }
+                },
             )
 
             // Ajouter une couche de sous-titres basée sur Compose
             if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
                 // Calculer le temps actuel en millisecondes
-                val currentTimeMs = remember(playerState.sliderPos, playerState.durationText) {
-                    (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
-                }
+                val currentTimeMs =
+                    remember(playerState.sliderPos, playerState.durationText) {
+                        (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
+                    }
 
                 // Calculer la durée en millisecondes
-                val durationMs = remember(playerState.durationText) {
-                    playerState.durationText.toTimeMs()
-                }
+                val durationMs =
+                    remember(playerState.durationText) {
+                        playerState.durationText.toTimeMs()
+                    }
 
                 ComposeSubtitleLayer(
                     currentTimeMs = currentTimeMs,
@@ -247,7 +256,7 @@ private fun VideoPlayerContent(
                     subtitleTrack = playerState.currentSubtitleTrack,
                     subtitlesEnabled = playerState.subtitlesEnabled,
                     textStyle = playerState.subtitleTextStyle,
-                    backgroundColor = playerState.subtitleBackgroundColor
+                    backgroundColor = playerState.subtitleBackgroundColor,
                 )
             }
         }
@@ -261,8 +270,8 @@ private fun VideoPlayerContent(
 }
 
 @OptIn(UnstableApi::class)
-private fun mapContentScaleToResizeMode(contentScale: ContentScale): Int {
-    return when (contentScale) {
+private fun mapContentScaleToResizeMode(contentScale: ContentScale): Int =
+    when (contentScale) {
         ContentScale.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
         ContentScale.FillBounds -> AspectRatioFrameLayout.RESIZE_MODE_FILL
         ContentScale.Fit, ContentScale.Inside -> AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -270,19 +279,19 @@ private fun mapContentScaleToResizeMode(contentScale: ContentScale): Int {
         ContentScale.FillHeight -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
         else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
-}
 
 @OptIn(UnstableApi::class)
 private fun createPlayerViewWithSurfaceType(
     context: Context,
-    surfaceType: SurfaceType
-): PlayerView {
-    return try {
+    surfaceType: SurfaceType,
+): PlayerView =
+    try {
         // Essayer d'abord d'inflater les layouts personnalisés
-        val layoutId = when (surfaceType) {
-            SurfaceType.SurfaceView -> R.layout.player_view_surface
-            SurfaceType.TextureView -> R.layout.player_view_texture
-        }
+        val layoutId =
+            when (surfaceType) {
+                SurfaceType.SurfaceView -> R.layout.player_view_surface
+                SurfaceType.TextureView -> R.layout.player_view_texture
+            }
 
         LayoutInflater.from(context).inflate(layoutId, null) as PlayerView
     } catch (e: Exception) {
@@ -322,4 +331,3 @@ private fun createPlayerViewWithSurfaceType(
             throw e2
         }
     }
-}

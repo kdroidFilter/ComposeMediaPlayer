@@ -1,27 +1,25 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlin.test.assertFalse
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.delay
-import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 
 /**
  * Tests for the JVM implementation of VideoPlayerState
  */
 class VideoPlayerStateTest {
-
     /**
      * Checks if the native video player library is available.
      * On Linux, this requires the native GStreamer JNI library.
      * On macOS, this requires the AVFoundation JNI library.
      * On Windows, this requires the Media Foundation JNI library.
      */
-    private fun isNativePlayerAvailable(): Boolean {
-        return try {
+    private fun isNativePlayerAvailable(): Boolean =
+        try {
             val state = createVideoPlayerState()
             state.dispose()
             true
@@ -29,7 +27,6 @@ class VideoPlayerStateTest {
             println("Native player not available: ${e.message}")
             false
         }
-    }
 
     @Test
     fun testCreateVideoPlayerState() {

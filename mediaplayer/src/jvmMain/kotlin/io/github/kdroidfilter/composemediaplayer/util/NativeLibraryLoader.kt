@@ -16,7 +16,10 @@ internal object NativeLibraryLoader {
     private val loadedLibraries = mutableSetOf<String>()
 
     @Synchronized
-    fun load(libraryName: String, callerClass: Class<*>): Boolean {
+    fun load(
+        libraryName: String,
+        callerClass: Class<*>,
+    ): Boolean {
         if (libraryName in loadedLibraries) return true
 
         // 1. Try system library path (packaged app / GraalVM native-image)
@@ -35,7 +38,10 @@ internal object NativeLibraryLoader {
         return true
     }
 
-    private fun extractToCache(libraryName: String, callerClass: Class<*>): File? {
+    private fun extractToCache(
+        libraryName: String,
+        callerClass: Class<*>,
+    ): File? {
         val platform = detectPlatform()
         val fileName = mapLibraryName(libraryName)
         val resourcePath = "$RESOURCE_PREFIX/$platform/$fileName"
@@ -69,12 +75,13 @@ internal object NativeLibraryLoader {
 
     private fun resolveCacheDir(platform: String): File {
         val os = System.getProperty("os.name")?.lowercase() ?: ""
-        val base = when {
-            os.contains("win") ->
-                File(System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"))
-            else ->
-                File(System.getProperty("user.home"), ".cache")
-        }
+        val base =
+            when {
+                os.contains("win") ->
+                    File(System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"))
+                else ->
+                    File(System.getProperty("user.home"), ".cache")
+            }
         return File(base, "composemediaplayer/native/$platform")
     }
 

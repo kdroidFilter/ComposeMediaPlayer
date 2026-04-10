@@ -3,7 +3,6 @@ package io.github.kdroidfilter.composemediaplayer
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalInspectionMode
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerSurface
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
@@ -28,18 +27,19 @@ import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerSurfa
  */
 @Composable
 actual fun VideoPlayerSurface(
-    playerState: VideoPlayerState, 
+    playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
-    overlay: @Composable () -> Unit
+    overlay: @Composable () -> Unit,
 ) {
-    if (playerState is DefaultVideoPlayerState)
+    if (playerState is DefaultVideoPlayerState) {
         when (val delegate = playerState.delegate) {
             is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, contentScale, overlay)
             is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier, contentScale, overlay)
             is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier, contentScale, overlay)
             else -> throw IllegalArgumentException("Unsupported player state type")
         }
-    else
+    } else {
         throw IllegalArgumentException("Unsupported player state type")
+    }
 }

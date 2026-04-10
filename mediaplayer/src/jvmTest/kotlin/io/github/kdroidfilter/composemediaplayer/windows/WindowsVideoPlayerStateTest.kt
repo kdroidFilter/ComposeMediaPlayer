@@ -1,7 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.windows
 
-import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
@@ -13,12 +13,11 @@ import kotlin.test.assertTrue
 
 /**
  * Tests for the Windows implementation of VideoPlayerState
- * 
+ *
  * Note: These tests will only run on Windows platforms. On other platforms,
  * the tests will be skipped.
  */
 class WindowsVideoPlayerStateTest {
-    
     /**
      * Test the creation of WindowsVideoPlayerState
      */
@@ -29,9 +28,9 @@ class WindowsVideoPlayerStateTest {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
-        
+
         val playerState = WindowsVideoPlayerState()
-        
+
         // Verify the player state is initialized correctly
         assertNotNull(playerState)
         assertFalse(playerState.hasMedia)
@@ -45,11 +44,11 @@ class WindowsVideoPlayerStateTest {
         assertEquals(0f, playerState.rightLevel)
         assertFalse(playerState.isFullscreen)
         assertNull(playerState.error)
-        
+
         // Clean up
         playerState.dispose()
     }
-    
+
     /**
      * Test volume control
      */
@@ -60,27 +59,27 @@ class WindowsVideoPlayerStateTest {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
-        
+
         val playerState = WindowsVideoPlayerState()
-        
+
         // Test initial volume
         assertEquals(1f, playerState.volume)
-        
+
         // Test setting volume
         playerState.volume = 0.5f
         assertEquals(0.5f, playerState.volume)
-        
+
         // Test volume bounds
         playerState.volume = -0.1f
         assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
-        
+
         playerState.volume = 1.5f
         assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
-        
+
         // Clean up
         playerState.dispose()
     }
-    
+
     /**
      * Test loop setting
      */
@@ -91,23 +90,23 @@ class WindowsVideoPlayerStateTest {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
-        
+
         val playerState = WindowsVideoPlayerState()
-        
+
         // Test initial loop setting
         assertFalse(playerState.loop)
-        
+
         // Test setting loop
         playerState.loop = true
         assertTrue(playerState.loop)
-        
+
         playerState.loop = false
         assertFalse(playerState.loop)
-        
+
         // Clean up
         playerState.dispose()
     }
-    
+
     /**
      * Test fullscreen toggle
      */
@@ -118,23 +117,23 @@ class WindowsVideoPlayerStateTest {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
-        
+
         val playerState = WindowsVideoPlayerState()
-        
+
         // Test initial fullscreen state
         assertFalse(playerState.isFullscreen)
-        
+
         // Test toggling fullscreen
         playerState.toggleFullscreen()
         assertTrue(playerState.isFullscreen)
-        
+
         playerState.toggleFullscreen()
         assertFalse(playerState.isFullscreen)
-        
+
         // Clean up
         playerState.dispose()
     }
-    
+
     /**
      * Test error handling
      */
@@ -145,26 +144,26 @@ class WindowsVideoPlayerStateTest {
             println("Skipping Windows-specific test on non-Windows platform")
             return
         }
-        
+
         val playerState = WindowsVideoPlayerState()
-        
+
         // Initially there should be no error
         assertNull(playerState.error)
-        
+
         // Test opening a non-existent file (should cause an error)
         runBlocking {
             playerState.openUri("non_existent_file.mp4")
             delay(500) // Give some time for the error to be set
         }
-        
+
         // There should be an error now
         assertNotNull(playerState.error)
         assertTrue(playerState.error is VideoPlayerError.UnknownError)
-        
+
         // Test clearing the error
         playerState.clearError()
         assertNull(playerState.error)
-        
+
         // Clean up
         playerState.dispose()
     }

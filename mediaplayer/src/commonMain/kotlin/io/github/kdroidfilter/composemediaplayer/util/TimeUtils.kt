@@ -1,6 +1,5 @@
 package io.github.kdroidfilter.composemediaplayer.util
 
-
 /**
  * Formats a given time into either "HH:MM:SS" (if hours > 0) or "MM:SS".
  *
@@ -8,13 +7,17 @@ package io.github.kdroidfilter.composemediaplayer.util
  *              if interpreting nanoseconds, pass as Long).
  * @param isNanoseconds Set to true when you're passing nanoseconds (Long) for [value].
  */
-internal fun formatTime(value: Number, isNanoseconds: Boolean = false): String {
+internal fun formatTime(
+    value: Number,
+    isNanoseconds: Boolean = false,
+): String {
     // Convert the input to seconds (Double) if it's nanoseconds
-    val totalSeconds = if (isNanoseconds) {
-        value.toLong() / 1_000_000_000.0
-    } else {
-        value.toDouble()
-    }
+    val totalSeconds =
+        if (isNanoseconds) {
+            value.toLong() / 1_000_000_000.0
+        } else {
+            value.toDouble()
+        }
 
     // Calculate hours, minutes, and seconds directly from total seconds
     // This handles large time values correctly without date-time wrapping
@@ -25,7 +28,10 @@ internal fun formatTime(value: Number, isNanoseconds: Boolean = false): String {
 
     // Build the final string
     return if (hours > 0) {
-        "${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+        "${hours.toString().padStart(
+            2,
+            '0',
+        )}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
     } else {
         "${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
     }

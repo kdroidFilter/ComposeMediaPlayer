@@ -14,37 +14,76 @@ internal object LinuxNativeBridge {
 
     // Playback control
     @JvmStatic external fun nCreatePlayer(): Long
-    @JvmStatic external fun nOpenUri(handle: Long, uri: String)
+
+    @JvmStatic external fun nOpenUri(
+        handle: Long,
+        uri: String,
+    )
+
     @JvmStatic external fun nPlay(handle: Long)
+
     @JvmStatic external fun nPause(handle: Long)
-    @JvmStatic external fun nSetVolume(handle: Long, volume: Float)
+
+    @JvmStatic external fun nSetVolume(
+        handle: Long,
+        volume: Float,
+    )
+
     @JvmStatic external fun nGetVolume(handle: Long): Float
-    @JvmStatic external fun nSeekTo(handle: Long, time: Double)
+
+    @JvmStatic external fun nSeekTo(
+        handle: Long,
+        time: Double,
+    )
+
     @JvmStatic external fun nDisposePlayer(handle: Long)
-    @JvmStatic external fun nSetPlaybackSpeed(handle: Long, speed: Float)
+
+    @JvmStatic external fun nSetPlaybackSpeed(
+        handle: Long,
+        speed: Float,
+    )
+
     @JvmStatic external fun nGetPlaybackSpeed(handle: Long): Float
 
     // Frame access
     @JvmStatic external fun nGetLatestFrameAddress(handle: Long): Long
-    @JvmStatic external fun nWrapPointer(address: Long, size: Long): ByteBuffer?
+
+    @JvmStatic external fun nWrapPointer(
+        address: Long,
+        size: Long,
+    ): ByteBuffer?
+
     @JvmStatic external fun nGetFrameWidth(handle: Long): Int
+
     @JvmStatic external fun nGetFrameHeight(handle: Long): Int
-    @JvmStatic external fun nSetOutputSize(handle: Long, width: Int, height: Int): Int
+
+    @JvmStatic external fun nSetOutputSize(
+        handle: Long,
+        width: Int,
+        height: Int,
+    ): Int
 
     // Timing
     @JvmStatic external fun nGetVideoDuration(handle: Long): Double
+
     @JvmStatic external fun nGetCurrentTime(handle: Long): Double
 
     // Audio levels
     @JvmStatic external fun nGetLeftAudioLevel(handle: Long): Float
+
     @JvmStatic external fun nGetRightAudioLevel(handle: Long): Float
 
     // Metadata
     @JvmStatic external fun nGetVideoTitle(handle: Long): String?
+
     @JvmStatic external fun nGetVideoBitrate(handle: Long): Long
+
     @JvmStatic external fun nGetVideoMimeType(handle: Long): String?
+
     @JvmStatic external fun nGetAudioChannels(handle: Long): Int
+
     @JvmStatic external fun nGetAudioSampleRate(handle: Long): Int
+
     @JvmStatic external fun nGetFrameRate(handle: Long): Float
 
     // Playback completion

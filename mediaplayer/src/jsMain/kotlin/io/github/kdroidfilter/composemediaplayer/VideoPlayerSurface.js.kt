@@ -15,7 +15,7 @@ actual fun VideoPlayerSurface(
     playerState: VideoPlayerState,
     modifier: Modifier,
     contentScale: ContentScale,
-    overlay: @Composable () -> Unit
+    overlay: @Composable () -> Unit,
 ) {
     if (playerState.hasMedia) {
         var videoElement by remember { mutableStateOf<HTMLVideoElement?>(null) }
@@ -39,12 +39,12 @@ actual fun VideoPlayerSurface(
             onLastPlaybackSpeedChange = { lastPlaybackSpeed = it },
             lastPosition = lastPosition,
             wasPlaying = wasPlaying,
-            lastPlaybackSpeed = lastPlaybackSpeed
+            lastPlaybackSpeed = lastPlaybackSpeed,
         )
 
         VideoVolumeAndSpeedEffects(
             playerState = playerState,
-            videoElement = videoElement
+            videoElement = videoElement,
         )
 
         // Video content layout with WebElementView
@@ -53,7 +53,7 @@ actual fun VideoPlayerSurface(
             modifier = modifier,
             videoRatio = videoRatio,
             contentScale = contentScale,
-            overlay = overlay
+            overlay = overlay,
         ) {
             key(useCors) {
                 WebElementView(
@@ -68,7 +68,7 @@ actual fun VideoPlayerSurface(
                                 scope = scope,
                                 enableAudioDetection = true,
                                 useCors = useCors,
-                                onCorsError = { useCors = false }
+                                onCorsError = { useCors = false },
                             )
                         }
                     },
@@ -81,7 +81,7 @@ actual fun VideoPlayerSurface(
                     onRelease = { video ->
                         video.safePause()
                         videoElement = null
-                    }
+                    },
                 )
             }
         }

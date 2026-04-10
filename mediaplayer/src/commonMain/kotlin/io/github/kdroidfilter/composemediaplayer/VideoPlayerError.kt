@@ -1,6 +1,5 @@
 package io.github.kdroidfilter.composemediaplayer
 
-
 /**
  * Represents different types of errors that can occur during video playback in a video player.
  *
@@ -14,8 +13,19 @@ package io.github.kdroidfilter.composemediaplayer
  * - `UnknownError`: Covers any issues that do not fit into the other categories.
  */
 sealed class VideoPlayerError {
-    data class CodecError(val message: String): VideoPlayerError()
-    data class NetworkError(val message: String): VideoPlayerError()
-    data class SourceError(val message: String): VideoPlayerError()
-    data class UnknownError(val message: String): VideoPlayerError()
+    data class CodecError(
+        val message: String,
+    ) : VideoPlayerError()
+
+    data class NetworkError(
+        val message: String,
+    ) : VideoPlayerError()
+
+    data class SourceError(
+        val message: String,
+    ) : VideoPlayerError()
+
+    data class UnknownError(
+        val message: String,
+    ) : VideoPlayerError()
 }
