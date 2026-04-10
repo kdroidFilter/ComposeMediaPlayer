@@ -456,8 +456,8 @@ class MacVideoPlayerState : VideoPlayerState {
                 if (width > 0 && height > 0) {
                     width.toFloat() / height.toFloat()
                 } else {
-                    // Au lieu de forcer 16f/9f, ne changez pas l’aspect si la vidéo n’est pas encore prête.
-                    // Par exemple, on peut conserver l’ancien aspect ratio :
+                    // Instead of forcing 16f/9f, don’t change the aspect if the video is not ready yet.
+                    // For example, we can keep the previous aspect ratio:
                     _aspectRatio.value
                 }
 
@@ -480,7 +480,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 metadata.audioChannels = if (audioChannels == 0) null else audioChannels
                 metadata.audioSampleRate = if (audioSampleRate == 0) null else audioSampleRate
 
-                // Met à jour l’aspect ratio seulement si width/height valides
+                // Update the aspect ratio only if width/height are valid
                 _aspectRatio.value = newAspectRatio
             }
 

@@ -114,9 +114,9 @@ fun VideoPlayerSurfaceImpl(
                         when (contentScale) {
                             ContentScale.Crop,
                             ContentScale.FillHeight,
-                            -> AVLayerVideoGravityResizeAspectFill // ⬅️ changement
-                            ContentScale.FillWidth -> AVLayerVideoGravityResizeAspectFill // (même logique)
-                            ContentScale.FillBounds -> AVLayerVideoGravityResize // pas d’aspect-ratio
+                            -> AVLayerVideoGravityResizeAspectFill
+                            ContentScale.FillWidth -> AVLayerVideoGravityResizeAspectFill
+                            ContentScale.FillBounds -> AVLayerVideoGravityResize // no aspect-ratio
                             ContentScale.Fit,
                             ContentScale.Inside,
                             -> AVLayerVideoGravityResizeAspect

@@ -106,7 +106,7 @@ private fun VideoPlayerSurfaceInternal(
     DisposableEffect(playerState) {
         onDispose {
             try {
-                // Détacher la vue du player
+                // Detach the view from the player
                 if (playerState is DefaultVideoPlayerState) {
                     playerState.attachPlayerView(null)
                 }
@@ -173,15 +173,15 @@ private fun VideoPlayerContent(
                     ),
                 factory = { context ->
                     try {
-                        // Créer PlayerView avec le type de surface approprié
+                        // Create PlayerView with the appropriate surface type
 
                         createPlayerViewWithSurfaceType(context, surfaceType).apply {
                             if (playerState is DefaultVideoPlayerState) {
-                                // Attacher cette vue à l'état du lecteur
+                                // Attach this view to the player state
                                 playerState.attachPlayerView(this)
 
                                 if (playerState.exoPlayer != null) {
-                                    // Attacher le lecteur depuis l'état
+                                    // Attach the player from the state
                                     player = playerState.exoPlayer
                                 }
                             }
@@ -191,15 +191,15 @@ private fun VideoPlayerContent(
                             setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                             setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
-                            // Mapper ContentScale vers les modes de redimensionnement ExoPlayer
+                            // Map ContentScale to ExoPlayer resize modes
                             resizeMode = mapContentScaleToResizeMode(contentScale)
 
-                            // Désactiver la vue de sous-titres native car nous utilisons des sous-titres basés sur Compose
+                            // Disable the native subtitle view since we use Compose-based subtitles
                             subtitleView?.visibility = android.view.View.GONE
                         }
                     } catch (e: Exception) {
                         androidVideoLogger.e { "Error creating PlayerView: ${e.message}" }
-                        // Retourner une vue vide en cas d'erreur
+                        // Return an empty view in case of error
                         PlayerView(context).apply {
                             setBackgroundColor(android.graphics.Color.BLACK)
                         }
@@ -207,12 +207,12 @@ private fun VideoPlayerContent(
                 },
                 update = { playerView ->
                     try {
-                        // Vérifier que le player est toujours valide avant la mise à jour
+                        // Verify that the player is still valid before updating
                         if (playerState is DefaultVideoPlayerState &&
                             playerState.exoPlayer != null &&
                             playerView.player != null
                         ) {
-                            // Mettre à jour le mode de redimensionnement lorsque contentScale change
+                            // Update the resize mode when contentScale changes
                             playerView.resizeMode = mapContentScaleToResizeMode(contentScale)
                         }
                     } catch (e: Exception) {
@@ -221,7 +221,7 @@ private fun VideoPlayerContent(
                 },
                 onReset = { playerView ->
                     try {
-                        // Nettoyer les ressources lorsque la vue est recyclée dans une LazyList
+                        // Clean up resources when the view is recycled in a LazyList
                         playerView.player = null
                         playerView.onPause()
                     } catch (e: Exception) {
@@ -230,7 +230,7 @@ private fun VideoPlayerContent(
                 },
                 onRelease = { playerView ->
                     try {
-                        // Nettoyer complètement la vue lors de sa libération
+                        // Fully clean up the view on release
                         playerView.player = null
                     } catch (e: Exception) {
                         androidVideoLogger.e { "Error releasing PlayerView: ${e.message}" }
@@ -238,15 +238,15 @@ private fun VideoPlayerContent(
                 },
             )
 
-            // Ajouter une couche de sous-titres basée sur Compose
+            // Add a Compose-based subtitle layer
             if (playerState.subtitlesEnabled && playerState.currentSubtitleTrack != null) {
-                // Calculer le temps actuel en millisecondes
+                // Calculate the current time in milliseconds
                 val currentTimeMs =
                     remember(playerState.sliderPos, playerState.durationText) {
                         (playerState.sliderPos / 1000f * playerState.durationText.toTimeMs()).toLong()
                     }
 
-                // Calculer la durée en millisecondes
+                // Calculate the duration in milliseconds
                 val durationMs =
                     remember(playerState.durationText) {
                         playerState.durationText.toTimeMs()
@@ -264,8 +264,8 @@ private fun VideoPlayerContent(
             }
         }
 
-        // Rendre le contenu de l'overlay au-dessus de la vidéo avec le modificateur fillMaxSize
-        // pour s'assurer qu'il prend toute la hauteur du Box parent
+        // Render the overlay content above the video with the fillMaxSize modifier
+        // to ensure it takes the full height of the parent Box
         Box(modifier = Modifier.fillMaxSize()) {
             overlay()
         }
@@ -289,7 +289,7 @@ private fun createPlayerViewWithSurfaceType(
     surfaceType: SurfaceType,
 ): PlayerView =
     try {
-        // Essayer d'abord d'inflater les layouts personnalisés
+        // First try to inflate the custom layouts
         val layoutId =
             when (surfaceType) {
                 SurfaceType.SurfaceView -> R.layout.player_view_surface
@@ -300,16 +300,16 @@ private fun createPlayerViewWithSurfaceType(
     } catch (e: Exception) {
         androidVideoLogger.e { "Error inflating PlayerView layout: ${e.message}, creating programmatically" }
 
-        // Créer PlayerView programmatiquement pour éviter les problèmes de ressources manquantes
+        // Create PlayerView programmatically to avoid missing resource issues
         try {
             PlayerView(context).apply {
-                // Désactiver complètement les contrôles pour éviter l'inflation du layout des contrôles
+                // Fully disable controls to avoid inflating the controls layout
                 useController = false
 
-                // Configurer le type de surface programmatiquement
+                // Configure the surface type programmatically
                 when (surfaceType) {
                     SurfaceType.TextureView -> {
-                        // Utiliser TextureView si disponible
+                        // Use TextureView if available
                         videoSurfaceView?.let { view ->
                             if (view is TextureView) {
                                 androidVideoLogger.d { "Using TextureView" }
@@ -318,19 +318,19 @@ private fun createPlayerViewWithSurfaceType(
                     }
 
                     SurfaceType.SurfaceView -> {
-                        // SurfaceView est le défaut
+                        // SurfaceView is the default
                         androidVideoLogger.d { "Using SurfaceView" }
                     }
                 }
 
-                // Désactiver les fonctionnalités qui pourraient causer des problèmes
+                // Disable features that could cause issues
                 controllerAutoShow = false
                 controllerHideOnTouch = false
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
             }
         } catch (e2: Exception) {
             androidVideoLogger.e { "Error creating PlayerView programmatically: ${e2.message}" }
-            // Dernier recours : créer une vue vide pour éviter le crash
+            // Last resort: create an empty view to avoid crashing
             throw e2
         }
     }

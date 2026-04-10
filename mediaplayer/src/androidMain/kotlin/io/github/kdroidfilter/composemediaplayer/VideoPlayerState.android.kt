@@ -102,7 +102,7 @@ open class DefaultVideoPlayerState(
     private var updateJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // Protection contre les race conditions
+    // Protection against race conditions
     private var isPlayerReleased = false
     private val playerInitializationLock = Object()
     private var playerListener: Player.Listener? = null
@@ -185,7 +185,7 @@ open class DefaultVideoPlayerState(
 
     internal fun attachPlayerView(view: PlayerView?) {
         if (view == null) {
-            // Détacher la vue actuelle
+            // Detach the current view
             playerView?.player = null
             playerView = null
             return
@@ -289,12 +289,12 @@ open class DefaultVideoPlayerState(
         val manufacturer = android.os.Build.MANUFACTURER
         val model = android.os.Build.MODEL
 
-        // Liste des appareils connus pour avoir des problèmes MediaCodec
+        // List of devices known to have MediaCodec issues
         val problematicDevices =
             setOf(
                 "SM-A155F", // Galaxy A15
                 "SM-A156B", // Galaxy A15 5G
-                // Ajouter d'autres modèles problématiques ici
+                // Add other problematic models here
             )
 
         return device in problematicDevices ||
@@ -333,7 +333,7 @@ open class DefaultVideoPlayerState(
                             synchronized(playerInitializationLock) {
                                 if (!isPlayerReleased && wasPlayingBeforeScreenLock && exoPlayer != null) {
                                     try {
-                                        // Ajouter un petit délai pour s'assurer que le système est prêt
+                                        // Add a small delay to ensure the system is ready
                                         coroutineScope.launch {
                                             delay(200)
                                             if (!isPlayerReleased) {
@@ -390,13 +390,13 @@ open class DefaultVideoPlayerState(
                     ): AudioSink = audioSink
                 }.apply {
                     setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
-                    // Activer le fallback du décodeur pour une meilleure stabilité
+                    // Enable decoder fallback for better stability
                     setEnableDecoderFallback(true)
 
-                    // Sur les appareils problématiques, utiliser des paramètres plus conservateurs
+                    // On problematic devices, use more conservative settings
                     if (shouldUseConservativeCodecHandling()) {
-                        // On ne peut pas désactiver l'async queueing car la méthode n'existe pas
-                        // Mais on peut utiliser le MediaCodecSelector par défaut
+                        // Cannot disable async queueing as the method does not exist
+                        // But we can use the default MediaCodecSelector
                         setMediaCodecSelector(MediaCodecSelector.DEFAULT)
                     }
                 }
@@ -417,7 +417,7 @@ open class DefaultVideoPlayerState(
                     .setWakeMode(if (manageFocus) C.WAKE_MODE_LOCAL else C.WAKE_MODE_NONE)
                     .setAudioAttributes(audioAttributes, manageFocus)
                     .setPauseAtEndOfMediaItems(false)
-                    .setReleaseTimeoutMs(2000) // Augmenter le timeout de libération
+                    .setReleaseTimeoutMs(2000) // Increase the release timeout
                     .build()
                     .apply {
                         playerListener = createPlayerListener()
@@ -430,7 +430,7 @@ open class DefaultVideoPlayerState(
     private fun createPlayerListener() =
         object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                // Ajouter une vérification de sécurité
+                // Add a safety check
                 if (isPlayerReleased) return
 
                 when (playbackState) {
@@ -484,7 +484,7 @@ open class DefaultVideoPlayerState(
             override fun onPlayerError(error: PlaybackException) {
                 androidVideoLogger.e { "Player error occurred: ${error.errorCode} - ${error.message}" }
 
-                // Créer un rapport d'erreur détaillé
+                // Create a detailed error report
                 val errorDetails =
                     mapOf(
                         "error_code" to error.errorCode.toString(),
@@ -501,13 +501,13 @@ open class DefaultVideoPlayerState(
                 // Log the error details (you can send this to your crash reporting service)
                 androidVideoLogger.e { "Detailed error info: $errorDetails" }
 
-                // Gestion des erreurs spécifiques au codec
+                // Codec-specific error handling
                 when (error.errorCode) {
                     PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
                     PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
                     -> {
                         _error = VideoPlayerError.CodecError("Decoder error: ${error.message}")
-                        // Tenter une récupération pour les erreurs de codec
+                        // Attempt recovery for codec errors
                         attemptPlayerRecovery()
                     }
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
@@ -531,7 +531,7 @@ open class DefaultVideoPlayerState(
 
     private fun attemptPlayerRecovery() {
         coroutineScope.launch {
-            delay(100) // Petit délai pour laisser le système nettoyer
+            delay(100) // Small delay to let the system clean up
 
             synchronized(playerInitializationLock) {
                 if (!isPlayerReleased) {
@@ -541,22 +541,22 @@ open class DefaultVideoPlayerState(
                         val wasPlaying = player.isPlaying
 
                         try {
-                            // Retirer le listener avant de libérer
+                            // Remove the listener before releasing
                             playerListener?.let { player.removeListener(it) }
 
-                            // Libérer le lecteur actuel
+                            // Release the current player
                             player.release()
 
-                            // Réinitialiser
+                            // Reinitialize
                             initializePlayer()
 
-                            // Restaurer l'élément média et la position
+                            // Restore the media item and position
                             currentMediaItem?.let {
                                 exoPlayer?.apply {
                                     setMediaItem(it)
                                     prepare()
                                     seekTo(currentPosition)
-                                    // Restaurer l'état de lecture si nécessaire
+                                    // Restore the playback state if needed
                                     if (wasPlaying) {
                                         play()
                                     } else {
@@ -635,7 +635,7 @@ open class DefaultVideoPlayerState(
                     _error = null
                     resetStates(keepMedia = true)
 
-                    // Extraire les métadonnées avant de préparer le lecteur
+                    // Extract metadata before preparing the player
                     extractMediaItemMetadata(mediaItem)
 
                     player.setMediaItem(mediaItem)
@@ -643,7 +643,7 @@ open class DefaultVideoPlayerState(
                     player.volume = volume
                     player.repeatMode = if (loop) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
 
-                    // Contrôler l'état de lecture initial
+                    // Control the initial playback state
                     if (initializeplayerState == InitialPlayerState.PLAY) {
                         player.play()
                         _hasMedia = true
@@ -832,7 +832,7 @@ open class DefaultVideoPlayerState(
 
             try {
                 exoPlayer?.let { player ->
-                    // Retirer le listener spécifiquement
+                    // Remove the listener specifically
                     playerListener?.let { listener ->
                         player.removeListener(listener)
                     }

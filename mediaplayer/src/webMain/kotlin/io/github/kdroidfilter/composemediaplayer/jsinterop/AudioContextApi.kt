@@ -56,7 +56,7 @@ external class AudioDestinationNode : AudioNode {
  * Audio source based on a media element (audio or video)
  */
 external class MediaElementAudioSourceNode : AudioNode {
-    /** Number of channels actually présentes dans la piste audio. */
+    /** Number of channels actually present in the audio track. */
     val channelCount: Int
 }
 

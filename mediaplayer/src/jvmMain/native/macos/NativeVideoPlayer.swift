@@ -631,7 +631,7 @@ class MacVideoPlayer {
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
             guard let videoTrack = tracks?.first, error == nil else {
                 print(
-                    "Erreur lors du chargement des pistes vidéo : \(error?.localizedDescription ?? "Inconnue")"
+                    "Error loading video tracks: \(error?.localizedDescription ?? "Unknown")"
                 )
                 return
             }
@@ -720,7 +720,7 @@ class MacVideoPlayer {
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
             guard let videoTrack = tracks?.first, error == nil else {
                 print(
-                    "Erreur lors du chargement des pistes vidéo : \(error?.localizedDescription ?? "Inconnue")"
+                    "Error loading video tracks: \(error?.localizedDescription ?? "Unknown")"
                 )
                 // For HLS streams without video track info yet, use default dimensions
                 if isHLSStream {
@@ -991,7 +991,7 @@ class MacVideoPlayer {
         numberFramesOut.pointee = numberFrames
     }
 
-    // Dans la méthode setupAudioTap, ajoutez une vérification du format audio et un log
+    // In the setupAudioTap method, add audio format verification and logging
     private func setupAudioTap(for playerItem: AVPlayerItem) {
         guard let asset = playerItem.asset as? AVURLAsset else {
             print("Asset is not an AVURLAsset")
@@ -1062,7 +1062,7 @@ class MacVideoPlayer {
             player?.play()
             configureDisplayLink()
         } else {
-            // Marquer qu'une lecture est en attente
+            // Mark that playback is pending
             pendingPlay = true
         }
     }
