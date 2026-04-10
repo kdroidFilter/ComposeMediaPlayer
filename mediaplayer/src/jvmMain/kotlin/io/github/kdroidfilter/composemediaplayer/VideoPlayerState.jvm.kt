@@ -3,9 +3,9 @@ package io.github.kdroidfilter.composemediaplayer
 import androidx.compose.runtime.Stable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
-import com.sun.jna.Platform
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.vinceglb.filekit.PlatformFile
 
@@ -37,11 +37,10 @@ actual fun createVideoPlayerState(): VideoPlayerState = DefaultVideoPlayerState(
  */
 @Stable
 open class DefaultVideoPlayerState: VideoPlayerState {
-    val delegate: VideoPlayerState = when {
-        Platform.isWindows() -> WindowsVideoPlayerState()
-        Platform.isMac() -> MacVideoPlayerState()
-        Platform.isLinux() -> LinuxVideoPlayerState()
-        else -> throw UnsupportedOperationException("Unsupported platform")
+    val delegate: VideoPlayerState = when (CurrentPlatform.os) {
+        CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState()
+        CurrentPlatform.OS.MAC -> MacVideoPlayerState()
+        CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState()
     }
 
     override val hasMedia: Boolean get() = delegate.hasMedia

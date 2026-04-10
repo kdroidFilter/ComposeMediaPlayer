@@ -7,10 +7,7 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFalse
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
-import com.sun.jna.Platform
-import org.freedesktop.gstreamer.ElementFactory
-import org.freedesktop.gstreamer.Gst
-import org.freedesktop.gstreamer.Version
+import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 
 /**
  * Tests for the JVM implementation of VideoPlayerState
@@ -18,48 +15,31 @@ import org.freedesktop.gstreamer.Version
 class VideoPlayerStateTest {
 
     /**
-     * Checks if GStreamer is available and the playbin element can be created.
-     * This is used to skip tests when GStreamer is not properly installed or configured.
-     * GStreamer is only checked on Linux platforms.
+     * Checks if the native video player library is available.
+     * On Linux, this requires the native GStreamer JNI library.
+     * On macOS, this requires the AVFoundation JNI library.
+     * On Windows, this requires the Media Foundation JNI library.
      */
-    private fun isGStreamerAvailable(): Boolean {
-        // Only check for GStreamer on Linux platforms
-        if (!Platform.isLinux()) {
-            println("Skipping GStreamer check: Not on Linux platform")
-            return false
-        }
-
-        try {
-            // Try to initialize GStreamer if it's not already initialized
-            if (!Gst.isInitialized()) {
-                Gst.init(Version.BASELINE, "ComposeGStreamerPlayerTest")
-            }
-
-            // Try to create a playbin element
-            val element = ElementFactory.make("playbin", "testPlaybin")
-            val isAvailable = element != null
-            element?.dispose()
-            return isAvailable
+    private fun isNativePlayerAvailable(): Boolean {
+        return try {
+            val state = createVideoPlayerState()
+            state.dispose()
+            true
         } catch (e: Exception) {
-            println("GStreamer is not available: ${e.message}")
-            return false
+            println("Native player not available: ${e.message}")
+            false
         }
     }
 
-    /**
-     * Test the creation of VideoPlayerState
-     */
     @Test
     fun testCreateVideoPlayerState() {
-        // Skip test if GStreamer is not available
-        if (!isGStreamerAvailable()) {
-            println("Skipping test: GStreamer is not available")
+        if (!isNativePlayerAvailable()) {
+            println("Skipping test: Native player not available")
             return
         }
 
         val playerState = createVideoPlayerState()
 
-        // Verify the player state is initialized correctly
         assertNotNull(playerState)
         assertFalse(playerState.hasMedia)
         assertFalse(playerState.isPlaying)
@@ -72,125 +52,93 @@ class VideoPlayerStateTest {
         assertEquals(0f, playerState.rightLevel)
         assertFalse(playerState.isFullscreen)
 
-        // Clean up
         playerState.dispose()
     }
 
-    /**
-     * Test volume control
-     */
     @Test
     fun testVolumeControl() {
-        // Skip test if GStreamer is not available
-        if (!isGStreamerAvailable()) {
-            println("Skipping test: GStreamer is not available")
+        if (!isNativePlayerAvailable()) {
+            println("Skipping test: Native player not available")
             return
         }
 
         val playerState = createVideoPlayerState()
 
-        // Test initial volume
         assertEquals(1f, playerState.volume)
 
-        // Test setting volume
         playerState.volume = 0.5f
         assertEquals(0.5f, playerState.volume)
 
-        // Test volume bounds
         playerState.volume = -0.1f
         assertEquals(0f, playerState.volume, "Volume should be clamped to 0")
 
         playerState.volume = 1.5f
         assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
 
-        // Clean up
         playerState.dispose()
     }
 
-    /**
-     * Test loop setting
-     */
     @Test
     fun testLoopSetting() {
-        // Skip test if GStreamer is not available
-        if (!isGStreamerAvailable()) {
-            println("Skipping test: GStreamer is not available")
+        if (!isNativePlayerAvailable()) {
+            println("Skipping test: Native player not available")
             return
         }
 
         val playerState = createVideoPlayerState()
 
-        // Test initial loop setting
         assertFalse(playerState.loop)
 
-        // Test setting loop
         playerState.loop = true
         assertTrue(playerState.loop)
 
         playerState.loop = false
         assertFalse(playerState.loop)
 
-        // Clean up
         playerState.dispose()
     }
 
-    /**
-     * Test fullscreen toggle
-     */
     @Test
     fun testFullscreenToggle() {
-        // Skip test if GStreamer is not available
-        if (!isGStreamerAvailable()) {
-            println("Skipping test: GStreamer is not available")
+        if (!isNativePlayerAvailable()) {
+            println("Skipping test: Native player not available")
             return
         }
 
         val playerState = createVideoPlayerState()
 
-        // Test initial fullscreen state
         assertFalse(playerState.isFullscreen)
 
-        // Test toggling fullscreen
         playerState.toggleFullscreen()
         assertTrue(playerState.isFullscreen)
 
         playerState.toggleFullscreen()
         assertFalse(playerState.isFullscreen)
 
-        // Clean up
         playerState.dispose()
     }
 
-    /**
-     * Test error handling
-     */
     @Test
     fun testErrorHandling() {
-        // Skip test if GStreamer is not available
-        if (!isGStreamerAvailable()) {
-            println("Skipping test: GStreamer is not available")
+        if (!isNativePlayerAvailable()) {
+            println("Skipping test: Native player not available")
             return
         }
 
         val playerState = createVideoPlayerState()
 
-        // Initially there should be no error
         assertEquals(null, playerState.error)
 
-        // Test opening a non-existent file (should cause an error)
         runBlocking {
             playerState.openUri("non_existent_file.mp4")
-            delay(500) // Give some time for the error to be set
+            delay(500)
         }
 
-        // There should be an error now
         assertNotNull(playerState.error)
 
-        // Test clearing the error
         playerState.clearError()
         assertEquals(null, playerState.error)
 
-        // Clean up
         playerState.dispose()
     }
 }
