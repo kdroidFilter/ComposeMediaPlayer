@@ -23,13 +23,19 @@ class SharedVideoPlayer {
     // The actual capture frame rate (minimum of video and screen rates)
     private var captureFrameRate: Float = 0.0
 
-    // Shared buffer to store the frame in BGRA format (no conversion needed)
-    private var frameBuffer: UnsafeMutablePointer<UInt32>?
-    private var bufferCapacity: Int = 0
+    // Latest decoded CVPixelBuffer retained directly — no intermediate copy.
+    // The JNI side locks it for reading, copies to the Skia bitmap, then unlocks.
+    private var latestPixelBuffer: CVPixelBuffer? = nil
+    private var lockedPixelBuffer: CVPixelBuffer? = nil
+    private let bufferLock = NSLock()
 
-    // Frame dimensions
+    // Frame dimensions (scaled output — may be smaller than native to save RAM)
     private var frameWidth: Int = 0
     private var frameHeight: Int = 0
+
+    // Native video resolution (unscaled, as reported by the asset)
+    private var nativeVideoWidth: Int = 0
+    private var nativeVideoHeight: Int = 0
 
     // Audio volume control (0.0 to 1.0)
     private var volume: Float = 1.0
@@ -69,6 +75,10 @@ class SharedVideoPlayer {
     private var bufferEmptyObserver: NSKeyValueObservation?
     private var bufferLikelyToKeepUpObserver: NSKeyValueObservation?
     private var bufferFullObserver: NSKeyValueObservation?
+
+    // End-of-playback flag (set by AVPlayerItemDidPlayToEndTime, consumed once by the Kotlin side)
+    private var didPlayToEnd: Bool = false
+    private var playbackEndObserver: NSObjectProtocol?
 
     // HLS Error tracking
     private var lastError: String? = nil
@@ -159,13 +169,6 @@ class SharedVideoPlayer {
         // Monitor loaded time ranges for buffer status
         playerItemObserver = item.observe(\.loadedTimeRanges, options: [.new]) { [weak self] item, _ in
             self?.updateBufferStatus(from: item)
-        }
-
-        // Monitor player time control status
-        if let player = player {
-            timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-                self?.handleTimeControlStatus(player.timeControlStatus)
-            }
         }
 
         // Monitor access log for bitrate changes
@@ -727,7 +730,8 @@ class SharedVideoPlayer {
                 if isHLSStream {
                     frameWidth = 1920
                     frameHeight = 1080
-                    setupFrameBuffer()
+                    nativeVideoWidth = frameWidth
+                    nativeVideoHeight = frameHeight
                     setupVideoOutputAndPlayer(with: asset)
                 }
                 return
@@ -744,9 +748,10 @@ class SharedVideoPlayer {
                         let effectiveSize = naturalSize.applying(transform)
                         self.frameWidth = Int(abs(effectiveSize.width))
                         self.frameHeight = Int(abs(effectiveSize.height))
+                        self.nativeVideoWidth = self.frameWidth
+                        self.nativeVideoHeight = self.frameHeight
 
-                        // Continue with buffer allocation and setup
-                        self.setupFrameBuffer()
+                        // Continue with player setup
                         self.setupVideoOutputAndPlayer(with: asset)
                     } catch {
                         print("Error loading video track properties: \(error.localizedDescription)")
@@ -754,7 +759,6 @@ class SharedVideoPlayer {
                         if self.isHLSStream {
                             self.frameWidth = 1920
                             self.frameHeight = 1080
-                            self.setupFrameBuffer()
                             self.setupVideoOutputAndPlayer(with: asset)
                         }
                     }
@@ -767,25 +771,60 @@ class SharedVideoPlayer {
                 let effectiveSize = naturalSize.applying(transform)
                 frameWidth = Int(abs(effectiveSize.width))
                 frameHeight = Int(abs(effectiveSize.height))
+                nativeVideoWidth = frameWidth
+                nativeVideoHeight = frameHeight
 
-                // Continue with buffer allocation and setup
-                setupFrameBuffer()
+                // Continue with player setup
                 setupVideoOutputAndPlayer(with: asset)
             }
         }
     }
 
-    // Helper method to setup frame buffer
-    private func setupFrameBuffer() {
-        // Allocate or reuse the shared buffer if capacity matches
-        let totalPixels = frameWidth * frameHeight
-        if let buffer = frameBuffer, bufferCapacity == totalPixels {
-            buffer.initialize(repeating: 0, count: totalPixels)
-        } else {
-            frameBuffer?.deallocate()
-            frameBuffer = UnsafeMutablePointer<UInt32>.allocate(capacity: totalPixels)
-            frameBuffer?.initialize(repeating: 0, count: totalPixels)
-            bufferCapacity = totalPixels
+    // Retains the latest CVPixelBuffer for zero-copy JNI access.
+    // Updates frame dimensions for HLS streams where resolution may change dynamically.
+    private func retainLatestPixelBuffer(_ pixelBuffer: CVPixelBuffer) {
+        let w = CVPixelBufferGetWidth(pixelBuffer)
+        let h = CVPixelBufferGetHeight(pixelBuffer)
+        if isHLSStream && (w != frameWidth || h != frameHeight) {
+            frameWidth = w
+            frameHeight = h
+            nativeVideoWidth = w
+            nativeVideoHeight = h
+        }
+        bufferLock.lock()
+        latestPixelBuffer = pixelBuffer
+        bufferLock.unlock()
+    }
+
+    // Locks the latest CVPixelBuffer and returns its base address for direct reading.
+    // outInfo must point to an array of 3 int32_t: [width, height, bytesPerRow].
+    // Caller MUST call unlockLatestFrame() after reading.
+    func lockLatestFrame(_ outInfo: UnsafeMutablePointer<Int32>) -> UnsafeMutableRawPointer? {
+        bufferLock.lock()
+        guard let pb = latestPixelBuffer else {
+            bufferLock.unlock()
+            return nil
+        }
+        lockedPixelBuffer = pb
+        bufferLock.unlock()
+
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        guard let addr = CVPixelBufferGetBaseAddress(pb) else {
+            CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+            lockedPixelBuffer = nil
+            return nil
+        }
+        outInfo[0] = Int32(CVPixelBufferGetWidth(pb))
+        outInfo[1] = Int32(CVPixelBufferGetHeight(pb))
+        outInfo[2] = Int32(CVPixelBufferGetBytesPerRow(pb))
+        return addr
+    }
+
+    // Unlocks the CVPixelBuffer previously locked by lockLatestFrame().
+    func unlockLatestFrame() {
+        if let pb = lockedPixelBuffer {
+            CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+            lockedPixelBuffer = nil
         }
     }
 
@@ -827,6 +866,20 @@ class SharedVideoPlayer {
 
         player = AVPlayer(playerItem: item)
 
+        // Monitor time control status for all media types (buffering, paused, playing)
+        timeControlStatusObserver = player?.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            self?.handleTimeControlStatus(player.timeControlStatus)
+        }
+
+        // Observe end of playback for all media types
+        playbackEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: nil
+        ) { [weak self] _ in
+            self?.didPlayToEnd = true
+        }
+
         // Configure player for HLS
         if isHLSStream {
             player?.automaticallyWaitsToMinimizeStalling = true
@@ -865,7 +918,7 @@ class SharedVideoPlayer {
         if output.hasNewPixelBuffer(forItemTime: zeroTime),
            let pixelBuffer = output.copyPixelBuffer(forItemTime: zeroTime, itemTimeForDisplay: nil)
         {
-            updateLatestFrameData(from: pixelBuffer)
+            retainLatestPixelBuffer(pixelBuffer)
         }
     }
 
@@ -898,46 +951,10 @@ class SharedVideoPlayer {
            let pixelBuffer = output.copyPixelBuffer(
                forItemTime: currentTime, itemTimeForDisplay: nil)
         {
-            updateLatestFrameData(from: pixelBuffer)
+            retainLatestPixelBuffer(pixelBuffer)
         }
     }
 
-    /// Directly copies the content of the pixelBuffer into the shared buffer without conversion.
-    private func updateLatestFrameData(from pixelBuffer: CVPixelBuffer) {
-        guard let destBuffer = frameBuffer else { return }
-
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-
-        guard let srcBaseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        let srcBytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-
-        // For HLS, dimensions might change dynamically
-        if isHLSStream && (width != frameWidth || height != frameHeight) {
-            print("HLS: Resolution changed from \(frameWidth)x\(frameHeight) to \(width)x\(height)")
-            frameWidth = width
-            frameHeight = height
-            setupFrameBuffer()
-            guard frameBuffer != nil else { return }
-        }
-
-        guard width == frameWidth, height == frameHeight else {
-            print("Unexpected dimensions: \(width)x\(height)")
-            return
-        }
-
-        if srcBytesPerRow == width * 4 {
-            memcpy(destBuffer, srcBaseAddress, height * srcBytesPerRow)
-        } else {
-            for row in 0..<height {
-                let srcRow = srcBaseAddress.advanced(by: row * srcBytesPerRow)
-                let destRow = destBuffer.advanced(by: row * width)
-                memcpy(destRow, srcRow, width * 4)
-            }
-        }
-    }
 
     /// Retrieve the audio levels.
     func getLeftAudioLevel() -> Float {
@@ -1069,14 +1086,14 @@ class SharedVideoPlayer {
                 process: self.tapProcess
             )
 
-            var tap: Unmanaged<MTAudioProcessingTap>?
+            var tap: MTAudioProcessingTap?
             // Create the audio processing tap
             let status = MTAudioProcessingTapCreate(
                 kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap
             )
             if status == noErr, let tap = tap {
                 print("Audio tap created successfully")
-                inputParams.audioTapProcessor = tap.takeRetainedValue()
+                inputParams.audioTapProcessor = tap
                 let audioMix = AVMutableAudioMix()
                 audioMix.inputParameters = [inputParams]
                 playerItem.audioMix = audioMix
@@ -1111,7 +1128,7 @@ class SharedVideoPlayer {
                let pixelBuffer = output.copyPixelBuffer(
                    forItemTime: currentTime, itemTimeForDisplay: nil)
             {
-                updateLatestFrameData(from: pixelBuffer)
+                retainLatestPixelBuffer(pixelBuffer)
             }
         }
     }
@@ -1172,16 +1189,50 @@ class SharedVideoPlayer {
         return playbackSpeed
     }
 
-    /// Returns a pointer to the shared frame buffer. The caller should not free this pointer.
-    func getLatestFramePointer() -> UnsafeMutablePointer<UInt32>? {
-        return frameBuffer
-    }
-
     /// Returns the width of the video frame in pixels
     func getFrameWidth() -> Int { return frameWidth }
 
     /// Returns the height of the video frame in pixels
     func getFrameHeight() -> Int { return frameHeight }
+
+    /// Scales the output to fit within (width, height) while preserving the native aspect ratio.
+    /// Never upscales beyond the native resolution. Recreates the pixel buffer output at the new size.
+    /// Returns true if dimensions actually changed.
+    func setOutputSize(width: Int, height: Int) -> Bool {
+        guard width > 0, height > 0 else { return false }
+        guard nativeVideoWidth > 0, nativeVideoHeight > 0 else { return false }
+
+        let scaleX = Double(width) / Double(nativeVideoWidth)
+        let scaleY = Double(height) / Double(nativeVideoHeight)
+        let scale = min(scaleX, scaleY, 1.0) // never upscale
+
+        // Enforce even dimensions (required by many codecs)
+        let newWidth = max(2, (Int(Double(nativeVideoWidth) * scale) / 2) * 2)
+        let newHeight = max(2, (Int(Double(nativeVideoHeight) * scale) / 2) * 2)
+
+        if newWidth == frameWidth && newHeight == frameHeight { return false }
+
+        frameWidth = newWidth
+        frameHeight = newHeight
+
+        // Recreate AVPlayerItemVideoOutput with updated hint dimensions
+        if let item = player?.currentItem {
+            if let old = videoOutput {
+                item.remove(old)
+            }
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: newWidth,
+                kCVPixelBufferHeightKey as String: newHeight,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+            ]
+            let newOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: attrs)
+            item.add(newOutput)
+            videoOutput = newOutput
+        }
+
+        return true
+    }
 
     /// Returns the detected video frame rate
     func getVideoFrameRate() -> Float { return videoFrameRate }
@@ -1265,10 +1316,19 @@ class SharedVideoPlayer {
                    let pixelBuffer = output.copyPixelBuffer(
                        forItemTime: newTime, itemTimeForDisplay: nil)
                 {
-                    updateLatestFrameData(from: pixelBuffer)
+                    retainLatestPixelBuffer(pixelBuffer)
                 }
             }
         }
+    }
+
+    /// Consumes the end-of-playback flag. Returns true once per playback completion.
+    func consumeDidPlayToEnd() -> Bool {
+        if didPlayToEnd {
+            didPlayToEnd = false
+            return true
+        }
+        return false
     }
 
     /// Clean up observers
@@ -1280,6 +1340,12 @@ class SharedVideoPlayer {
         bufferLikelyToKeepUpObserver?.invalidate()
         bufferFullObserver?.invalidate()
 
+        if let observer = playbackEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            playbackEndObserver = nil
+        }
+        didPlayToEnd = false
+
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -1289,11 +1355,11 @@ class SharedVideoPlayer {
         cleanupObservers()
         player = nil
         videoOutput = nil
-        if let buffer = frameBuffer {
-            buffer.deallocate()
-            frameBuffer = nil
-            bufferCapacity = 0
+        if let pb = lockedPixelBuffer {
+            CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+            lockedPixelBuffer = nil
         }
+        latestPixelBuffer = nil
     }
 }
 
@@ -1355,14 +1421,18 @@ public func getVolume(_ context: UnsafeMutableRawPointer?) -> Float {
     return player.getVolume()
 }
 
-@_cdecl("getLatestFrame")
-public func getLatestFrame(_ context: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-    guard let context = context else { return nil }
+@_cdecl("lockLatestFrame")
+public func lockLatestFrame(_ context: UnsafeMutableRawPointer?, _ outInfo: UnsafeMutablePointer<Int32>?) -> UnsafeMutableRawPointer? {
+    guard let context = context, let outInfo = outInfo else { return nil }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
-    if let ptr = player.getLatestFramePointer() {
-        return UnsafeMutableRawPointer(ptr)
-    }
-    return nil
+    return player.lockLatestFrame(outInfo)
+}
+
+@_cdecl("unlockLatestFrame")
+public func unlockLatestFrame(_ context: UnsafeMutableRawPointer?) {
+    guard let context = context else { return }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    player.unlockLatestFrame()
 }
 
 @_cdecl("getFrameWidth")
@@ -1377,6 +1447,13 @@ public func getFrameHeight(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getFrameHeight())
+}
+
+@_cdecl("setOutputSize")
+public func setOutputSize(_ context: UnsafeMutableRawPointer?, _ width: Int32, _ height: Int32) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.setOutputSize(width: Int(width), height: Int(height)) ? 1 : 0
 }
 
 @_cdecl("getVideoFrameRate")
@@ -1503,6 +1580,13 @@ public func getAudioSampleRate(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
     let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getAudioSampleRate())
+}
+
+@_cdecl("consumeDidPlayToEnd")
+public func consumeDidPlayToEnd(_ context: UnsafeMutableRawPointer?) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<SharedVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.consumeDidPlayToEnd() ? 1 : 0
 }
 
 // HLS-specific C exports
