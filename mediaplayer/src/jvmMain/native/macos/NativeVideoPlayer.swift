@@ -1086,12 +1086,12 @@ class MacVideoPlayer {
                 process: self.tapProcess
             )
 
-            var tap: MTAudioProcessingTap?
+            var tap: Unmanaged<MTAudioProcessingTap>?
             // Create the audio processing tap
             let status = MTAudioProcessingTapCreate(
                 kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap
             )
-            if status == noErr, let tap = tap {
+            if status == noErr, let tap = tap?.takeRetainedValue() {
                 print("Audio tap created successfully")
                 inputParams.audioTapProcessor = tap
                 let audioMix = AVMutableAudioMix()

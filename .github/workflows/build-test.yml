@@ -73,7 +73,7 @@ jobs:
           cache: gradle
 
       - name: Build Android
-        run: ./gradlew :mediaplayer:compileReleaseKotlinAndroid :mediaplayer:androidReleaseUnitTest --no-daemon --continue
+        run: ./gradlew :mediaplayer:compileReleaseKotlinAndroid :mediaplayer:testReleaseUnitTest --no-daemon --continue
 
       - name: Upload test reports
         uses: actions/upload-artifact@v4
