@@ -505,7 +505,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
                     // Native-to-native copy: frame buffer -> Skia bitmap pixels
                     srcBuf.rewind()
-                    val destRowBytes = pixmap.rowBytes.toInt()
+                    val destRowBytes = pixmap.rowBytes
                     val destSizeBytes = destRowBytes.toLong() * height.toLong()
                     val destBuf =
                         LinuxNativeBridge.nWrapPointer(pixelsAddr, destSizeBytes)

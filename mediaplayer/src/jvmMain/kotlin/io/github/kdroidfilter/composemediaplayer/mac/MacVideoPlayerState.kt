@@ -605,7 +605,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
                         // Single copy: CVPixelBuffer → Skia bitmap pixels (no intermediate buffer)
                         srcBuf.rewind()
-                        val dstRowBytes = pixmap.rowBytes.toInt()
+                        val dstRowBytes = pixmap.rowBytes
                         val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
                         val destBuf =
                             MacNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
