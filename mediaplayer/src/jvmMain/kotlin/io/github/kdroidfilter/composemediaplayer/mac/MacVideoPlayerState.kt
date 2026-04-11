@@ -861,32 +861,37 @@ class MacVideoPlayerState : VideoPlayerState {
         uiUpdateJob?.cancel()
         playerScope.cancel()
 
-        // Dispose synchronously to guarantee cleanup before ioScope is cancelled —
-        // otherwise AVPlayer keeps running (audio leak).
-        // Use frameDispatcher to safely close bitmaps (rendering accesses them there).
-        val ptrToDispose = runBlocking(frameDispatcher) {
-            val ptr = playerPtrAtomic.getAndSet(0L)
+        // Clear the pointer atomically so no background task can use it
+        val ptrToDispose = playerPtrAtomic.getAndSet(0L)
 
-            skiaBitmapA?.close()
-            skiaBitmapB?.close()
-            skiaBitmapA = null
-            skiaBitmapB = null
-            skiaBitmapWidth = 0
-            skiaBitmapHeight = 0
-            nextSkiaBitmapA = true
-
-            ptr
-        }
-
-        if (ptrToDispose != 0L) {
-            macLogger.d { "dispose() - Disposing native player" }
+        // Release bitmaps on the frame dispatcher (rendering accesses them there)
+        // then dispose the native player — all on a background thread to avoid
+        // blocking the main/UI thread.
+        Thread {
             try {
-                MacNativeBridge.nDisposePlayer(ptrToDispose)
+                // Close bitmaps (not thread-safe with rendering, but frame updates
+                // are already cancelled above and playerPtr is zeroed)
+                skiaBitmapA?.close()
+                skiaBitmapB?.close()
+                skiaBitmapA = null
+                skiaBitmapB = null
+                skiaBitmapWidth = 0
+                skiaBitmapHeight = 0
+                nextSkiaBitmapA = true
             } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                macLogger.e { "Error disposing player: ${e.message}" }
+                macLogger.e { "Error releasing bitmaps: ${e.message}" }
             }
-        }
+
+            if (ptrToDispose != 0L) {
+                macLogger.d { "dispose() - Disposing native player" }
+                try {
+                    MacNativeBridge.nDisposePlayer(ptrToDispose)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    macLogger.e { "Error disposing player: ${e.message}" }
+                }
+            }
+        }.start()
 
         ioScope.cancel()
     }

@@ -297,65 +297,43 @@ class WindowsVideoPlayerState : VideoPlayerState {
             return // Already disposing
         }
 
-        // Cancel the scope immediately to stop all coroutines
-        scope.cancel()
+        // Stop coroutines first — non-blocking
+        videoJob?.cancel()
+        resizeJob?.cancel()
+        _isPlaying = false
+        _hasMedia = false
 
-        // Use runBlocking to ensure resources are cleaned up synchronously
-        runBlocking {
-            try {
-                // Cancel all jobs with immediate effect
-                videoJob?.cancel()
-                resizeJob?.cancel()
+        // Release Kotlin-side resources immediately (bitmaps, channel)
+        releaseAllResources()
 
-                // Wait a bit for coroutines to cancel
-                delay(50)
+        // Native cleanup on a background thread so dispose() never blocks the UI.
+        // scope is about to be cancelled, so use a detached thread.
+        val instance = videoPlayerInstance
+        videoPlayerInstance = 0L
+        lastUri = null
 
-                mediaOperationMutex.withLock {
-                    // Stop playing if active
-                    _isPlaying = false
-                    val instance = videoPlayerInstance
-                    if (instance != 0L) {
-                        try {
-                            // Stop playback before releasing resources
-                            val hr = player.SetPlaybackState(instance, false, true)
-                            if (hr < 0) {
-                                windowsLogger.e { "Error stopping playback (hr=0x${hr.toString(16)})" }
-                            }
-                        } catch (e: Exception) {
-                            windowsLogger.e { "Exception stopping playback: ${e.message}" }
-                        }
-
-                        // Close the media
-                        try {
-                            player.CloseMedia(instance)
-                        } catch (e: Exception) {
-                            windowsLogger.e { "Exception closing media: ${e.message}" }
-                        }
-
-                        // Remove volume setting for this instance
-                        instanceVolumes.remove(instance)
-
-                        // Destroy the player instance
-                        try {
-                            WindowsNativeBridge.destroyInstance(instance)
-                        } catch (e: Exception) {
-                            windowsLogger.e { "Exception destroying instance: ${e.message}" }
-                        }
-
-                        videoPlayerInstance = 0L
-                    }
-
-                    // Clear all resources
-                    clearAllResourcesSync()
+        if (instance != 0L) {
+            Thread {
+                try {
+                    player.SetPlaybackState(instance, false, true)
+                } catch (e: Exception) {
+                    windowsLogger.e { "Exception stopping playback: ${e.message}" }
                 }
-            } catch (e: Exception) {
-                windowsLogger.e { "Error during dispose: ${e.message}" }
-            } finally {
-                // Mark player as uninitialized
-                _hasMedia = false
-                lastUri = null
-            }
+                try {
+                    player.CloseMedia(instance)
+                } catch (e: Exception) {
+                    windowsLogger.e { "Exception closing media: ${e.message}" }
+                }
+                instanceVolumes.remove(instance)
+                try {
+                    WindowsNativeBridge.destroyInstance(instance)
+                } catch (e: Exception) {
+                    windowsLogger.e { "Exception destroying instance: ${e.message}" }
+                }
+            }.start()
         }
+
+        scope.cancel()
     }
 
     private fun clearAllResourcesSync() {
