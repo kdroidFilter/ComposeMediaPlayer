@@ -822,11 +822,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // Send frame to channel
                 frameChannel.trySend(FrameData(targetBitmap, frameTime))
 
-                // Yield to the audio thread on the shared SourceReader.
-                // Native AcquireNextSample already sleeps to pace video to
-                // the presentation clock, so this delay just prevents tight
-                // looping when frames are skipped or the decoder is fast.
-                delay(frameIntervalMs)
+                // Native AcquireNextSample already paces video to the audio
+                // clock via PreciseSleepHighRes — no additional delay needed.
+                delay(1)
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
@@ -882,7 +880,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     }
                 isLoading = false
 
-                delay(frameIntervalMs)
+                delay(1)
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
