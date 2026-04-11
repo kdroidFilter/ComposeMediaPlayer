@@ -346,19 +346,10 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
         // Free bitmaps and frame buffers
         bitmapLock.write {
-            val currentFrame = _currentFrame
-            if (currentFrame != null &&
-                currentFrame !== skiaBitmapA &&
-                currentFrame !== skiaBitmapB
-            ) {
-                currentFrame.close()
-            }
             _currentFrame = null
             currentFrameState.value = null
 
-            // Clean up double-buffering bitmaps
-            skiaBitmapA?.close()
-            skiaBitmapB?.close()
+            // Don't close bitmaps — see comment in releaseAllResources().
             skiaBitmapA = null
             skiaBitmapB = null
             skiaBitmapWidth = 0
@@ -391,19 +382,16 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
         // Free bitmaps and frame buffers
         bitmapLock.write {
-            val currentFrame = _currentFrame
-            if (currentFrame != null &&
-                currentFrame !== skiaBitmapA &&
-                currentFrame !== skiaBitmapB
-            ) {
-                currentFrame.close()
-            }
             _currentFrame = null
             currentFrameState.value = null
 
-            // Clean up double-buffering bitmaps
-            skiaBitmapA?.close()
-            skiaBitmapB?.close()
+            // Do NOT close the double-buffer bitmaps here: the ImageBitmap
+            // exposed via currentFrameState shares the same native pixel memory
+            // (asComposeImageBitmap is zero-copy). Compose may still be rendering
+            // the last frame on the AWT-EventQueue thread. Closing now would free
+            // the native memory while Skia reads it, causing an access violation.
+            // Nullifying the references lets the Skia Managed cleaner release them
+            // once Compose (and any other holder) drops its reference.
             skiaBitmapA = null
             skiaBitmapB = null
             skiaBitmapWidth = 0
