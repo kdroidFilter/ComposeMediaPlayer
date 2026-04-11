@@ -48,6 +48,7 @@
   - [Fullscreen Mode](#️-fullscreen-mode)
   - [Picture-in-Picture (PiP)](#-picture-in-picture-pip)
   - [Audio Mode](#-audio-mode)
+- [Video Caching](#-video-caching)
 - [Metadata Support](#-metadata-support)
   - [Example Usage](#example-usage)
   - [Basic Example](#-basic-example)
@@ -71,6 +72,7 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 - **Fullscreen Mode**: Toggle between windowed and fullscreen playback modes.
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
 - **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
+- **Video Caching**: Opt-in disk caching for video data on Android and iOS, ideal for scroll-based UIs.
 - **Error handling** Simple error handling for network or playback issues.
 
 ## ✨ Supported Video Formats
@@ -548,6 +550,40 @@ val playerState = rememberVideoPlayerState(
 
 > [!NOTE]
 > Audio mode is only effective on **Android** and **iOS**. On desktop and web, the parameter is accepted but ignored.
+
+### 💾 Video Caching
+
+You can enable disk-based caching so that video data fetched via `openUri()` is stored locally. Subsequent plays of the same URL load from the cache instead of re-downloading, which is especially useful for scroll-based UIs like TikTok/Reels-style `VerticalPager`.
+
+```kotlin
+val playerState = rememberVideoPlayerState(
+    cacheConfig = CacheConfig(
+        enabled = true,
+        maxCacheSizeBytes = 200L * 1024L * 1024L // 200 MB
+    )
+)
+```
+
+| Parameter | Description | Default |
+| :--- | :--- | :---: |
+| `enabled` | Whether caching is active | `false` |
+| `maxCacheSizeBytes` | Maximum disk space for the cache (LRU eviction) | `100 MB` |
+
+To clear the cache programmatically:
+
+```kotlin
+playerState.clearCache()
+```
+
+| Platform | Status | Implementation |
+| :--- | :---: | :--- |
+| **Android** | ✅ | Media3 `SimpleCache` with `LeastRecentlyUsedCacheEvictor` |
+| **iOS** | ✅ | `NSURLCache` with increased disk capacity |
+| **Desktop** | ❌ | No-op (config accepted but ignored) |
+| **Web** | ❌ | No-op (browser manages its own HTTP cache) |
+
+> [!NOTE]
+> Caching only applies to URIs opened via `openUri()`. Local files and assets are not cached. The cache is shared across all player instances, so multiple players benefit from the same cached data.
 
 ## 🔍 Metadata Support
 
