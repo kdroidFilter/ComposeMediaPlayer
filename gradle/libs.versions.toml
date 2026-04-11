@@ -44,6 +44,7 @@ compose-ui-tooling = { module = "org.jetbrains.compose.ui:ui-tooling", version.r
 compose-ui-tooling-preview = { module = "org.jetbrains.compose.components:components-ui-tooling-preview", version.ref = "compose" }
 compose-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version = "1.7.3" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "androidx-lifecycle-runtime-ktx" }
+nucleus-graalvm-runtime = { module = "io.github.kdroidfilter:nucleus.graalvm-runtime", version = "1.9.1" }
 
 [plugins]
 
@@ -57,3 +58,4 @@ vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.3
 dokka = { id = "org.jetbrains.dokka" , version = "2.2.0"}
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
+nucleus = { id = "io.github.kdroidfilter.nucleus", version = "1.9.1" }

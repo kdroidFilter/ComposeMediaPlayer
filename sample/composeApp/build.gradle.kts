@@ -1,7 +1,8 @@
 @file:OptIn(ExperimentalWasmDsl::class)
 
+import io.github.kdroidfilter.nucleus.desktop.application.dsl.CompressionLevel
 import org.apache.tools.ant.taskdefs.condition.Os
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import io.github.kdroidfilter.nucleus.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.targets.js.webpack.KotlinWebpackConfig
 
@@ -10,6 +11,7 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.compose)
     alias(libs.plugins.android.application)
+    alias(libs.plugins.nucleus)
 }
 
 
@@ -81,6 +83,7 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
+            implementation(libs.nucleus.graalvm.runtime)
         }
         webMain.dependencies {
             implementation(libs.kotlinx.browser)
@@ -106,23 +109,31 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 }
 
-compose.desktop {
-    application {
-        mainClass = "sample.app.MainKt"
+nucleus.application {
+    mainClass = "sample.app.MainKt"
 
-        nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "sample"
-            packageVersion = "1.0.0"
-            linux {
-                modules("jdk.security.auth", "jdk.accessibility")
-            }
-            macOS {
-                jvmArgs(
-                    "-Dapple.awt.application.appearance=system"
-                )
-            }
+    nativeDistributions {
+        targetFormats(TargetFormat.Dmg, TargetFormat.Nsis, TargetFormat.Deb)
+        packageName = "Compose Media Player"
+        description = "A Kotlin Multiplatform media player built with Compose"
+        vendor = "KDroidFilter"
+        cleanupNativeLibs = true
+        packageVersion = "1.0.0"
+        compressionLevel = CompressionLevel.Maximum
+        windows {
+            shortcut = true
         }
+    }
+
+    graalvm {
+        isEnabled = true
+        imageName = "compose-media-player"
+        javaLanguageVersion = 25
+        jvmVendor = JvmVendorSpec.BELLSOFT
+        buildArgs.addAll(
+            "-H:+AddAllCharsets",
+            "-Djava.awt.headless=false"
+        )
     }
 }
 

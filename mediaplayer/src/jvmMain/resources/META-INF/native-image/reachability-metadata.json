@@ -1,26 +1,39 @@
-[
-  {
-    "type": "io.github.kdroidfilter.composemediaplayer.linux.LinuxNativeBridge",
-    "allDeclaredFields": true,
-    "allDeclaredMethods": true,
-    "allDeclaredConstructors": true
-  },
-  {
-    "type": "io.github.kdroidfilter.composemediaplayer.mac.MacNativeBridge",
-    "allDeclaredFields": true,
-    "allDeclaredMethods": true,
-    "allDeclaredConstructors": true
-  },
-  {
-    "type": "io.github.kdroidfilter.composemediaplayer.windows.WindowsNativeBridge",
-    "allDeclaredFields": true,
-    "allDeclaredMethods": true,
-    "allDeclaredConstructors": true
-  },
-  {
-    "type": "java.lang.Runnable",
-    "methods": [
-      { "name": "run", "parameterTypes": [] }
+{
+    "reflection": [
+        {
+            "type": "io.github.kdroidfilter.composemediaplayer.linux.LinuxNativeBridge",
+            "allDeclaredFields": true,
+            "allDeclaredMethods": true,
+            "allDeclaredConstructors": true,
+            "jniAccessible": true
+        },
+        {
+            "type": "io.github.kdroidfilter.composemediaplayer.mac.MacNativeBridge",
+            "allDeclaredFields": true,
+            "allDeclaredMethods": true,
+            "allDeclaredConstructors": true,
+            "jniAccessible": true
+        },
+        {
+            "type": "io.github.kdroidfilter.composemediaplayer.windows.WindowsNativeBridge",
+            "allDeclaredFields": true,
+            "allDeclaredMethods": true,
+            "allDeclaredConstructors": true,
+            "jniAccessible": true
+        },
+        {
+            "type": "java.lang.Runnable",
+            "methods": [
+                {
+                    "name": "run",
+                    "parameterTypes": []
+                }
+            ]
+        }
+    ],
+    "resources": [
+        {
+            "glob": "composemediaplayer/native/**"
+        }
     ]
-  }
-]
+}
