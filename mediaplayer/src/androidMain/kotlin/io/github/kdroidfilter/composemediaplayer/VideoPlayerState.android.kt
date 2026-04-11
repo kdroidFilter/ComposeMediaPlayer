@@ -117,6 +117,10 @@ open class DefaultVideoPlayerState(
     private var screenLockReceiver: BroadcastReceiver? = null
     private var wasPlayingBeforeScreenLock: Boolean = false
 
+    // Background detection
+    override var pauseOnBackground: Boolean = true
+    internal var wasPlayingBeforeBackground: Boolean = false
+
     private var _hasMedia by mutableStateOf(false)
     override val hasMedia: Boolean get() = _hasMedia
 
