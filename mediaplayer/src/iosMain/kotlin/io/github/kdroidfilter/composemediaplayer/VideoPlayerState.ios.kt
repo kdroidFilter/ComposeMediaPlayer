@@ -11,11 +11,13 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
-import io.github.kdroidfilter.composemediaplayer.util.getUri
 import io.github.vinceglb.filekit.PlatformFile
+import io.github.vinceglb.filekit.startAccessingSecurityScopedResource
+import io.github.vinceglb.filekit.stopAccessingSecurityScopedResource
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
@@ -169,6 +171,9 @@ open class DefaultVideoPlayerState(
 
     // Flag to track if the state has been disposed
     private var isDisposed = false
+
+    // Security-scoped file that needs to be released on cleanup
+    private var securityScopedFile: PlatformFile? = null
 
     init {
         if (cacheConfig.enabled) {
@@ -516,6 +521,10 @@ open class DefaultVideoPlayerState(
         player?.pause()
         player?.replaceCurrentItemWithPlayerItem(null)
         player = null
+
+        // Release security-scoped resource access from file picker
+        securityScopedFile?.stopAccessingSecurityScopedResource()
+        securityScopedFile = null
     }
 
     /**
@@ -541,35 +550,32 @@ open class DefaultVideoPlayerState(
                 iosLogger.d { "Failed to create NSURL from uri: $uri" }
                 return
             }
+        openNsUrl(nsUrl, initializeplayerState)
+    }
 
-        // Clear any previous error
+    /**
+     * Core method to open media from an NSURL.
+     * Both [openUri] and [openFile] delegate to this.
+     */
+    private fun openNsUrl(
+        nsUrl: NSURL,
+        initializeplayerState: InitialPlayerState,
+    ) {
         _error = null
 
-        // Stop the current player immediately to prevent stale KVO/notifications
-        // while background metadata extraction runs. Full cleanup happens on main
-        // after background work completes.
         stopPositionUpdates()
         removeObservers()
         player?.pause()
 
-        // Configure audio session
         configureAudioSession()
 
-        // Reset playback speed to 1.0f when opening a new video
         _playbackSpeed = 1.0f
-
-        // Set loading state to true at the beginning of loading a new video
         _isLoading = true
-
-        // Reset metadata to default values
         _metadata = VideoMetadata(audioChannels = 2)
-
         _hasMedia = false
 
-        // Clean up existing player before creating a new one
         cleanupCurrentPlayer()
 
-        // Create player item and player directly on main thread.
         // AVPlayer handles async loading internally — metadata is extracted
         // safely in the KVO readyToPlay callback, avoiding ObjC exceptions
         // from accessing track properties on an unloaded/failed asset.
@@ -587,10 +593,6 @@ open class DefaultVideoPlayerState(
             }
 
         player = newPlayer
-        // Don't set _hasMedia = true yet — wait until the item is readyToPlay.
-        // Setting it early causes VideoPlayerSurface to create a UIKitView with
-        // AVPictureInPictureController on a player whose item may be invalid,
-        // which throws an ObjC NSException during Compose recomposition.
 
         setupObservers(newPlayer, playerItem)
 
@@ -733,8 +735,16 @@ open class DefaultVideoPlayerState(
         file: PlatformFile,
         initializeplayerState: InitialPlayerState,
     ) {
-        iosLogger.d { "openFile called with file: $file, initializeplayerState: $initializeplayerState" }
-        // Use the getUri extension function to get a proper file URL
+        iosLogger.d { "openFile called with file: $file" }
+
+        // iOS requires security-scoped resource access for files picked via
+        // UIDocumentPickerViewController. Without this, AVPlayer cannot read the file.
+        val hasAccess = file.startAccessingSecurityScopedResource()
+        iosLogger.d { "Security-scoped access: $hasAccess" }
+        if (hasAccess) {
+            securityScopedFile = file
+        }
+
         val fileUrl = file.getUri()
         iosLogger.d { "Opening file with URL: $fileUrl" }
         openUri(fileUrl, initializeplayerState)
