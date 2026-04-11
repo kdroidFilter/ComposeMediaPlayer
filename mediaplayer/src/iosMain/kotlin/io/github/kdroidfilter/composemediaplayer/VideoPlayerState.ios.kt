@@ -16,8 +16,6 @@ import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
-import io.github.vinceglb.filekit.startAccessingSecurityScopedResource
-import io.github.vinceglb.filekit.stopAccessingSecurityScopedResource
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.useContents
@@ -172,8 +170,6 @@ open class DefaultVideoPlayerState(
     // Flag to track if the state has been disposed
     private var isDisposed = false
 
-    // Security-scoped file that needs to be released on cleanup
-    private var securityScopedFile: PlatformFile? = null
 
     init {
         if (cacheConfig.enabled) {
@@ -522,9 +518,6 @@ open class DefaultVideoPlayerState(
         player?.replaceCurrentItemWithPlayerItem(null)
         player = null
 
-        // Release security-scoped resource access from file picker
-        securityScopedFile?.stopAccessingSecurityScopedResource()
-        securityScopedFile = null
     }
 
     /**
@@ -550,17 +543,7 @@ open class DefaultVideoPlayerState(
                 iosLogger.d { "Failed to create NSURL from uri: $uri" }
                 return
             }
-        openNsUrl(nsUrl, initializeplayerState)
-    }
 
-    /**
-     * Core method to open media from an NSURL.
-     * Both [openUri] and [openFile] delegate to this.
-     */
-    private fun openNsUrl(
-        nsUrl: NSURL,
-        initializeplayerState: InitialPlayerState,
-    ) {
         _error = null
 
         stopPositionUpdates()
@@ -735,16 +718,7 @@ open class DefaultVideoPlayerState(
         file: PlatformFile,
         initializeplayerState: InitialPlayerState,
     ) {
-        iosLogger.d { "openFile called with file: $file" }
-
-        // iOS requires security-scoped resource access for files picked via
-        // UIDocumentPickerViewController. Without this, AVPlayer cannot read the file.
-        val hasAccess = file.startAccessingSecurityScopedResource()
-        iosLogger.d { "Security-scoped access: $hasAccess" }
-        if (hasAccess) {
-            securityScopedFile = file
-        }
-
+        iosLogger.d { "openFile called with file: $file, initializeplayerState: $initializeplayerState" }
         val fileUrl = file.getUri()
         iosLogger.d { "Opening file with URL: $fileUrl" }
         openUri(fileUrl, initializeplayerState)

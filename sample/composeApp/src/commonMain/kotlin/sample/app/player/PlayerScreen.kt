@@ -88,6 +88,12 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showSubtitleSheet by remember { mutableStateOf(false) }
 
+    // Flags to launch pickers after the bottom sheet is fully dismissed.
+    // On iOS, presenting a file picker while a ModalBottomSheet is still
+    // visible fails silently because iOS cannot stack two modals.
+    var pendingPickVideo by remember { mutableStateOf(false) }
+    var pendingPickSubtitle by remember { mutableStateOf(false) }
+
     val videoFileLauncher = rememberFilePickerLauncher(type = FileKitType.Video) { file ->
         file?.let { playerState.openFile(it, initialPlayerState) }
     }
@@ -99,6 +105,21 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
             subtitleTracks.add(track)
             selectedSubtitleTrack = track
             playerState.selectSubtitleTrack(track)
+        }
+    }
+
+    // Launch pickers only after the sheet is gone
+    LaunchedEffect(pendingPickVideo, showSourceSheet) {
+        if (pendingPickVideo && !showSourceSheet) {
+            pendingPickVideo = false
+            videoFileLauncher.launch()
+        }
+    }
+
+    LaunchedEffect(pendingPickSubtitle, showSubtitleSheet) {
+        if (pendingPickSubtitle && !showSubtitleSheet) {
+            pendingPickSubtitle = false
+            subtitleFileLauncher.launch()
         }
     }
 
@@ -219,7 +240,7 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 showSourceSheet = false
             },
             onPickFile = {
-                videoFileLauncher.launch()
+                pendingPickVideo = true
                 showSourceSheet = false
             },
             onSelectPreset = { url ->
@@ -252,7 +273,10 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
                 selectedSubtitleTrack = null
                 playerState.disableSubtitles()
             },
-            onPickFile = { subtitleFileLauncher.launch() },
+            onPickFile = {
+                pendingPickSubtitle = true
+                showSubtitleSheet = false
+            },
             onAddTrack = { track ->
                 subtitleTracks.add(track)
                 selectedSubtitleTrack = track
