@@ -1,12 +1,11 @@
-// AudioManager.cpp – full rewrite with tighter A/V synchronisation
+// AudioManager.cpp – WASAPI audio rendering with resampling for playback speed.
 // -----------------------------------------------------------------------------
-//  * Keeps the original public API so that existing call‑sites still compile.
-//  * Uses an event‑driven render loop instead of busy‑wait polling where possible.
-//  * Measures drift between the WASAPI render clock and the Media Foundation
-//    presentation clock and corrects it gradually to avoid audible glitches.
-//  * All sleeps are clamped to a minimum of 1 ms to keep the thread responsive.
-//  * Volume scaling is done in place only when necessary and supports both
-//    16‑bit and 32‑bit (float) PCM formats.
+//  Audio is the timing master (like AVPlayer on macOS). The audio thread feeds
+//  decoded PCM to WASAPI as fast as the buffer allows — no wall-clock drift
+//  correction, no sleep, no sample dropping. Video compensates via audioLatencyMs.
+//
+//  This eliminates the class of stutter bugs caused by drift correction
+//  sleeping/dropping samples after seek, resume, or speed changes.
 // -----------------------------------------------------------------------------
 
 #include "AudioManager.h"
@@ -15,10 +14,10 @@
 #include "MediaFoundationManager.h"
 #include <algorithm>
 #include <cmath>
-#include <array>
 #include <mmreg.h>
-// WAVE_FORMAT_EXTENSIBLE sub-format GUIDs for volume scaling.
-// Defined inline to avoid pulling in <ks.h>/<ksmedia.h> which may conflict.
+#include <mfreadwrite.h>
+
+// WAVE_FORMAT_EXTENSIBLE sub-format GUIDs
 static const GUID kSubtypePCM =
     {0x00000001, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71}};
 static const GUID kSubtypeIEEEFloat =
@@ -28,20 +27,54 @@ using namespace VideoPlayerUtils;
 
 namespace AudioManager {
 
-// ‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑ Helper constants ‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑
-constexpr REFERENCE_TIME kTargetBufferDuration100ns = 2'000'000; // 200 ms
-constexpr REFERENCE_TIME kMinSleepUs              = 1'000;       // 1 ms
-constexpr double         kDriftPositiveThresholdMs =  15.0;      // audio ahead  → wait
-constexpr double         kDriftNegativeThresholdMs = -50.0;      // audio behind → drop
+// ---------------------- Helper constants ----------------------
+constexpr REFERENCE_TIME kTargetBufferDuration100ns = 2'000'000; // 200 ms
+
+// ---------------------------------------------------------------------------
+static void ResolveFormatTag(const WAVEFORMATEX* fmt, WORD* outTag, WORD* outBps) {
+    *outTag = fmt->wFormatTag;
+    *outBps = fmt->wBitsPerSample;
+    if (*outTag == WAVE_FORMAT_EXTENSIBLE && fmt->cbSize >= 22) {
+        auto* ext = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(fmt);
+        if (ext->SubFormat == kSubtypePCM)            *outTag = WAVE_FORMAT_PCM;
+        else if (ext->SubFormat == kSubtypeIEEEFloat)  *outTag = WAVE_FORMAT_IEEE_FLOAT;
+    }
+}
+
+// ---------------------------------------------------------------------------
+static void ApplyVolume(BYTE* data, UINT32 frames, UINT32 blockAlign,
+                        float vol, WORD formatTag, WORD bitsPerSample) {
+    if (vol >= 0.999f) return;
+
+    if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 16) {
+        auto* s = reinterpret_cast<int16_t*>(data);
+        size_t n = (frames * blockAlign) / sizeof(int16_t);
+        for (size_t i = 0; i < n; ++i)
+            s[i] = static_cast<int16_t>(s[i] * vol);
+    } else if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 24) {
+        size_t totalBytes = frames * blockAlign;
+        for (size_t i = 0; i + 2 < totalBytes; i += 3) {
+            int32_t sample = static_cast<int8_t>(data[i + 2]);
+            sample = (sample << 8) | data[i + 1];
+            sample = (sample << 8) | data[i];
+            sample = static_cast<int32_t>(sample * vol);
+            data[i]     = static_cast<BYTE>(sample & 0xFF);
+            data[i + 1] = static_cast<BYTE>((sample >> 8) & 0xFF);
+            data[i + 2] = static_cast<BYTE>((sample >> 16) & 0xFF);
+        }
+    } else if (formatTag == WAVE_FORMAT_IEEE_FLOAT && bitsPerSample == 32) {
+        auto* s = reinterpret_cast<float*>(data);
+        size_t n = (frames * blockAlign) / sizeof(float);
+        for (size_t i = 0; i < n; ++i) s[i] *= vol;
+    }
+}
 
 // ------------------------------------------------------------------------------------
-//  InitWASAPI  –  initialises the shared WASAPI client for the default render endpoint
+//  InitWASAPI
 // ------------------------------------------------------------------------------------
 HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt)
 {
     if (!inst) return E_INVALIDARG;
-
-    // Reuse previously initialized client if still valid
     if (inst->pAudioClient && inst->pRenderClient) {
         inst->bAudioInitialized = TRUE;
         return S_OK;
@@ -50,14 +83,12 @@ HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt)
     HRESULT hr = S_OK;
     WAVEFORMATEX* deviceMixFmt = nullptr;
 
-    // 1. Get the default render device
     IMMDeviceEnumerator* enumerator = MediaFoundation::GetDeviceEnumerator();
     if (!enumerator) return E_FAIL;
 
     hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &inst->pDevice);
     if (FAILED(hr)) goto fail;
 
-    // 2. Activate IAudioClient + IAudioEndpointVolume
     hr = inst->pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                                  reinterpret_cast<void**>(&inst->pAudioClient));
     if (FAILED(hr)) goto fail;
@@ -66,7 +97,6 @@ HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt)
                                  reinterpret_cast<void**>(&inst->pAudioEndpointVolume));
     if (FAILED(hr)) goto fail;
 
-    // 3. Determine the format that will be rendered
     if (!srcFmt) {
         hr = inst->pAudioClient->GetMixFormat(&deviceMixFmt);
         if (FAILED(hr)) goto fail;
@@ -77,7 +107,6 @@ HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt)
     if (!inst->pSourceAudioFormat) { hr = E_OUTOFMEMORY; goto fail; }
     memcpy(inst->pSourceAudioFormat, srcFmt, srcFmt->cbSize + sizeof(WAVEFORMATEX));
 
-    // 4. Create (or reuse) the render-ready event
     if (!inst->hAudioSamplesReadyEvent) {
         inst->hAudioSamplesReadyEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
         if (!inst->hAudioSamplesReadyEvent) {
@@ -86,19 +115,14 @@ HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt)
         }
     }
 
-    // 5. Initialize the audio client in shared, event-callback mode
     hr = inst->pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                         AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                        kTargetBufferDuration100ns,
-                                        0,
-                                        srcFmt,
-                                        nullptr);
+                                        kTargetBufferDuration100ns, 0, srcFmt, nullptr);
     if (FAILED(hr)) goto fail;
 
     hr = inst->pAudioClient->SetEventHandle(inst->hAudioSamplesReadyEvent);
     if (FAILED(hr)) goto fail;
 
-    // 6. Grab the render-client service interface
     hr = inst->pAudioClient->GetService(__uuidof(IAudioRenderClient),
                                         reinterpret_cast<void**>(&inst->pRenderClient));
     if (FAILED(hr)) goto fail;
@@ -108,8 +132,6 @@ HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt)
     return S_OK;
 
 fail:
-    // Release any partially-created COM objects so that CloseMedia does not
-    // call methods (e.g. pAudioClient->Stop()) on an uninitialized client.
     if (inst->pRenderClient)        { inst->pRenderClient->Release();        inst->pRenderClient = nullptr; }
     if (inst->pAudioClient)         { inst->pAudioClient->Release();         inst->pAudioClient = nullptr; }
     if (inst->pAudioEndpointVolume) { inst->pAudioEndpointVolume->Release(); inst->pAudioEndpointVolume = nullptr; }
@@ -121,16 +143,222 @@ fail:
     return hr;
 }
 
-// ----------------------------------------------------------------------------
-//  AudioThreadProc – feeds decoded audio samples into the WASAPI render client
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+//  FeedSamplesToWASAPI — reads audio from MF and feeds to WASAPI render buffer.
+//  Used by both AudioThreadProc (main loop) and PreFillAudioBuffer (seek).
+//  Returns the number of output frames written, or -1 on EOF/error.
+// ---------------------------------------------------------------------------
+static int FeedOneSample(VideoPlayerInstance* inst, IMFSourceReader* audioReader,
+                         UINT32 engineBufferFrames, UINT32 blockAlign, UINT32 channels,
+                         WORD formatTag, WORD bitsPerSample, float speed)
+{
+    // How many frames can we write?
+    UINT32 framesPadding = 0;
+    if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding)))
+        return -1;
+    UINT32 framesFree = engineBufferFrames - framesPadding;
+    if (framesFree == 0) return 0; // buffer full, try later
+
+    // Update latency for video-side compensation
+    const UINT32 sampleRate = inst->pSourceAudioFormat ? inst->pSourceAudioFormat->nSamplesPerSec : 48000;
+    inst->audioLatencyMs.store(
+        static_cast<double>(framesPadding) * 1000.0 / sampleRate,
+        std::memory_order_relaxed);
+
+    // Read one decoded audio sample
+    IMFSample* mfSample = nullptr;
+    DWORD      flags    = 0;
+    LONGLONG   ts100n   = 0;
+    HRESULT hr = audioReader->ReadSample(
+        MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+        0, nullptr, &flags, &ts100n, &mfSample);
+    if (FAILED(hr)) return -1;
+    if (!mfSample) return 0; // decoder starved
+    if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+        mfSample->Release();
+        return -1;
+    }
+
+    // Update position from audio PTS (audio is the timing master)
+    if (ts100n > 0) {
+        inst->llCurrentPosition = ts100n;
+    }
+
+    // Lock sample buffer
+    IMFMediaBuffer* mediaBuf = nullptr;
+    if (FAILED(mfSample->ConvertToContiguousBuffer(&mediaBuf)) || !mediaBuf) {
+        mfSample->Release();
+        return 0;
+    }
+
+    BYTE*  srcData = nullptr;
+    DWORD  srcSize = 0, srcMax = 0;
+    if (FAILED(mediaBuf->Lock(&srcData, &srcMax, &srcSize))) {
+        mediaBuf->Release();
+        mfSample->Release();
+        return 0;
+    }
+
+    const UINT32 srcFrames = srcSize / blockAlign;
+    const bool needsResample = std::abs(speed - 1.0f) >= 0.01f;
+
+    UINT32 totalOutputFrames = srcFrames;
+    if (needsResample && speed > 0.0f)
+        totalOutputFrames = static_cast<UINT32>(std::ceil(srcFrames / speed));
+
+    UINT32 outputDone = 0;
+    double fracPos = inst->resampleFracPos;
+
+    while (outputDone < totalOutputFrames && inst->bAudioThreadRunning) {
+        // Abort if seek started
+        {
+            EnterCriticalSection(&inst->csClockSync);
+            bool seeking = inst->bSeekInProgress;
+            LeaveCriticalSection(&inst->csClockSync);
+            if (seeking) break;
+        }
+
+        UINT32 wantFrames = std::min(totalOutputFrames - outputDone, framesFree);
+        if (wantFrames == 0) {
+            // Buffer full — wait briefly for WASAPI to consume
+            WaitForSingleObject(inst->hAudioSamplesReadyEvent, 5);
+            if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding))) break;
+            framesFree = engineBufferFrames - framesPadding;
+            continue;
+        }
+
+        EnterCriticalSection(&inst->csAudioFeed);
+
+        BYTE* dstData = nullptr;
+        HRESULT hrBuf = inst->pRenderClient->GetBuffer(wantFrames, &dstData);
+        if (FAILED(hrBuf) || !dstData) {
+            LeaveCriticalSection(&inst->csAudioFeed);
+            break;
+        }
+
+        if (needsResample) {
+            double localFrac = fracPos + outputDone * static_cast<double>(speed);
+            UINT32 actualWritten = 0;
+            for (UINT32 i = 0; i < wantFrames; ++i) {
+                if (localFrac >= srcFrames) {
+                    memset(dstData + i * blockAlign, 0, (wantFrames - i) * blockAlign);
+                    actualWritten = wantFrames;
+                    break;
+                }
+                UINT32 idx0 = static_cast<UINT32>(localFrac);
+                UINT32 idx1 = std::min(idx0 + 1, srcFrames - 1);
+                float frac = static_cast<float>(localFrac - idx0);
+
+                if (formatTag == WAVE_FORMAT_IEEE_FLOAT && bitsPerSample == 32) {
+                    const float* s = reinterpret_cast<const float*>(srcData);
+                    float* d = reinterpret_cast<float*>(dstData + i * blockAlign);
+                    for (UINT32 ch = 0; ch < channels; ++ch)
+                        d[ch] = s[idx0 * channels + ch] * (1.0f - frac)
+                              + s[idx1 * channels + ch] * frac;
+                } else if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 16) {
+                    const int16_t* s = reinterpret_cast<const int16_t*>(srcData);
+                    int16_t* d = reinterpret_cast<int16_t*>(dstData + i * blockAlign);
+                    for (UINT32 ch = 0; ch < channels; ++ch)
+                        d[ch] = static_cast<int16_t>(
+                            s[idx0 * channels + ch] * (1.0f - frac)
+                          + s[idx1 * channels + ch] * frac);
+                } else {
+                    memcpy(dstData + i * blockAlign, srcData + idx0 * blockAlign, blockAlign);
+                }
+                localFrac += speed;
+                ++actualWritten;
+            }
+            wantFrames = actualWritten;
+        } else {
+            memcpy(dstData, srcData + outputDone * blockAlign, wantFrames * blockAlign);
+        }
+
+        const float vol = inst->instanceVolume.load(std::memory_order_relaxed);
+        ApplyVolume(dstData, wantFrames, blockAlign, vol, formatTag, bitsPerSample);
+
+        inst->pRenderClient->ReleaseBuffer(wantFrames, 0);
+        LeaveCriticalSection(&inst->csAudioFeed);
+
+        outputDone += wantFrames;
+
+        if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding))) break;
+        framesFree = engineBufferFrames - framesPadding;
+    }
+
+    // Save fractional position for next sample
+    if (needsResample) {
+        double endPos = fracPos + outputDone * static_cast<double>(speed);
+        inst->resampleFracPos = endPos - srcFrames;
+        if (inst->resampleFracPos < 0.0) inst->resampleFracPos = 0.0;
+    } else {
+        inst->resampleFracPos = 0.0;
+    }
+
+    mediaBuf->Unlock();
+    mediaBuf->Release();
+    mfSample->Release();
+    return static_cast<int>(outputDone);
+}
+
+// ---------------------------------------------------------------------------
+//  PreFillAudioBuffer — fills WASAPI buffer BEFORE Start() so there's no
+//  gap at the beginning of playback / after seek.
+// ---------------------------------------------------------------------------
+HRESULT PreFillAudioBuffer(VideoPlayerInstance* inst)
+{
+    if (!inst || !inst->pAudioClient || !inst->pRenderClient)
+        return E_INVALIDARG;
+
+    IMFSourceReader* audioReader = inst->pSourceReaderAudio
+                                 ? inst->pSourceReaderAudio
+                                 : inst->pSourceReader;
+    if (!audioReader) return E_FAIL;
+
+    UINT32 engineBufferFrames = 0;
+    if (FAILED(inst->pAudioClient->GetBufferSize(&engineBufferFrames)))
+        return E_FAIL;
+
+    const UINT32 blockAlign = inst->pSourceAudioFormat ? inst->pSourceAudioFormat->nBlockAlign : 4;
+    const UINT32 channels   = inst->pSourceAudioFormat ? inst->pSourceAudioFormat->nChannels : 2;
+
+    WORD formatTag = WAVE_FORMAT_PCM, bitsPerSample = 16;
+    if (inst->pSourceAudioFormat)
+        ResolveFormatTag(inst->pSourceAudioFormat, &formatTag, &bitsPerSample);
+
+    float speed = inst->playbackSpeed.load(std::memory_order_relaxed);
+    inst->resampleFracPos = 0.0;
+
+    // Fill until the buffer is at least half full
+    UINT32 targetFrames = engineBufferFrames / 2;
+    UINT32 totalFed = 0;
+    for (int attempts = 0; attempts < 20 && totalFed < targetFrames; ++attempts) {
+        int fed = FeedOneSample(inst, audioReader, engineBufferFrames,
+                                blockAlign, channels, formatTag, bitsPerSample, speed);
+        if (fed < 0) break; // EOF or error
+        if (fed == 0) continue;
+        totalFed += fed;
+    }
+
+    return S_OK;
+}
+
+// ---------------------------------------------------------------------------
+//  AudioThreadProc — simple feed loop, no drift correction.
+//  Audio is the timing master: it feeds WASAPI as fast as the buffer allows.
+//  WASAPI's hardware clock determines the actual playback rate.
+//  Video compensates via audioLatencyMs.
+// ---------------------------------------------------------------------------
 DWORD WINAPI AudioThreadProc(LPVOID lpParam)
 {
     auto* inst = static_cast<VideoPlayerInstance*>(lpParam);
-    if (!inst || !inst->pAudioClient || !inst->pRenderClient || !inst->pSourceReaderAudio)
+    if (!inst || !inst->pAudioClient || !inst->pRenderClient)
         return 0;
 
-    // Pre‑warm the audio engine so that GetBufferSize() is valid
+    IMFSourceReader* audioReader = inst->pSourceReaderAudio
+                                 ? inst->pSourceReaderAudio
+                                 : inst->pSourceReader;
+    if (!audioReader) return 0;
+
     UINT32 engineBufferFrames = 0;
     if (FAILED(inst->pAudioClient->GetBufferSize(&engineBufferFrames)))
         return 0;
@@ -139,13 +367,19 @@ DWORD WINAPI AudioThreadProc(LPVOID lpParam)
         WaitForSingleObject(inst->hAudioReadyEvent, INFINITE);
 
     const UINT32 blockAlign = inst->pSourceAudioFormat ? inst->pSourceAudioFormat->nBlockAlign : 4;
+    const UINT32 channels   = inst->pSourceAudioFormat ? inst->pSourceAudioFormat->nChannels : 2;
 
-    // Main render loop – wait for "ready" event, then push as many frames as possible
+    WORD formatTag = WAVE_FORMAT_PCM, bitsPerSample = 16;
+    if (inst->pSourceAudioFormat)
+        ResolveFormatTag(inst->pSourceAudioFormat, &formatTag, &bitsPerSample);
+
+    inst->resampleFracPos = 0.0;
+
     while (inst->bAudioThreadRunning) {
-        DWORD signalled = WaitForSingleObject(inst->hAudioSamplesReadyEvent, 10);
-        if (signalled != WAIT_OBJECT_0) continue; // timeout ⇒ loop back
+        // Wait for WASAPI to signal buffer space (or 10ms timeout)
+        WaitForSingleObject(inst->hAudioSamplesReadyEvent, 10);
 
-        // Handle seek / pause concurrently with the decoder thread
+        // Pause / seek: spin until resumed
         {
             EnterCriticalSection(&inst->csClockSync);
             bool suspended = inst->bSeekInProgress || inst->llPauseStart != 0;
@@ -156,154 +390,27 @@ DWORD WINAPI AudioThreadProc(LPVOID lpParam)
             }
         }
 
-        // How many frames are currently available for writing?
-        UINT32 framesPadding = 0;
-        if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding)))
-            break;
-        UINT32 framesFree = engineBufferFrames - framesPadding;
-        if (framesFree == 0) continue; // buffer full – wait for next event
-
-        // Read one decoded sample from MF (non‑blocking)
-        IMFSample* sample = nullptr;
-        DWORD      flags  = 0;
-        LONGLONG   ts100n = 0;
-        HRESULT hr = inst->pSourceReaderAudio->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-                                                          0, nullptr, &flags, &ts100n, &sample);
-        if (FAILED(hr)) break;
-        if (!sample)     continue; // decoder starved – wait for more data
-        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
-            sample->Release();
-            break;
-        }
-
-        // Measure drift between sample PTS and wall clock (real elapsed time)
-        // This ensures audio and video are synchronized to the same time reference
-        double driftMs = 0.0;
-        if (inst->bUseClockSync && inst->llPlaybackStartTime != 0 && ts100n > 0) {
-            // Calculate elapsed time since playback started (in milliseconds)
-            LONGLONG currentTimeMs = GetCurrentTimeMs();
-            LONGLONG elapsedMs = currentTimeMs - inst->llPlaybackStartTime - inst->llTotalPauseTime;
-
-            // Apply playback speed to elapsed time
-            double adjustedElapsedMs = elapsedMs * inst->playbackSpeed.load(std::memory_order_relaxed);
-
-            // Convert sample timestamp from 100ns units to milliseconds
-            double sampleTimeMs = ts100n / 10000.0;
-
-            // Calculate drift: positive means audio is ahead, negative means audio is late
-            driftMs = sampleTimeMs - adjustedElapsedMs;
-        }
-
-        if (driftMs > kDriftPositiveThresholdMs) {
-            // Audio ahead → delay feed to renderer
-            PreciseSleepHighRes(std::min(driftMs, 100.0));
-        } else if (driftMs < kDriftNegativeThresholdMs) {
-            // Audio too late → drop sample completely (skip)
-            sample->Release();
-            continue;
-        }
-
-        // Copy contiguous audio buffer into render buffer – may span multiple GetBuffer() calls
-        IMFMediaBuffer* mediaBuf = nullptr;
-        if (FAILED(sample->ConvertToContiguousBuffer(&mediaBuf)) || !mediaBuf) {
-            sample->Release();
-            continue;
-        }
-
-        BYTE*  srcData = nullptr;
-        DWORD  srcSize = 0, srcMax = 0;
-        if (FAILED(mediaBuf->Lock(&srcData, &srcMax, &srcSize))) {
-            mediaBuf->Release();
-            sample->Release();
-            continue;
-        }
-
-        UINT32 totalFrames = srcSize / blockAlign;
-        UINT32 offsetFrames = 0;
-
-        while (offsetFrames < totalFrames) {
-            UINT32 framesWanted = std::min(totalFrames - offsetFrames, framesFree);
-            if (framesWanted == 0) {
-                // Renderer is full → wait for next event
-                WaitForSingleObject(inst->hAudioSamplesReadyEvent, 5);
-                if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding))) break;
-                framesFree = engineBufferFrames - framesPadding;
-                continue;
-            }
-
-            BYTE* dstData = nullptr;
-            if (FAILED(inst->pRenderClient->GetBuffer(framesWanted, &dstData)) || !dstData) break;
-
-            const BYTE* chunkStart = srcData + (offsetFrames * blockAlign);
-            memcpy(dstData, chunkStart, framesWanted * blockAlign);
-
-            // Apply per-instance volume in-place.
-            // Supports PCM 16-bit, PCM 24-bit, IEEE float 32-bit, and
-            // WAVE_FORMAT_EXTENSIBLE wrappers around those sub-formats.
-            const float vol = inst->instanceVolume.load(std::memory_order_relaxed);
-            if (vol < 0.999f) {
-                WORD formatTag = inst->pSourceAudioFormat->wFormatTag;
-                WORD bitsPerSample = inst->pSourceAudioFormat->wBitsPerSample;
-
-                // Unwrap WAVE_FORMAT_EXTENSIBLE to the actual sub-format
-                if (formatTag == WAVE_FORMAT_EXTENSIBLE && inst->pSourceAudioFormat->cbSize >= 22) {
-                    auto* ext = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(inst->pSourceAudioFormat);
-                    if (ext->SubFormat == kSubtypePCM)
-                        formatTag = WAVE_FORMAT_PCM;
-                    else if (ext->SubFormat == kSubtypeIEEEFloat)
-                        formatTag = WAVE_FORMAT_IEEE_FLOAT;
-                }
-
-                if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 16) {
-                    auto* s = reinterpret_cast<int16_t*>(dstData);
-                    size_t n = (framesWanted * blockAlign) / sizeof(int16_t);
-                    for (size_t i = 0; i < n; ++i)
-                        s[i] = static_cast<int16_t>(s[i] * vol);
-                } else if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 24) {
-                    // 24-bit PCM: 3 bytes per sample, little-endian
-                    size_t totalBytes = framesWanted * blockAlign;
-                    for (size_t i = 0; i + 2 < totalBytes; i += 3) {
-                        int32_t sample = static_cast<int8_t>(dstData[i + 2]);
-                        sample = (sample << 8) | dstData[i + 1];
-                        sample = (sample << 8) | dstData[i];
-                        sample = static_cast<int32_t>(sample * vol);
-                        dstData[i]     = static_cast<BYTE>(sample & 0xFF);
-                        dstData[i + 1] = static_cast<BYTE>((sample >> 8) & 0xFF);
-                        dstData[i + 2] = static_cast<BYTE>((sample >> 16) & 0xFF);
-                    }
-                } else if (formatTag == WAVE_FORMAT_IEEE_FLOAT && bitsPerSample == 32) {
-                    auto* s = reinterpret_cast<float*>(dstData);
-                    size_t n = (framesWanted * blockAlign) / sizeof(float);
-                    for (size_t i = 0; i < n; ++i) s[i] *= vol;
-                }
-            }
-
-            inst->pRenderClient->ReleaseBuffer(framesWanted, 0);
-            offsetFrames += framesWanted;
-
-            // Recompute free frames for potential second iteration in this loop
-            if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding))) break;
-            framesFree = engineBufferFrames - framesPadding;
-        }
-
-        mediaBuf->Unlock();
-        mediaBuf->Release();
-        sample->Release();
+        float speed = inst->playbackSpeed.load(std::memory_order_relaxed);
+        int result = FeedOneSample(inst, audioReader, engineBufferFrames,
+                                   blockAlign, channels, formatTag, bitsPerSample, speed);
+        if (result < 0) break; // EOF or fatal error
     }
 
+    EnterCriticalSection(&inst->csAudioFeed);
     inst->pAudioClient->Stop();
+    LeaveCriticalSection(&inst->csAudioFeed);
+    inst->audioLatencyMs.store(0.0, std::memory_order_relaxed);
     return 0;
 }
 
 // -------------------------------------------------------------
-//  Thread management helpers
+//  Thread management
 // -------------------------------------------------------------
 HRESULT StartAudioThread(VideoPlayerInstance* inst)
 {
     if (!inst || !inst->bHasAudio || !inst->bAudioInitialized)
         return E_INVALIDARG;
 
-    // Terminate any previous thread first
     if (inst->hAudioThread) {
         WaitForSingleObject(inst->hAudioThread, 5000);
         CloseHandle(inst->hAudioThread);
@@ -326,18 +433,25 @@ void StopAudioThread(VideoPlayerInstance* inst)
     if (!inst) return;
 
     inst->bAudioThreadRunning = FALSE;
+    if (inst->hAudioReadyEvent) SetEvent(inst->hAudioReadyEvent);
+    if (inst->hAudioSamplesReadyEvent) SetEvent(inst->hAudioSamplesReadyEvent);
+
     if (inst->hAudioThread) {
-        if (WaitForSingleObject(inst->hAudioThread, 1000) == WAIT_TIMEOUT)
-            TerminateThread(inst->hAudioThread, 0);
+        WaitForSingleObject(inst->hAudioThread, 5000);
         CloseHandle(inst->hAudioThread);
         inst->hAudioThread = nullptr;
     }
 
-    if (inst->pAudioClient) inst->pAudioClient->Stop();
+    if (inst->pAudioClient) {
+        EnterCriticalSection(&inst->csAudioFeed);
+        inst->pAudioClient->Stop();
+        LeaveCriticalSection(&inst->csAudioFeed);
+    }
+    inst->audioLatencyMs.store(0.0, std::memory_order_relaxed);
 }
 
 // -----------------------------------------
-//  Per‑instance volume helpers (0.0 – 1.0)
+//  Volume helpers
 // -----------------------------------------
 HRESULT SetVolume(VideoPlayerInstance* inst, float vol)
 {

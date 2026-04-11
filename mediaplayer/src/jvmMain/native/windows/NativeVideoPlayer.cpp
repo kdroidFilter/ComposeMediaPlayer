@@ -280,32 +280,24 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* pInstance, IMFSample** ppS
             pInstance->pCachedSample = nullptr;
         }
 
-        // On the first decoded frame after play/seek, recalibrate the wall clock
-        // so that any decode or network latency doesn't cause mass frame skipping.
-        // This is critical for HTTP sources where ReadSample may block for seconds.
-        if (!pInstance->bHasInitialFrame) {
-            if (pInstance->bUseClockSync && pInstance->llPlaybackStartTime != 0) {
-                double frameTimeMs = llTimestamp / 10000.0;
-                double adjustedMs = frameTimeMs / static_cast<double>(pInstance->playbackSpeed.load());
-                pInstance->llPlaybackStartTime = GetCurrentTimeMs() - static_cast<LONGLONG>(adjustedMs);
-                pInstance->llTotalPauseTime = 0;
-            }
-            pInstance->bHasInitialFrame = TRUE;
-        }
+        pInstance->bHasInitialFrame = TRUE;
 
-        pInstance->llCurrentPosition = llTimestamp;
+        // Only update position from video if there's no audio track.
+        if (!pInstance->bHasAudio) {
+            pInstance->llCurrentPosition = llTimestamp;
+        }
     }
 
-    // ----- Frame timing synchronization (wall-clock based) -----
-    if (!isPaused && pInstance->bUseClockSync &&
-        pInstance->llPlaybackStartTime != 0 && llTimestamp > 0) {
+    // ----- Frame timing synchronization -----
+    // Audio-master model (like AVPlayer on macOS): video syncs to the audio
+    // position, not to a wall clock.  This guarantees lip-sync because both
+    // streams share the same time reference.
+    //
+    // For video-only files (no audio), fall back to wall-clock sync.
+    if (!isPaused && llTimestamp > 0) {
 
-        LONGLONG currentTimeMs = GetCurrentTimeMs();
-        LONGLONG elapsedMs = currentTimeMs - pInstance->llPlaybackStartTime - pInstance->llTotalPauseTime;
-        double adjustedElapsedMs = elapsedMs * pInstance->playbackSpeed.load();
         double frameTimeMs = llTimestamp / 10000.0;
 
-        // Determine frame interval, guarding against division by zero (issue #3)
         UINT frameRateNum = kDefaultFrameRateNum, frameRateDenom = kDefaultFrameRateDenom;
         GetVideoFrameRate(pInstance, &frameRateNum, &frameRateDenom);
         if (frameRateNum == 0) {
@@ -314,7 +306,22 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* pInstance, IMFSample** ppS
         }
         double frameIntervalMs = 1000.0 * frameRateDenom / frameRateNum;
 
-        double diffMs = frameTimeMs - adjustedElapsedMs;
+        double referenceMs;
+        if (pInstance->bHasAudio) {
+            // Audio-master: use the audio position heard by the user right now.
+            // llCurrentPosition = PTS of the last sample fed to WASAPI.
+            // audioLatencyMs    = how much of the WASAPI buffer hasn't played yet.
+            double audioFedMs = pInstance->llCurrentPosition / 10000.0;
+            double latencyMs  = pInstance->audioLatencyMs.load(std::memory_order_relaxed);
+            referenceMs = audioFedMs - latencyMs;
+        } else {
+            // No audio: wall-clock fallback
+            LONGLONG currentTimeMs = GetCurrentTimeMs();
+            LONGLONG elapsedMs = currentTimeMs - pInstance->llPlaybackStartTime - pInstance->llTotalPauseTime;
+            referenceMs = elapsedMs * pInstance->playbackSpeed.load();
+        }
+
+        double diffMs = frameTimeMs - referenceMs;
 
         if (diffMs < -frameIntervalMs * kFrameSkipThreshold) {
             // Frame is very late — skip it
@@ -359,10 +366,12 @@ NATIVEVIDEOPLAYER_API HRESULT CreateVideoPlayerInstance(VideoPlayerInstance** pp
         return E_OUTOFMEMORY;
 
     InitializeCriticalSection(&pInstance->csClockSync);
+    InitializeCriticalSection(&pInstance->csAudioFeed);
     pInstance->bUseClockSync = TRUE;
 
     pInstance->hAudioReadyEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     if (!pInstance->hAudioReadyEvent) {
+        DeleteCriticalSection(&pInstance->csAudioFeed);
         DeleteCriticalSection(&pInstance->csClockSync);
         delete pInstance;
         return HRESULT_FROM_WIN32(GetLastError());
@@ -382,6 +391,7 @@ NATIVEVIDEOPLAYER_API void DestroyVideoPlayerInstance(VideoPlayerInstance* pInst
             pInstance->pCachedSample = nullptr;
         }
 
+        DeleteCriticalSection(&pInstance->csAudioFeed);
         DeleteCriticalSection(&pInstance->csClockSync);
         delete pInstance;
         DecrementInstanceCount();
@@ -524,37 +534,28 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
             }
         }
 
-        // Create a separate audio source reader for the audio thread
+        // Create a dedicated audio SourceReader so the audio thread is never
+        // blocked by video decoding (ReadSample is serialized within a single
+        // reader).  Both readers share the same container timestamps.
         IMFAttributes* pAudioAttrs = nullptr;
-        if (isNetwork) {
-            MFCreateAttributes(&pAudioAttrs, 1);
-            if (pAudioAttrs) pAudioAttrs->SetUINT32(MF_LOW_LATENCY, TRUE);
-        }
-        hr = MFCreateSourceReaderFromURL(url, pAudioAttrs, &pInstance->pSourceReaderAudio);
-        SafeRelease(pAudioAttrs);
+        hr = MFCreateAttributes(&pAudioAttrs, 2);
         if (SUCCEEDED(hr)) {
-            hr = pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
-            if (SUCCEEDED(hr))
-                hr = pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
+            if (isNetwork) pAudioAttrs->SetUINT32(MF_LOW_LATENCY, TRUE);
+            hr = MFCreateSourceReaderFromURL(url, pAudioAttrs, &pInstance->pSourceReaderAudio);
+            SafeRelease(pAudioAttrs);
+        }
+        if (SUCCEEDED(hr) && pInstance->pSourceReaderAudio) {
+            pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
+            pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
 
-            if (SUCCEEDED(hr)) {
-                // Use the same format that succeeded for the main reader
-                UINT32 usedCh = pInstance->pSourceAudioFormat ? pInstance->pSourceAudioFormat->nChannels : 2;
-                UINT32 usedSr = pInstance->pSourceAudioFormat ? pInstance->pSourceAudioFormat->nSamplesPerSec : 48000;
-
-                IMFMediaType* pWantedAudioType = nullptr;
-                hr = MFCreateMediaType(&pWantedAudioType);
-                if (SUCCEEDED(hr)) {
-                    ConfigureAudioType(pWantedAudioType, usedCh, usedSr);
-                    hr = pInstance->pSourceReaderAudio->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pWantedAudioType);
-                    SafeRelease(pWantedAudioType);
-                }
-            }
-
-            if (FAILED(hr)) {
-                PrintHR("Failed to configure audio source reader", hr);
-                SafeRelease(pInstance->pSourceReaderAudio);
-                pInstance->pSourceReaderAudio = nullptr;
+            UINT32 usedCh = pInstance->pSourceAudioFormat ? pInstance->pSourceAudioFormat->nChannels : 2;
+            UINT32 usedSr = pInstance->pSourceAudioFormat ? pInstance->pSourceAudioFormat->nSamplesPerSec : 48000;
+            IMFMediaType* pWantedAudioType = nullptr;
+            if (SUCCEEDED(MFCreateMediaType(&pWantedAudioType))) {
+                ConfigureAudioType(pWantedAudioType, usedCh, usedSr);
+                pInstance->pSourceReaderAudio->SetCurrentMediaType(
+                    MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pWantedAudioType);
+                SafeRelease(pWantedAudioType);
             }
         } else {
             PrintHR("Failed to create audio source reader", hr);
@@ -624,6 +625,11 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
         pInstance->llPlaybackStartTime = GetCurrentTimeMs();
         pInstance->llTotalPauseTime = 0;
         pInstance->llPauseStart = 0;
+
+        // Pre-fill WASAPI buffer before starting audio thread
+        if (pInstance->bHasAudio && pInstance->bAudioInitialized) {
+            PreFillAudioBuffer(pInstance);
+        }
 
         if (pInstance->bHasAudio && pInstance->bAudioInitialized && pInstance->pSourceReaderAudio) {
             hr = StartAudioThread(pInstance);
@@ -875,6 +881,15 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(
         }
     }
 
+    // Force alpha byte to 0xFF — same fix as ReadVideoFrame.
+    // MFVideoFormat_RGB32 (X8R8G8B8) leaves the high byte undefined.
+    {
+        const DWORD pixelCount = (dstRowBytes * height) / 4;
+        DWORD* px = reinterpret_cast<DWORD*>(pDst);
+        for (DWORD i = 0; i < pixelCount; ++i)
+            px[i] |= 0xFF000000;
+    }
+
     pBuffer->Release();
     pSample->Release();
     return S_OK;
@@ -956,8 +971,11 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
     bool wasPlaying = false;
     if (pInstance->bHasAudio && pInstance->pAudioClient) {
         wasPlaying = (pInstance->llPauseStart == 0);
+        // Stop WASAPI under csAudioFeed to ensure the audio thread is not
+        // in the middle of GetBuffer/ReleaseBuffer.
+        EnterCriticalSection(&pInstance->csAudioFeed);
         pInstance->pAudioClient->Stop();
-        Sleep(kSeekAudioSettleMs);
+        LeaveCriticalSection(&pInstance->csAudioFeed);
     }
 
     // Stop the presentation clock
@@ -965,7 +983,7 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
         pInstance->pPresentationClock->Stop();
     }
 
-    // Seek the main source reader
+    // Seek video reader
     HRESULT hr = pInstance->pSourceReader->SetCurrentPosition(GUID_NULL, var);
     if (FAILED(hr)) {
         EnterCriticalSection(&pInstance->csClockSync);
@@ -975,40 +993,32 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
         return hr;
     }
 
-    // Also seek the audio source reader if available
+    // Seek audio reader independently — never blocks on video decoding
     if (pInstance->pSourceReaderAudio) {
         PROPVARIANT varAudio;
         PropVariantInit(&varAudio);
         varAudio.vt = VT_I8;
         varAudio.hVal.QuadPart = llPositionIn100Ns;
-
-        HRESULT hrAudio = pInstance->pSourceReaderAudio->SetCurrentPosition(GUID_NULL, varAudio);
-        if (FAILED(hrAudio)) {
-            PrintHR("Failed to seek audio source reader", hrAudio);
-        }
+        pInstance->pSourceReaderAudio->SetCurrentPosition(GUID_NULL, varAudio);
         PropVariantClear(&varAudio);
     }
 
-    // Reset audio client if needed
+    // Reset WASAPI buffer under csAudioFeed
     if (pInstance->bHasAudio && pInstance->pRenderClient && pInstance->pAudioClient) {
-        UINT32 bufferFrameCount = 0;
-        if (SUCCEEDED(pInstance->pAudioClient->GetBufferSize(&bufferFrameCount))) {
-            pInstance->pAudioClient->Reset();
-        }
+        EnterCriticalSection(&pInstance->csAudioFeed);
+        pInstance->pAudioClient->Reset();
+        LeaveCriticalSection(&pInstance->csAudioFeed);
     }
 
     PropVariantClear(&var);
 
-    // Update position and state
+    pInstance->bEOF = FALSE;
+    pInstance->resampleFracPos = 0.0;
+    pInstance->audioLatencyMs.store(0.0, std::memory_order_relaxed);
+
+    // Reset timing for A/V sync after seek.
     EnterCriticalSection(&pInstance->csClockSync);
     pInstance->llCurrentPosition = llPositionIn100Ns;
-    pInstance->bSeekInProgress = FALSE;
-    LeaveCriticalSection(&pInstance->csClockSync);
-
-    pInstance->bEOF = FALSE;
-
-    // Reset timing for A/V sync after seek:
-    // Adjust llPlaybackStartTime so that elapsed time matches the seek position.
     if (pInstance->bUseClockSync) {
         double seekPositionMs = llPositionIn100Ns / 10000.0;
         double adjustedSeekMs = seekPositionMs / static_cast<double>(pInstance->playbackSpeed.load());
@@ -1021,8 +1031,10 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
             pInstance->llPauseStart = 0;
         }
     }
+    pInstance->bSeekInProgress = FALSE;
+    LeaveCriticalSection(&pInstance->csClockSync);
 
-    // Restart the presentation clock at the new position
+    // Restart the presentation clock
     if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
         hr = pInstance->pPresentationClock->Start(llPositionIn100Ns);
         if (FAILED(hr)) {
@@ -1030,15 +1042,25 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
         }
     }
 
-    // Restart audio if it was playing
-    if (pInstance->bHasAudio && pInstance->pAudioClient && wasPlaying) {
-        Sleep(kSeekAudioSettleMs);
-        pInstance->pAudioClient->Start();
+    // Pre-fill the WASAPI buffer BEFORE Start() so audio plays immediately
+    // with no gap. This is the key to stutter-free seek: the buffer has
+    // ~100ms of audio ready before the hardware starts consuming.
+    if (pInstance->bHasAudio && pInstance->bAudioInitialized) {
+        PreFillAudioBuffer(pInstance);
     }
 
-    // Signal audio thread to continue
+    // Now start the audio client — buffer already has data, no gap
+    if (pInstance->bHasAudio && pInstance->pAudioClient && wasPlaying) {
+        EnterCriticalSection(&pInstance->csAudioFeed);
+        pInstance->pAudioClient->Start();
+        LeaveCriticalSection(&pInstance->csAudioFeed);
+    }
+
+    // Signal audio thread to resume its feed loop
     if (pInstance->hAudioReadyEvent)
         SetEvent(pInstance->hAudioReadyEvent);
+    if (pInstance->hAudioSamplesReadyEvent)
+        SetEvent(pInstance->hAudioSamplesReadyEvent);
 
     return S_OK;
 }
@@ -1126,9 +1148,11 @@ NATIVEVIDEOPLAYER_API HRESULT SetPlaybackState(VideoPlayerInstance* pInstance, B
 
         pInstance->bHasInitialFrame = FALSE;
 
-        // Start audio client if available
+        // Start audio client if available (under csAudioFeed for thread safety)
         if (pInstance->pAudioClient && pInstance->bAudioInitialized) {
+            EnterCriticalSection(&pInstance->csAudioFeed);
             hr = pInstance->pAudioClient->Start();
+            LeaveCriticalSection(&pInstance->csAudioFeed);
             if (FAILED(hr)) {
                 PrintHR("Failed to start audio client", hr);
             }
@@ -1153,9 +1177,10 @@ NATIVEVIDEOPLAYER_API HRESULT SetPlaybackState(VideoPlayerInstance* pInstance, B
             }
         }
 
-        if (pInstance->hAudioReadyEvent) {
+        if (pInstance->hAudioReadyEvent)
             SetEvent(pInstance->hAudioReadyEvent);
-        }
+        if (pInstance->hAudioSamplesReadyEvent)
+            SetEvent(pInstance->hAudioSamplesReadyEvent);
     } else {
         // Pause playback
         if (pInstance->llPauseStart == 0) {
@@ -1165,7 +1190,9 @@ NATIVEVIDEOPLAYER_API HRESULT SetPlaybackState(VideoPlayerInstance* pInstance, B
         pInstance->bHasInitialFrame = FALSE;
 
         if (pInstance->pAudioClient && pInstance->bAudioInitialized) {
+            EnterCriticalSection(&pInstance->csAudioFeed);
             pInstance->pAudioClient->Stop();
+            LeaveCriticalSection(&pInstance->csAudioFeed);
         }
 
         if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
@@ -1245,6 +1272,8 @@ NATIVEVIDEOPLAYER_API void CloseMedia(VideoPlayerInstance* pInstance) {
     pInstance->llCurrentPosition = 0;
     pInstance->bSeekInProgress = FALSE;
     pInstance->playbackSpeed = 1.0f;
+    pInstance->resampleFracPos = 0.0;
+    pInstance->audioLatencyMs.store(0.0, std::memory_order_relaxed);
     pInstance->bIsNetworkSource = FALSE;
     pInstance->bIsLiveStream = FALSE;
 
@@ -1272,7 +1301,24 @@ NATIVEVIDEOPLAYER_API HRESULT SetPlaybackSpeed(VideoPlayerInstance* pInstance, f
         return pInstance->pHLSPlayer->SetPlaybackSpeed(speed);
 
     speed = std::max(0.5f, std::min(speed, 2.0f));
+
+    // Recalibrate the wall-clock reference so that the position accumulated
+    // at the old speed is preserved when switching to the new speed.
+    // Without this, `elapsed * newSpeed` would produce a wrong position.
+    if (pInstance->bUseClockSync && pInstance->llPlaybackStartTime != 0) {
+        float oldSpeed = pInstance->playbackSpeed.load();
+        EnterCriticalSection(&pInstance->csClockSync);
+        LONGLONG now = GetCurrentTimeMs();
+        LONGLONG elapsedMs = now - pInstance->llPlaybackStartTime - pInstance->llTotalPauseTime;
+        double currentPositionMs = elapsedMs * static_cast<double>(oldSpeed);
+        // Solve: (now - newStart - pause) * newSpeed = currentPositionMs
+        pInstance->llPlaybackStartTime = now - pInstance->llTotalPauseTime
+            - static_cast<LONGLONG>(currentPositionMs / speed);
+        LeaveCriticalSection(&pInstance->csClockSync);
+    }
+
     pInstance->playbackSpeed = speed;
+    pInstance->resampleFracPos = 0.0;
 
     if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
         IMFRateControl* pRateControl = nullptr;

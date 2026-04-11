@@ -263,6 +263,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private var skiaBitmapWidth: Int = 0
     private var skiaBitmapHeight: Int = 0
 
+    // Adaptive frame interval (ms) based on the video's native frame rate.
+    // Mirrors macOS approach: poll at the video frame rate, not faster.
+    // This prevents starving the audio thread on the shared SourceReader.
+    private var frameIntervalMs: Long = 16L // Default ~60fps, updated after open
+
     // Variable to store the last opened URI
     private var lastUri: String? = null
 
@@ -592,6 +597,16 @@ class WindowsVideoPlayerState : VideoPlayerState {
                             )
                     }
 
+                    // Query the native frame rate to compute an adaptive polling interval
+                    // like macOS does with captureFrameRate.
+                    val rateArr = IntArray(2)
+                    if (player.nGetVideoFrameRate(instance, rateArr) >= 0 && rateArr[0] > 0) {
+                        val fps = rateArr[0].toDouble() / rateArr[1].coerceAtLeast(1).toDouble()
+                        frameIntervalMs = (1000.0 / fps).toLong().coerceIn(8L, 50L)
+                    } else {
+                        frameIntervalMs = 16L // fallback ~60fps
+                    }
+
                     // Set _hasMedia to true only if everything succeeded
                     _hasMedia = true
 
@@ -807,7 +822,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // Send frame to channel
                 frameChannel.trySend(FrameData(targetBitmap, frameTime))
 
-                delay(1)
+                // Yield to the audio thread on the shared SourceReader.
+                // Native AcquireNextSample already sleeps to pace video to
+                // the presentation clock, so this delay just prevents tight
+                // looping when frames are skipped or the decoder is fast.
+                delay(frameIntervalMs)
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
@@ -863,7 +882,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     }
                 isLoading = false
 
-                delay(1)
+                delay(frameIntervalMs)
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {

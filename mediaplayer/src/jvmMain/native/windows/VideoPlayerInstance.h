@@ -17,7 +17,7 @@ class HLSPlayer;
  */
 struct VideoPlayerInstance {
     // Video related members
-    IMFSourceReader* pSourceReader = nullptr;
+    IMFSourceReader* pSourceReader = nullptr; // Single reader for both audio & video
     IMFMediaBuffer* pLockedBuffer = nullptr;
     BYTE* pLockedBytes = nullptr;
     DWORD lockedMaxSize = 0;
@@ -27,13 +27,13 @@ struct VideoPlayerInstance {
     UINT32 nativeWidth = 0;   // Original video resolution (before scaling)
     UINT32 nativeHeight = 0;
     BOOL bEOF = FALSE;
-    
+
     // Frame caching for paused state
     IMFSample* pCachedSample = nullptr;     // Cached sample for paused state
     BOOL bHasInitialFrame = FALSE;          // Whether we've read an initial frame when paused
 
     // Audio related members
-    IMFSourceReader* pSourceReaderAudio = nullptr;
+    IMFSourceReader* pSourceReaderAudio = nullptr; // Separate reader for audio (no serialization with video)
     BOOL bHasAudio = FALSE;
     BOOL bAudioInitialized = FALSE;
     IAudioClient* pAudioClient = nullptr;
@@ -45,6 +45,12 @@ struct VideoPlayerInstance {
     BOOL bAudioThreadRunning = FALSE;
     HANDLE hAudioReadyEvent = nullptr;
     IAudioEndpointVolume* pAudioEndpointVolume = nullptr;
+
+    // WASAPI latency: updated by audio thread, read by video thread for A/V sync
+    std::atomic<double> audioLatencyMs{0.0};
+
+    // Protects WASAPI GetBuffer/ReleaseBuffer vs Stop/Reset/Start during seeks
+    CRITICAL_SECTION csAudioFeed{};
 
     // Media Foundation clock for synchronization
     IMFPresentationClock* pPresentationClock = nullptr;
@@ -62,6 +68,10 @@ struct VideoPlayerInstance {
     // Playback control (atomic for lock-free access from the audio thread)
     std::atomic<float> instanceVolume{1.0f}; // Volume specific to this instance (1.0 = 100%)
     std::atomic<float> playbackSpeed{1.0f};  // Playback speed (1.0 = 100%)
+
+    // Audio resampling fractional position for playback speed (audio thread only)
+    double resampleFracPos = 0.0;
+
 
     // Network / HLS streaming
     BOOL bIsNetworkSource = FALSE;  // TRUE when URL is http:// or https://
