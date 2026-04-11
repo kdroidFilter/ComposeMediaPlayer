@@ -22,10 +22,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.io.IOException
 import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
-actual fun createVideoPlayerState(audioMode: AudioMode): VideoPlayerState = DefaultVideoPlayerState()
+actual fun createVideoPlayerState(
+    audioMode: AudioMode,
+    cacheConfig: CacheConfig,
+): VideoPlayerState = DefaultVideoPlayerState()
 
 /**
  * Implementation of VideoPlayerState for WebAssembly/JavaScript platform.

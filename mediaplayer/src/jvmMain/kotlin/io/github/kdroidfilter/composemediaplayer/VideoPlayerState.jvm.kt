@@ -9,7 +9,10 @@ import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
 import io.github.vinceglb.filekit.PlatformFile
 
-actual fun createVideoPlayerState(audioMode: AudioMode): VideoPlayerState = DefaultVideoPlayerState()
+actual fun createVideoPlayerState(
+    audioMode: AudioMode,
+    cacheConfig: CacheConfig,
+): VideoPlayerState = DefaultVideoPlayerState()
 
 /**
  * Represents the state and behavior of a video player. This class provides properties
