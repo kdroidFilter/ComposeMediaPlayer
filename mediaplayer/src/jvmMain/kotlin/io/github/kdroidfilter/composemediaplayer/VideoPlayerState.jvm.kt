@@ -103,6 +103,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override val positionText: String get() = delegate.positionText
     override val durationText: String get() = delegate.durationText
     override val currentTime: Double get() = delegate.currentTime
+    override val duration: Double get() = delegate.duration
 
     override fun openUri(
         uri: String,

@@ -73,6 +73,11 @@ interface VideoPlayerState {
      */
     val durationText: String
     val currentTime: Double
+
+    /**
+     * Returns the total duration of the media in seconds.
+     */
+    val duration: Double
     var isFullscreen: Boolean
     val aspectRatio: Float
 
@@ -190,6 +195,7 @@ data class PreviewableVideoPlayerState(
     override val positionText: String = "00:05",
     override val durationText: String = "00:10",
     override val currentTime: Double = 5000.0,
+    override val duration: Double = 10.0,
     override var isFullscreen: Boolean = false,
     override val aspectRatio: Float = 1.7f,
     override val error: VideoPlayerError? = null,

@@ -58,6 +58,7 @@ actual fun createVideoPlayerState(audioMode: AudioMode): VideoPlayerState =
             positionText = "00:00",
             durationText = "00:00",
             currentTime = 0.0,
+            duration = 0.0,
             isFullscreen = false,
             aspectRatio = 16f / 9f,
             error =
@@ -267,6 +268,7 @@ open class DefaultVideoPlayerState(
     override val positionText: String get() = formatTime(_currentTime)
     override val durationText: String get() = formatTime(_duration)
     override val currentTime: Double get() = _currentTime
+    override val duration: Double get() = _duration
 
     override val isPipSupported: Boolean
         get() {

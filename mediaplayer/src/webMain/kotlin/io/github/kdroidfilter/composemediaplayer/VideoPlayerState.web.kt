@@ -126,6 +126,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     // Current time of the media in seconds
     private var _currentTime: Double = 0.0
     override val currentTime: Double get() = _currentTime
+    override val duration: Double get() = _currentDuration.toDouble()
 
     // Job for handling seek operations
     internal var seekJob: Job? = null
