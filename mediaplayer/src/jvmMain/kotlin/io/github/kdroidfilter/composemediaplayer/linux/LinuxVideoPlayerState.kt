@@ -718,26 +718,32 @@ class LinuxVideoPlayerState : VideoPlayerState {
         uiUpdateJob?.cancel()
         playerScope.cancel()
 
-        // Dispose the native player synchronously to guarantee cleanup before
-        // ioScope is cancelled — otherwise GStreamer keeps running (audio leak).
+        // Clear the pointer atomically so no background task can use it
         val ptrToDispose = playerPtrAtomic.getAndSet(0L)
 
-        skiaBitmapA?.close()
-        skiaBitmapB?.close()
-        skiaBitmapA = null
-        skiaBitmapB = null
-        skiaBitmapWidth = 0
-        skiaBitmapHeight = 0
-        nextSkiaBitmapA = true
-
-        if (ptrToDispose != 0L) {
+        // Native cleanup on a background thread to avoid blocking the UI.
+        Thread {
             try {
-                LinuxNativeBridge.nDisposePlayer(ptrToDispose)
+                skiaBitmapA?.close()
+                skiaBitmapB?.close()
+                skiaBitmapA = null
+                skiaBitmapB = null
+                skiaBitmapWidth = 0
+                skiaBitmapHeight = 0
+                nextSkiaBitmapA = true
             } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                linuxLogger.e { "Error disposing player: ${e.message}" }
+                linuxLogger.e { "Error releasing bitmaps: ${e.message}" }
             }
-        }
+
+            if (ptrToDispose != 0L) {
+                try {
+                    LinuxNativeBridge.nDisposePlayer(ptrToDispose)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    linuxLogger.e { "Error disposing player: ${e.message}" }
+                }
+            }
+        }.start()
 
         ioScope.cancel()
     }

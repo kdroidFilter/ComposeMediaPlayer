@@ -17,9 +17,14 @@ Pods/
 *yarn.lock
 # Native compiled binaries (built locally or in CI)
 /mediaplayer/src/jvmMain/resources/composemediaplayer/native/
+/mediaplayer/src/jvmMain/resources/win32-x86-64/
+/mediaplayer/src/jvmMain/resources/win32-arm64/
 
 # Native build artifacts
 /mediaplayer/src/jvmMain/native/windows/build-x64/
 /mediaplayer/src/jvmMain/native/windows/build-arm64/
+/mediaplayer/src/jvmMain/native/windows/build-test/
 *.log
 /sample/composeApp/debug/
+NUL
+.claude/

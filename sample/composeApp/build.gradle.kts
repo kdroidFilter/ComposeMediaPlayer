@@ -115,7 +115,7 @@ compose.desktop {
             packageName = "sample"
             packageVersion = "1.0.0"
             linux {
-                modules("jdk.security.auth")
+                modules("jdk.security.auth", "jdk.accessibility")
             }
             macOS {
                 jvmArgs(

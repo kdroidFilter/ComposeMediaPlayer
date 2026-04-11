@@ -36,6 +36,11 @@ DWORD WINAPI AudioThreadProc(LPVOID lpParam);
  * @param pInstance Pointer to the video player instance.
  * @return S_OK on success, or an error code.
  */
+/**
+ * @brief Pre-fills the WASAPI buffer before Start() to avoid gaps after seek.
+ */
+HRESULT PreFillAudioBuffer(VideoPlayerInstance* pInstance);
+
 HRESULT StartAudioThread(VideoPlayerInstance* pInstance);
 
 /**

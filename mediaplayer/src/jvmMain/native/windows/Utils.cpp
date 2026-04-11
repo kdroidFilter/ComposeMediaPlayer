@@ -8,8 +8,9 @@ void PreciseSleepHighRes(double ms) {
     if (ms <= 0.1)
         return;
 
-    // Use a single static timer for all sleep operations
-    static HANDLE hTimer = CreateWaitableTimer(nullptr, TRUE, nullptr);
+    // Each thread gets its own waitable timer to avoid race conditions
+    // when multiple threads (audio + video) call this concurrently.
+    thread_local HANDLE hTimer = CreateWaitableTimer(nullptr, TRUE, nullptr);
     if (!hTimer) {
         std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(ms));
         return;

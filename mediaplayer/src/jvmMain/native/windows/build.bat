@@ -3,6 +3,17 @@ setlocal
 
 echo === Starting compilation for x64 and ARM64 ===
 
+rem Clean previous build directories to ensure a fresh build
+if exist build-x64 rmdir /s /q build-x64
+if exist build-arm64 rmdir /s /q build-arm64
+
+rem Clear local DLL cache so the JVM loader picks up the new build
+set "NATIVE_CACHE=%LOCALAPPDATA%\composemediaplayer\native"
+if exist "%NATIVE_CACHE%" (
+    echo Clearing native DLL cache: %NATIVE_CACHE%
+    rmdir /s /q "%NATIVE_CACHE%"
+)
+
 echo.
 echo === x64 Configuration ===
 cmake -B build-x64 -A x64 .
