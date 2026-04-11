@@ -742,6 +742,19 @@ open class DefaultVideoPlayerState(
         openUri(fileUrl, initializeplayerState)
     }
 
+    override fun openAsset(
+        fileName: String,
+        initializeplayerState: InitialPlayerState,
+    ) {
+        val name = fileName.substringBeforeLast(".")
+        val ext = fileName.substringAfterLast(".", "")
+        val path =
+            platform.Foundation.NSBundle.mainBundle
+                .pathForResource(name, ext.ifEmpty { null })
+                ?: throw IllegalArgumentException("Asset not found in app bundle: $fileName")
+        openUri("file://$path", initializeplayerState)
+    }
+
     override val metadata: VideoMetadata
         get() = _metadata
 

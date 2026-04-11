@@ -162,6 +162,20 @@ interface VideoPlayerState {
         initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
     )
 
+    /**
+     * Opens a media file bundled with the application.
+     *
+     * On Android, plays directly from the APK's `assets/` directory via the `asset:///` URI scheme (zero-copy).
+     * On iOS, resolves the file from the app bundle via `NSBundle.mainBundle`.
+     *
+     * @param fileName the file name or relative path (e.g. `"video.mp4"` or `"videos/intro.mp4"`)
+     * @throws UnsupportedOperationException on platforms where asset loading is not yet supported
+     */
+    fun openAsset(
+        fileName: String,
+        initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
+    ): Unit = throw UnsupportedOperationException("openAsset is not supported on this platform")
+
     // Error handling
     val error: VideoPlayerError?
 
