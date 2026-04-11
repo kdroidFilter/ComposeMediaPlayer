@@ -448,7 +448,7 @@ class MacVideoPlayerState : VideoPlayerState {
         try {
             val width = MacNativeBridge.nGetFrameWidth(ptr)
             val height = MacNativeBridge.nGetFrameHeight(ptr)
-            val duration = MacNativeBridge.nGetVideoDuration(ptr).toLong()
+            val duration = (MacNativeBridge.nGetVideoDuration(ptr) * 1000).toLong()
             val frameRate = MacNativeBridge.nGetVideoFrameRate(ptr)
 
             // Calculate aspect ratio

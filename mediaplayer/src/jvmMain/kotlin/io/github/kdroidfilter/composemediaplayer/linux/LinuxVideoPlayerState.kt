@@ -379,7 +379,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         try {
             val width = LinuxNativeBridge.nGetFrameWidth(ptr)
             val height = LinuxNativeBridge.nGetFrameHeight(ptr)
-            val duration = LinuxNativeBridge.nGetVideoDuration(ptr).toLong()
+            val duration = (LinuxNativeBridge.nGetVideoDuration(ptr) * 1000).toLong()
             val frameRate = LinuxNativeBridge.nGetFrameRate(ptr)
             val newAspectRatio =
                 if (width > 0 && height > 0) {
