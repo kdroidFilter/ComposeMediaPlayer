@@ -37,7 +37,6 @@
   - [Video Playback via URL or Local Files](#video-playback-via-url-or-local-files)
   - [Full Controls](#full-controls)
   - [Progress Indicators](#progress-indicators)
-  - [Display Left and Right Volume Levels](#display-left-and-right-volume-levels)
   - [Error Handling](#error-handling)
   - [Loading Indicator](#loading-indicator)
   - [Using Subtitles](#using-subtitles)
@@ -68,7 +67,7 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 - **Media Controls**: Includes play, pause, loop toggle, volume control, playback speed, loop playback and timeline slider.
 - **Initial Playback Control**: Choose whether videos automatically play or remain paused after opening.
 - **Custom Video Player UI**: Fully customizable using Compose Multiplatform, with support for custom overlays that display even in fullscreen mode.
-- **Audio Levels**: Displays left and right audio levels in real time.
+- **HLS Streaming**: Native HLS (M3U8) support on all platforms except Web.
 - **Fullscreen Mode**: Toggle between windowed and fullscreen playback modes.
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
 - **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
@@ -87,6 +86,12 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 | WEBM | ❌                                                                                                                 | ✅ | ❌                                                                           | ✅ | ✅ |
 | WMV | ✅                                                                                                                 | ✅ | ❌                                                                           | ❌ | ❌ |
 | 3GP | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅ | ❌ |
+| HLS (M3U8) | ✅                                                                                                                 | ✅ | ✅                                                                           | ✅* | ❌ |
+
+> *\* On Android, HLS requires adding the ExoPlayer HLS module dependency:*
+> ```kotlin
+> implementation("androidx.media3:media3-exoplayer-hls:<version>")
+> ```
 
 
 ## 🔧 Installation
@@ -352,18 +357,6 @@ For programmatic seeking (e.g. skip forward/backward), use `seekTo` directly:
 // Seek to the middle of the video
 playerState.seekTo(500f)
 ```
-
-### Display Left and Right Volume Levels
-
-To display audio levels:
-
-```kotlin
-println("Left level: ${playerState.leftLevel.toInt()}%, Right level: ${playerState.rightLevel.toInt()}%")
-```
-
-> [!IMPORTANT]
-> This feature is not working on iOS.
-
 
 ### Error Handling
 
