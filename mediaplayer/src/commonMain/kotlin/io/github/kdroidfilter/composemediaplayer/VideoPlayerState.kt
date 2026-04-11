@@ -195,6 +195,16 @@ interface VideoPlayerState {
 
     fun disableSubtitles()
 
+    // Cache management
+
+    /**
+     * Clears the shared video cache, removing all cached media data from disk.
+     *
+     * This is a no-op on platforms that do not support caching or when caching
+     * is not enabled.
+     */
+    fun clearCache() {}
+
     // Cleanup
 
     /**
@@ -223,8 +233,16 @@ interface VideoPlayerState {
 /**
  *  Create platform-specific video player state. Supported platforms include Windows,
  *  macOS, and Linux.
+ *
+ * @param audioMode The audio mode configuration for the player.
+ * @param cacheConfig Optional caching configuration. When [CacheConfig.enabled] is `true`,
+ *   video data fetched via [VideoPlayerState.openUri] is cached on disk so that subsequent
+ *   plays of the same URI avoid a full re-download. Currently only effective on Android and iOS.
  */
-expect fun createVideoPlayerState(audioMode: AudioMode = AudioMode()): VideoPlayerState
+expect fun createVideoPlayerState(
+    audioMode: AudioMode = AudioMode(),
+    cacheConfig: CacheConfig = CacheConfig(),
+): VideoPlayerState
 
 /**
  * Creates and remembers a [VideoPlayerState], automatically releasing all player resources
@@ -242,11 +260,17 @@ expect fun createVideoPlayerState(audioMode: AudioMode = AudioMode()): VideoPlay
  * ```
  *
  * @param audioMode The audio mode configuration for the player.
+ * @param cacheConfig Optional caching configuration. When [CacheConfig.enabled] is `true`,
+ *   video data fetched via [VideoPlayerState.openUri] is cached on disk so that subsequent
+ *   plays of the same URI avoid a full re-download. Currently only effective on Android and iOS.
  * @return The remembered instance of [VideoPlayerState].
  */
 @Composable
-fun rememberVideoPlayerState(audioMode: AudioMode = AudioMode()): VideoPlayerState {
-    val playerState = remember(audioMode) { createVideoPlayerState(audioMode) }
+fun rememberVideoPlayerState(
+    audioMode: AudioMode = AudioMode(),
+    cacheConfig: CacheConfig = CacheConfig(),
+): VideoPlayerState {
+    val playerState = remember(audioMode, cacheConfig) { createVideoPlayerState(audioMode, cacheConfig) }
     DisposableEffect(Unit) {
         onDispose {
             playerState.dispose()

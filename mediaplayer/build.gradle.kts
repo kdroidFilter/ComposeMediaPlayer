@@ -87,6 +87,8 @@ kotlin {
             implementation(libs.androidcontextprovider)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.androidx.media3.exoplayer)
+            implementation(libs.androidx.media3.datasource)
+            implementation(libs.androidx.media3.database)
             implementation(libs.androidx.media3.ui)
             implementation(libs.androidx.activityCompose)
             implementation(libs.androidx.core)

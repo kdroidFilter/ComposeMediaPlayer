@@ -30,6 +30,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import com.kdroid.androidcontextprovider.ContextProvider
@@ -42,9 +43,12 @@ import kotlinx.coroutines.*
 import java.lang.ref.WeakReference
 
 @OptIn(UnstableApi::class)
-actual fun createVideoPlayerState(audioMode: AudioMode): VideoPlayerState =
+actual fun createVideoPlayerState(
+    audioMode: AudioMode,
+    cacheConfig: CacheConfig,
+): VideoPlayerState =
     try {
-        DefaultVideoPlayerState(audioMode)
+        DefaultVideoPlayerState(audioMode, cacheConfig)
     } catch (e: IllegalStateException) {
         PreviewableVideoPlayerState(
             hasMedia = false,
@@ -80,6 +84,7 @@ internal val androidVideoLogger = TaggedLogger("AndroidVideoPlayerSurface")
 @Stable
 open class DefaultVideoPlayerState(
     private val audioMode: AudioMode = AudioMode(),
+    private val cacheConfig: CacheConfig = CacheConfig(),
 ) : VideoPlayerState {
     companion object {
         var activity: WeakReference<Activity> = WeakReference(null)
@@ -411,7 +416,7 @@ open class DefaultVideoPlayerState(
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                     .build()
 
-            exoPlayer =
+            val playerBuilder =
                 ExoPlayer
                     .Builder(context)
                     .setRenderersFactory(renderersFactory)
@@ -420,6 +425,14 @@ open class DefaultVideoPlayerState(
                     .setAudioAttributes(audioAttributes, manageFocus)
                     .setPauseAtEndOfMediaItems(false)
                     .setReleaseTimeoutMs(2000) // Increase the release timeout
+
+            if (cacheConfig.enabled) {
+                val cacheDataSourceFactory = buildCachingDataSourceFactory(context, cacheConfig.maxCacheSizeBytes)
+                playerBuilder.setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
+            }
+
+            exoPlayer =
+                playerBuilder
                     .build()
                     .apply {
                         playerListener = createPlayerListener()
@@ -780,6 +793,12 @@ open class DefaultVideoPlayerState(
 
     override fun clearError() {
         _error = null
+    }
+
+    override fun clearCache() {
+        if (cacheConfig.enabled) {
+            VideoCache.clear(context, cacheConfig.maxCacheSizeBytes)
+        }
     }
 
     override fun toggleFullscreen() {

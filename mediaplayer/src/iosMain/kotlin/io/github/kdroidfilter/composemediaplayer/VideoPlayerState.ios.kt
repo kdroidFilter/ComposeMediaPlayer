@@ -52,13 +52,17 @@ import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_global_queue
 import platform.darwin.dispatch_get_main_queue
 
-actual fun createVideoPlayerState(audioMode: AudioMode): VideoPlayerState = DefaultVideoPlayerState(audioMode)
+actual fun createVideoPlayerState(
+    audioMode: AudioMode,
+    cacheConfig: CacheConfig,
+): VideoPlayerState = DefaultVideoPlayerState(audioMode, cacheConfig)
 
 private val iosLogger = TaggedLogger("iOSVideoPlayerState")
 
 @Stable
 open class DefaultVideoPlayerState(
     private val audioMode: AudioMode = AudioMode(),
+    private val cacheConfig: CacheConfig = CacheConfig(),
 ) : VideoPlayerState {
     // Base states
     private var _volume = mutableStateOf(1.0f)
@@ -165,6 +169,12 @@ open class DefaultVideoPlayerState(
 
     // Flag to track if the state has been disposed
     private var isDisposed = false
+
+    init {
+        if (cacheConfig.enabled) {
+            IosVideoCache.configure(cacheConfig.maxCacheSizeBytes)
+        }
+    }
 
     // Internal time values (in seconds)
     private var _currentTime: Double = 0.0
@@ -710,6 +720,12 @@ open class DefaultVideoPlayerState(
 
     override fun clearError() {
         iosLogger.d { "clearError called" }
+    }
+
+    override fun clearCache() {
+        if (cacheConfig.enabled) {
+            IosVideoCache.clear()
+        }
     }
 
     /**
