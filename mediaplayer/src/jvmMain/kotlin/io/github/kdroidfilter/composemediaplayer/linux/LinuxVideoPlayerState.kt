@@ -82,6 +82,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override var userDragging: Boolean by mutableStateOf(false)
     override var loop: Boolean by mutableStateOf(false)
     override var isLoading: Boolean by mutableStateOf(false)
+    override var onPlaybackEnded: (() -> Unit)? = null
     override var error: VideoPlayerError? by mutableStateOf(null)
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
@@ -504,7 +505,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
                     // Native-to-native copy: frame buffer -> Skia bitmap pixels
                     srcBuf.rewind()
-                    val destRowBytes = pixmap.rowBytes.toInt()
+                    val destRowBytes = pixmap.rowBytes
                     val destSizeBytes = destRowBytes.toLong() * height.toLong()
                     val destBuf =
                         LinuxNativeBridge.nWrapPointer(pixelsAddr, destSizeBytes)
@@ -572,6 +573,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         } else {
             withContext(Dispatchers.Main) { isPlaying = false }
             pauseInBackground()
+            onPlaybackEnded?.invoke()
         }
     }
 

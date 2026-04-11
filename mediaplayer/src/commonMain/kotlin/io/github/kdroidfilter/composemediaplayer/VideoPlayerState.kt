@@ -37,7 +37,7 @@ interface VideoPlayerState {
     var volume: Float
 
     /**
-     * Represents the current playback position as a normalized value between 0.0 and 1.0.
+     * Represents the current playback position as a value between 0.0 and 1000.0.
      */
     var sliderPos: Float
 
@@ -51,6 +51,12 @@ interface VideoPlayerState {
      */
     var loop: Boolean
     var playbackSpeed: Float
+
+    /**
+     * Callback invoked when playback reaches the end of the media.
+     * Only called when [loop] is false. May be invoked from a background thread.
+     */
+    var onPlaybackEnded: (() -> Unit)?
 
     companion object {
         const val MIN_PLAYBACK_SPEED = 0.25f
@@ -96,7 +102,7 @@ interface VideoPlayerState {
     fun stop()
 
     /**
-     * Seeks to a specific playback position based on the provided normalized value.
+     * Seeks to a specific playback position. The [value] should be between 0.0 and 1000.0.
      */
     fun seekTo(value: Float)
 
@@ -196,6 +202,7 @@ data class PreviewableVideoPlayerState(
     override val isPipSupported: Boolean = false,
     override var isPipActive: Boolean = false,
     override var isPipEnabled: Boolean = false,
+    override var onPlaybackEnded: (() -> Unit)? = null,
 ) : VideoPlayerState {
     override fun play() {}
 

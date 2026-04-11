@@ -79,6 +79,7 @@ class MacVideoPlayerState : VideoPlayerState {
     override var userDragging: Boolean by mutableStateOf(false)
     override var loop: Boolean by mutableStateOf(false)
     override var isLoading: Boolean by mutableStateOf(false)
+    override var onPlaybackEnded: (() -> Unit)? = null
     override var error: VideoPlayerError? by mutableStateOf(null)
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
@@ -604,7 +605,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
                         // Single copy: CVPixelBuffer → Skia bitmap pixels (no intermediate buffer)
                         srcBuf.rewind()
-                        val dstRowBytes = pixmap.rowBytes.toInt()
+                        val dstRowBytes = pixmap.rowBytes
                         val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
                         val destBuf =
                             MacNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
@@ -699,6 +700,7 @@ class MacVideoPlayerState : VideoPlayerState {
                 isPlaying = false
             }
             pauseInBackground()
+            onPlaybackEnded?.invoke()
         }
     }
 

@@ -126,5 +126,11 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     override fun dispose() = delegate.dispose()
 
+    override var onPlaybackEnded: (() -> Unit)?
+        get() = delegate.onPlaybackEnded
+        set(value) {
+            delegate.onPlaybackEnded = value
+        }
+
     override fun clearError() = delegate.clearError()
 }

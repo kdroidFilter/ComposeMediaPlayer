@@ -102,6 +102,11 @@ fun PlayerScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    // Example: detect when playback reaches the end
+    playerState.onPlaybackEnded = {
+        println("Playback ended")
+    }
+
     // Auto-hide controls when playing
     LaunchedEffect(controlsVisible, playerState.isPlaying) {
         if (controlsVisible && playerState.isPlaying) {
