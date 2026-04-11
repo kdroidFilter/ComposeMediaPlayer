@@ -634,6 +634,13 @@ open class DefaultVideoPlayerState(
         openFromMediaItem(mediaItem, initializeplayerState)
     }
 
+    override fun openAsset(
+        fileName: String,
+        initializeplayerState: InitialPlayerState,
+    ) {
+        openUri("asset:///$fileName", initializeplayerState)
+    }
+
     private fun openFromMediaItem(
         mediaItem: MediaItem,
         initializeplayerState: InitialPlayerState,
