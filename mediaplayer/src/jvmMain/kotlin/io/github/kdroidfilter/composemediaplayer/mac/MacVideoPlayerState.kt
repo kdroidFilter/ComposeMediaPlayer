@@ -80,6 +80,7 @@ class MacVideoPlayerState : VideoPlayerState {
     override var loop: Boolean by mutableStateOf(false)
     override var isLoading: Boolean by mutableStateOf(false)
     override var onPlaybackEnded: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)? = null
     override var error: VideoPlayerError? by mutableStateOf(null)
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
@@ -700,6 +701,7 @@ class MacVideoPlayerState : VideoPlayerState {
         if (loop) {
             macLogger.d { "checkLoopingAsync() - Loop enabled, restarting video" }
             seekToAsync(0f)
+            onRestart?.invoke()
         } else {
             macLogger.d { "checkLoopingAsync() - Video completed, updating state" }
             withContext(Dispatchers.Main) {

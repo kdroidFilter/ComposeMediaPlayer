@@ -145,7 +145,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
         get() = _progress * 1000f
         set(value) {
             _progress = (value / 1000f).coerceIn(0f, 1f)
-            if (!userDragging) seekTo(value)
         }
     private var _userDragging by mutableStateOf(false)
     override var userDragging: Boolean
@@ -161,6 +160,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
         }
 
     override var onPlaybackEnded: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)? = null
 
     private var _playbackSpeed by mutableStateOf(1.0f)
     override var playbackSpeed: Float
@@ -665,6 +665,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         lastFrameHash = Int.MIN_VALUE // Reset hash for new loop
                         seekTo(0f)
                         play()
+                        onRestart?.invoke()
                     } catch (e: Exception) {
                         setError("Error during SeekMedia for loop: ${e.message}")
                     }

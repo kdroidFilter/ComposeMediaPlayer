@@ -63,6 +63,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     // Error handling
     override var onPlaybackEnded: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)? = null
 
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     override val error: VideoPlayerError? get() = _error
@@ -361,38 +362,14 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         forceUpdate: Boolean = false,
     ) {
         val now = TimeSource.Monotonic.markNow()
-        if (forceUpdate || now - lastUpdateTime >= 1.seconds) {
-            // Calculate a dynamic threshold based on video duration (10% of duration or at least 0.5 seconds)
-            val threshold =
-                if (duration > 0f && !duration.isNaN()) {
-                    maxOf(duration * 0.1f, 0.5f)
-                } else {
-                    0.5f
-                }
-
-            // Check if we're very close to the end of the video
-            val isNearEnd =
-                duration > 0f &&
-                    !duration.isNaN() &&
-                    !currentTime.isNaN() &&
-                    (duration - currentTime < threshold)
-
-            // If we're near the end, use the duration as the current time
-            val displayTime = if (isNearEnd) duration else currentTime
-
-            _positionText = if (displayTime.isNaN()) "00:00" else formatTime(displayTime)
+        if (forceUpdate || now - lastUpdateTime >= 250.milliseconds) {
+            _positionText = if (currentTime.isNaN()) "00:00" else formatTime(currentTime)
             _durationText = if (duration.isNaN()) "00:00" else formatTime(duration)
 
-            // Update the current time property
-            _currentTime = displayTime.toDouble()
+            _currentTime = currentTime.toDouble()
 
             if (!userDragging && duration > 0f && !duration.isNaN() && !_isLoading) {
-                sliderPos =
-                    if (isNearEnd) {
-                        PERCENTAGE_MULTIPLIER // Set to 100% if near end
-                    } else {
-                        (currentTime / duration) * PERCENTAGE_MULTIPLIER
-                    }
+                sliderPos = (currentTime / duration) * PERCENTAGE_MULTIPLIER
             }
             _currentDuration = duration
             lastUpdateTime = now

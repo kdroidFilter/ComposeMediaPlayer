@@ -349,14 +349,8 @@ private fun ControlsOverlay(
             // Seek bar
             Slider(
                 value = playerState.sliderPos,
-                onValueChange = {
-                    playerState.sliderPos = it
-                    playerState.userDragging = true
-                },
-                onValueChangeFinished = {
-                    playerState.userDragging = false
-                    playerState.seekTo(playerState.sliderPos)
-                },
+                onValueChange = { playerState.seekStart(it) },
+                onValueChangeFinished = { playerState.seekFinished() },
                 valueRange = 0f..1000f,
                 colors = SliderDefaults.colors(
                     thumbColor = Color.White,

@@ -83,6 +83,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override var loop: Boolean by mutableStateOf(false)
     override var isLoading: Boolean by mutableStateOf(false)
     override var onPlaybackEnded: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)? = null
     override var error: VideoPlayerError? by mutableStateOf(null)
     override var subtitlesEnabled: Boolean by mutableStateOf(false)
     override var currentSubtitleTrack: SubtitleTrack? by mutableStateOf(null)
@@ -576,6 +577,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
         if (loop) {
             seekToAsync(0f)
+            onRestart?.invoke()
         } else {
             withContext(Dispatchers.Main) { isPlaying = false }
             pauseInBackground()
