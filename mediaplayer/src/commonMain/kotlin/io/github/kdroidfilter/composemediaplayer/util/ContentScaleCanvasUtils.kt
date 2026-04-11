@@ -3,6 +3,7 @@ package io.github.kdroidfilter.composemediaplayer.util
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
@@ -98,7 +99,8 @@ internal fun DrawScope.drawScaledImage(
             image = image,
             srcOffset = IntOffset(srcX, srcY),
             srcSize = IntSize(srcW, srcH),
-            dstSize = dstSize, // draw into full destination rect
+            dstSize = dstSize,
+            blendMode = BlendMode.Src,
         )
     } else {
         /* --------------------------------------------------------------
@@ -109,6 +111,7 @@ internal fun DrawScope.drawScaledImage(
         drawImage(
             image = image,
             dstSize = dstSize,
+            blendMode = BlendMode.Src,
         )
     }
 }
