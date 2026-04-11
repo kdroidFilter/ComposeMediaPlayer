@@ -381,8 +381,9 @@ internal fun setupVideoElement(
                     "ended" to {
                         scope.launch {
                             if (playerState.loop) {
-                                playerState.seekTo(0f)
-                                playerState.play()
+                                video.safeSetCurrentTime(0.0)
+                                video.safePlay()
+                                playerState.sliderPos = 0f
                                 playerState.onRestart?.invoke()
                             } else {
                                 playerState.pause()
