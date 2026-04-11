@@ -72,6 +72,7 @@ open class DefaultVideoPlayerState(
             }
         }
 
+    override var onPlaybackEnded: (() -> Unit)? = null
     override var sliderPos: Float by mutableStateOf(0f) // value between 0 and 1000
     override var userDragging: Boolean = false
     private var _loop by mutableStateOf(false)
@@ -344,6 +345,7 @@ open class DefaultVideoPlayerState(
                 } else {
                     player.pause()
                     _isPlaying = false
+                    onPlaybackEnded?.invoke()
                 }
             }
 

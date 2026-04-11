@@ -378,7 +378,12 @@ internal fun setupVideoElement(
             events =
                 mapOf(
                     "timeupdate" to { event -> playerState.onTimeUpdateEvent(event) },
-                    "ended" to { scope.launch { playerState.pause() } },
+                    "ended" to {
+                        scope.launch {
+                            playerState.pause()
+                            playerState.onPlaybackEnded?.invoke()
+                        }
+                    },
                 ),
             loadingEvents =
                 mapOf(

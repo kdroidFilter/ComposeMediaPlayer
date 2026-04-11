@@ -225,6 +225,8 @@ open class DefaultVideoPlayerState(
     // User interaction states
     override var userDragging by mutableStateOf(false)
 
+    override var onPlaybackEnded: (() -> Unit)? = null
+
     // Loop control
     private var _loop by mutableStateOf(false)
     override var loop: Boolean
@@ -454,6 +456,7 @@ open class DefaultVideoPlayerState(
                         _isLoading = false
                         stopPositionUpdates()
                         _isPlaying = false
+                        onPlaybackEnded?.invoke()
                     }
 
                     Player.STATE_IDLE -> {

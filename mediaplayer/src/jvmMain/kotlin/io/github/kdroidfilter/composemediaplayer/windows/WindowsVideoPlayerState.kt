@@ -35,7 +35,6 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -160,6 +159,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
         set(value) {
             _loop = value
         }
+
+    override var onPlaybackEnded: (() -> Unit)? = null
 
     private var _playbackSpeed by mutableStateOf(1.0f)
     override var playbackSpeed: Float
@@ -675,6 +676,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         _progress = 1f
                     }
                     pause()
+                    onPlaybackEnded?.invoke()
                     break
                 }
             }
