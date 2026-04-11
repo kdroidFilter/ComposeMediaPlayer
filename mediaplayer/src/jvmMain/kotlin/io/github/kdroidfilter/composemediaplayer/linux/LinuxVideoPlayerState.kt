@@ -112,6 +112,12 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 if (hasMedia) getPositionSafely() else 0.0
             }
 
+    override val duration: Double
+        get() =
+            runBlocking {
+                if (hasMedia) getDurationSafely() else 0.0
+            }
+
     private val _aspectRatio = mutableStateOf(16f / 9f)
     override val aspectRatio: Float get() = _aspectRatio.value
 

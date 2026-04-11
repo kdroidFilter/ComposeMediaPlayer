@@ -169,6 +169,7 @@ open class DefaultVideoPlayerState(
     private var _currentTime: Double = 0.0
     private var _duration: Double = 0.0
     override val currentTime: Double get() = _currentTime
+    override val duration: Double get() = _duration
 
     // Observable video aspect ratio (default to 16:9)
     private var _videoAspectRatio by mutableStateOf(16.0 / 9.0)
