@@ -14,11 +14,11 @@
 ### Supported by
 [![JetBrains logo.](https://resources.jetbrains.com/storage/products/company/brand/logos/jetbrains.svg)](https://jb.gg/OpenSource)
 
-**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations. The library leverages:
+**Compose Media Player** is a video player library designed for Compose Multiplatform, supporting multiple platforms including Android, macOS, Windows, and Linux. It is the first fully functional multiplatform video player for Compose for Desktop that requires no additional software installations. All desktop platforms communicate with their native backends through **pure JNI** — no JNA, no GStreamer Java bindings, no external runtime dependencies. The library leverages:
 
-- **GStreamer** for Linux
-- **Media Foundation** for Windows
-- **AVPlayer** for macOS and iOS
+- **GStreamer** (via JNI) for Linux
+- **Media Foundation** (via JNI) for Windows
+- **AVPlayer** (via JNI) for macOS and iOS
 - **Media3** for Android
 - **HTML5 Player** for WASMJS
 
