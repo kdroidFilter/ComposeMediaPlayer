@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
+import kotlin.concurrent.AtomicInt
 import platform.Foundation.NSURLCache
 
 private val cacheLogger = TaggedLogger("iOSVideoCache")
@@ -18,13 +19,12 @@ private val cacheLogger = TaggedLogger("iOSVideoCache")
  * that allow caching.
  */
 internal object IosVideoCache {
-    private var configured = false
+    private val configuredFlag = AtomicInt(0)
     private var previousMemoryCapacity: ULong = 0u
     private var previousDiskCapacity: ULong = 0u
 
-    @Synchronized
     fun configure(maxCacheSizeBytes: Long) {
-        if (configured) return
+        if (!configuredFlag.compareAndSet(0, 1)) return
 
         val sharedCache = NSURLCache.sharedURLCache
         previousMemoryCapacity = sharedCache.memoryCapacity
@@ -34,26 +34,22 @@ internal object IosVideoCache {
         sharedCache.memoryCapacity = maxOf(sharedCache.memoryCapacity, (10L * 1024 * 1024).toULong())
         sharedCache.diskCapacity = maxOf(sharedCache.diskCapacity, maxCacheSizeBytes.toULong())
 
-        configured = true
         cacheLogger.d {
             "NSURLCache configured: disk=${sharedCache.diskCapacity} bytes, memory=${sharedCache.memoryCapacity} bytes"
         }
     }
 
-    @Synchronized
     fun clear() {
         NSURLCache.sharedURLCache.removeAllCachedResponses()
         cacheLogger.d { "NSURLCache cleared" }
     }
 
-    @Synchronized
     fun release() {
-        if (!configured) return
+        if (!configuredFlag.compareAndSet(1, 0)) return
 
         val sharedCache = NSURLCache.sharedURLCache
         sharedCache.memoryCapacity = previousMemoryCapacity
         sharedCache.diskCapacity = previousDiskCapacity
-        configured = false
         cacheLogger.d { "NSURLCache restored to previous configuration" }
     }
 }
