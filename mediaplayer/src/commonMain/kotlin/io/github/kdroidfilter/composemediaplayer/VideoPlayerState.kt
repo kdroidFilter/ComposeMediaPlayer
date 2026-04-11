@@ -174,7 +174,7 @@ interface VideoPlayerState {
     fun openAsset(
         fileName: String,
         initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY,
-    ) = throw UnsupportedOperationException("openAsset is not supported on this platform")
+    ): Unit = throw UnsupportedOperationException("openAsset is not supported on this platform")
 
     // Error handling
     val error: VideoPlayerError?
