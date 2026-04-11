@@ -617,8 +617,8 @@ internal fun VideoPlayerEffects(
         }
     }
 
-    // Handle seeking
-    LaunchedEffect(playerState.sliderPos) {
+    // Handle seeking — react to both sliderPos changes and drag end (userDragging → false)
+    LaunchedEffect(playerState.sliderPos, playerState.userDragging) {
         if (playerState is DefaultVideoPlayerState && !playerState.userDragging && playerState.hasMedia) {
             playerState.seekJob?.cancel()
 
