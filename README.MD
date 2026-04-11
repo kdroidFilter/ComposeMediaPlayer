@@ -290,7 +290,33 @@ println("Volume set to 50%")
 
 ```kotlin
 playerState.loop = true // Enable loop playback
-println("Loop playback enabled")
+```
+
+You can listen for loop restarts via the `onRestart` callback:
+
+```kotlin
+playerState.loop = true
+playerState.onRestart = {
+    println("Video restarted from the beginning")
+}
+```
+
+- **Restart**:
+
+Restart playback from the beginning. Works reliably from any state, including when the video has ended:
+
+```kotlin
+playerState.restart()
+```
+
+- **Playback End Callback**:
+
+Get notified when playback reaches the end (only called when `loop` is `false`):
+
+```kotlin
+playerState.onPlaybackEnded = {
+    println("Video finished")
+}
 ```
 
 - **Playback Speed**:
@@ -304,23 +330,25 @@ You can adjust the playback speed between 0.5x (slower) and 2.0x (faster). The d
 
 ### Progress Indicators
 
-To display and control playback progress:
+To display and control playback progress, use `seekStart` and `seekFinished` for slider interactions:
 
 ```kotlin
 Slider(
     value = playerState.sliderPos,
-    onValueChange = {
-        playerState.sliderPos = it
-        playerState.userDragging = true
-        println("Position changed: $it")
-    },
-    onValueChangeFinished = {
-        playerState.userDragging = false
-        playerState.seekTo(playerState.sliderPos)
-        println("Position finalized: ${playerState.sliderPos}")
-    },
+    onValueChange = { playerState.seekStart(it) },
+    onValueChangeFinished = { playerState.seekFinished() },
     valueRange = 0f..1000f
 )
+```
+
+- `seekStart(value)` updates the slider position visually without performing the actual seek, allowing smooth dragging.
+- `seekFinished()` commits the seek to the player and ends the drag interaction.
+
+For programmatic seeking (e.g. skip forward/backward), use `seekTo` directly:
+
+```kotlin
+// Seek to the middle of the video
+playerState.seekTo(500f)
 ```
 
 ### Display Left and Right Volume Levels

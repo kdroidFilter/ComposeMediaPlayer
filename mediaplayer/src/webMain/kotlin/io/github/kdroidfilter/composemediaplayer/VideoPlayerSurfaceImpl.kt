@@ -380,8 +380,14 @@ internal fun setupVideoElement(
                     "timeupdate" to { event -> playerState.onTimeUpdateEvent(event) },
                     "ended" to {
                         scope.launch {
-                            playerState.pause()
-                            playerState.onPlaybackEnded?.invoke()
+                            if (playerState.loop) {
+                                playerState.seekTo(0f)
+                                playerState.play()
+                                playerState.onRestart?.invoke()
+                            } else {
+                                playerState.pause()
+                                playerState.onPlaybackEnded?.invoke()
+                            }
                         }
                     },
                 ),
@@ -579,12 +585,7 @@ internal fun VideoPlayerEffects(
         }
     }
 
-    // Handle loop property
-    LaunchedEffect(playerState.loop) {
-        videoElement?.let { video ->
-            video.loop = playerState.loop
-        }
-    }
+    // Loop is handled manually via the "ended" event to support the onRestart callback
 
     // Store state before video element recreation
     LaunchedEffect(useCors) {

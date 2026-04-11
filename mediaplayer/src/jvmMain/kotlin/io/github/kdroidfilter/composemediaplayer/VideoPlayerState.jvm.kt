@@ -133,5 +133,13 @@ open class DefaultVideoPlayerState : VideoPlayerState {
             delegate.onPlaybackEnded = value
         }
 
+    override var onRestart: (() -> Unit)?
+        get() = delegate.onRestart
+        set(value) {
+            delegate.onRestart = value
+        }
+
+    override fun restart() = delegate.restart()
+
     override fun clearError() = delegate.clearError()
 }

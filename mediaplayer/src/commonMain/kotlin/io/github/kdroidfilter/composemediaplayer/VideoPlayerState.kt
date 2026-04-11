@@ -58,6 +58,12 @@ interface VideoPlayerState {
      */
     var onPlaybackEnded: (() -> Unit)?
 
+    /**
+     * Callback invoked when playback restarts from the beginning due to looping.
+     * Only called when [loop] is true. May be invoked from a background thread.
+     */
+    var onRestart: (() -> Unit)?
+
     companion object {
         const val MIN_PLAYBACK_SPEED = 0.25f
         const val MAX_PLAYBACK_SPEED = 2.0f
@@ -110,6 +116,34 @@ interface VideoPlayerState {
      * Seeks to a specific playback position. The [value] should be between 0.0 and 1000.0.
      */
     fun seekTo(value: Float)
+
+    /**
+     * Begins a user-driven seek interaction (e.g. slider drag).
+     * Updates the visual slider position without performing the actual seek on the player.
+     * Must be followed by [seekFinished] to commit the seek.
+     */
+    fun seekStart(value: Float) {
+        userDragging = true
+        sliderPos = value
+    }
+
+    /**
+     * Commits the seek after a user-driven seek interaction.
+     * Performs the actual seek on the player and ends the dragging state.
+     */
+    fun seekFinished() {
+        seekTo(sliderPos)
+        userDragging = false
+    }
+
+    /**
+     * Restarts playback from the beginning. Works reliably from any state,
+     * including when playback has ended.
+     */
+    fun restart() {
+        seekTo(0f)
+        play()
+    }
 
     fun toggleFullscreen()
 
@@ -236,6 +270,7 @@ data class PreviewableVideoPlayerState(
     override var isPipActive: Boolean = false,
     override var isPipEnabled: Boolean = false,
     override var onPlaybackEnded: (() -> Unit)? = null,
+    override var onRestart: (() -> Unit)? = null,
 ) : VideoPlayerState {
     override fun play() {}
 

@@ -218,15 +218,13 @@ open class DefaultVideoPlayerState(
         get() = _sliderPos
         set(value) {
             _sliderPos = value.coerceIn(0f, 1000f)
-            if (!userDragging) {
-                seekTo(value)
-            }
         }
 
     // User interaction states
     override var userDragging by mutableStateOf(false)
 
     override var onPlaybackEnded: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)? = null
 
     // Loop control
     private var _loop by mutableStateOf(false)
@@ -478,6 +476,16 @@ open class DefaultVideoPlayerState(
                 }
             }
 
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int,
+            ) {
+                if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION && _loop) {
+                    onRestart?.invoke()
+                }
+            }
+
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 if (videoSize.width > 0 && videoSize.height > 0) {
                     _aspectRatio = videoSize.width.toFloat() / videoSize.height.toFloat()
@@ -673,10 +681,26 @@ open class DefaultVideoPlayerState(
                 exoPlayer?.let { player ->
                     if (player.playbackState == Player.STATE_IDLE) {
                         player.prepare()
+                    } else if (player.playbackState == Player.STATE_ENDED) {
+                        player.seekTo(0)
                     }
                     player.play()
                 }
                 _hasMedia = true
+            }
+        }
+    }
+
+    override fun restart() {
+        synchronized(playerInitializationLock) {
+            if (!isPlayerReleased) {
+                exoPlayer?.let { player ->
+                    if (player.playbackState == Player.STATE_IDLE) {
+                        player.prepare()
+                    }
+                    player.seekTo(0)
+                    player.play()
+                }
             }
         }
     }

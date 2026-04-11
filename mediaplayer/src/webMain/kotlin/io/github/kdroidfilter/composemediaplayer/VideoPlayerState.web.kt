@@ -63,6 +63,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     // Error handling
     override var onPlaybackEnded: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)? = null
 
     private var _error by mutableStateOf<VideoPlayerError?>(null)
     override val error: VideoPlayerError? get() = _error

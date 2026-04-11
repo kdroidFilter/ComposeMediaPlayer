@@ -73,6 +73,7 @@ open class DefaultVideoPlayerState(
         }
 
     override var onPlaybackEnded: (() -> Unit)? = null
+    override var onRestart: (() -> Unit)? = null
     override var sliderPos: Float by mutableStateOf(0f) // value between 0 and 1000
     override var userDragging: Boolean = false
     private var _loop by mutableStateOf(false)
@@ -340,6 +341,7 @@ open class DefaultVideoPlayerState(
                         if (finished) {
                             dispatch_async(dispatch_get_main_queue()) {
                                 player.playImmediatelyAtRate(_playbackSpeed)
+                                onRestart?.invoke()
                             }
                         }
                     }
@@ -605,14 +607,54 @@ open class DefaultVideoPlayerState(
 
     override fun play() {
         iosLogger.d { "play called" }
-        if (player == null) {
+        val currentPlayer = player
+        if (currentPlayer == null) {
             iosLogger.d { "play: player is null" }
             return
         }
         // Configure audio session
         configureAudioSession()
-        player?.playImmediatelyAtRate(_playbackSpeed)
+        // If the player has reached the end, seek to the beginning first
+        val currentItem = currentPlayer.currentItem
+        if (currentItem != null) {
+            val currentTime = CMTimeGetSeconds(currentItem.currentTime())
+            val duration = CMTimeGetSeconds(currentItem.duration)
+            if (duration > 0 && currentTime >= duration) {
+                val zeroTime = CMTimeMake(0, 1)
+                currentPlayer.seekToTime(
+                    time = CMTimeMakeWithSeconds(0.0, NSEC_PER_SEC.toInt()),
+                    toleranceBefore = zeroTime,
+                    toleranceAfter = zeroTime,
+                ) { finished ->
+                    if (finished) {
+                        dispatch_async(dispatch_get_main_queue()) {
+                            currentPlayer.playImmediatelyAtRate(_playbackSpeed)
+                        }
+                    }
+                }
+                return
+            }
+        }
+        currentPlayer.playImmediatelyAtRate(_playbackSpeed)
         // KVO will update isPlaying
+    }
+
+    override fun restart() {
+        iosLogger.d { "restart called" }
+        val currentPlayer = player ?: return
+        configureAudioSession()
+        val zeroTime = CMTimeMake(0, 1)
+        currentPlayer.seekToTime(
+            time = CMTimeMakeWithSeconds(0.0, NSEC_PER_SEC.toInt()),
+            toleranceBefore = zeroTime,
+            toleranceAfter = zeroTime,
+        ) { finished ->
+            if (finished) {
+                dispatch_async(dispatch_get_main_queue()) {
+                    currentPlayer.playImmediatelyAtRate(_playbackSpeed)
+                }
+            }
+        }
     }
 
     override fun pause() {
