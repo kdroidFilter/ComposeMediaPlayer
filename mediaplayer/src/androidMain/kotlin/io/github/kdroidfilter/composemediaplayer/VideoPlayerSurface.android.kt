@@ -103,8 +103,36 @@ private fun VideoPlayerSurfaceInternal(
         }
     }
 
-    DisposableEffect(playerState) {
+    // Pause video when app goes to background, resume when coming back
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(playerState, lifecycleOwner) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (playerState is DefaultVideoPlayerState && playerState.pauseOnBackground) {
+                    when (event) {
+                        Lifecycle.Event.ON_STOP -> {
+                            // Skip if PiP is active — video should keep playing
+                            if (!playerState.isPipActive) {
+                                playerState.wasPlayingBeforeBackground = playerState.isPlaying
+                                if (playerState.isPlaying) {
+                                    playerState.pause()
+                                }
+                            }
+                        }
+                        Lifecycle.Event.ON_START -> {
+                            if (playerState.wasPlayingBeforeBackground && !playerState.isPipActive) {
+                                playerState.play()
+                                playerState.wasPlayingBeforeBackground = false
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             try {
                 // Detach the view from the player
                 if (playerState is DefaultVideoPlayerState) {
