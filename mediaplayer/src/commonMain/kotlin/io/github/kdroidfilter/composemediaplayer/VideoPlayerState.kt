@@ -150,7 +150,24 @@ interface VideoPlayerState {
     // Cleanup
 
     /**
-     * Releases resources used by the video player and disposes of the state.
+     * Releases all resources used by the video player (native players, coroutines, observers, etc.).
+     *
+     * **You do not need to call this manually** when using [rememberVideoPlayerState], which is the
+     * recommended way to create a player state in a composable. It automatically calls [dispose]
+     * via a [DisposableEffect] when the composable leaves the composition.
+     *
+     * Only call this directly if you create the state manually via [createVideoPlayerState] outside
+     * of a composable lifecycle:
+     * ```
+     * val state = createVideoPlayerState()
+     * try {
+     *     // use the player...
+     * } finally {
+     *     state.dispose()
+     * }
+     * ```
+     *
+     * After calling [dispose], the state should not be reused.
      */
     fun dispose()
 }
@@ -162,12 +179,22 @@ interface VideoPlayerState {
 expect fun createVideoPlayerState(audioMode: AudioMode = AudioMode()): VideoPlayerState
 
 /**
- * Creates and manages an instance of `VideoPlayerState` within a composable function, ensuring
- * proper disposal of the player state when the composable leaves the composition. This function
- * is used to remember the video player state throughout the composition lifecycle.
+ * Creates and remembers a [VideoPlayerState], automatically releasing all player resources
+ * when the composable leaves the composition.
  *
- * @return The remembered instance of `VideoPlayerState`, which provides functionalities for
- *         controlling and managing video playback, such as play, pause, stop, and seek.
+ * This is the **recommended** way to obtain a [VideoPlayerState]. You do not need to call
+ * [VideoPlayerState.dispose] yourself — cleanup is handled via [DisposableEffect].
+ *
+ * ```
+ * @Composable
+ * fun MyPlayer() {
+ *     val playerState = rememberVideoPlayerState()
+ *     // use playerState — resources are freed automatically on removal
+ * }
+ * ```
+ *
+ * @param audioMode The audio mode configuration for the player.
+ * @return The remembered instance of [VideoPlayerState].
  */
 @Composable
 fun rememberVideoPlayerState(audioMode: AudioMode = AudioMode()): VideoPlayerState {
