@@ -41,6 +41,7 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -73,8 +74,17 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerScreen(modifier: Modifier = Modifier) {
-    val playerState = rememberVideoPlayerState()
+fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = rememberVideoPlayerState()) {
+    // Pause when leaving the screen, resume when coming back
+    DisposableEffect(playerState) {
+        val wasPlaying = playerState.isPlaying
+        onDispose {
+            if (playerState.isPlaying) {
+                playerState.pause()
+            }
+        }
+    }
+
     val scope = rememberCoroutineScope()
 
     var videoUrl by remember { mutableStateOf(SAMPLE_VIDEOS.first().second) }
