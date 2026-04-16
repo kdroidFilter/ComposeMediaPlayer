@@ -16,7 +16,12 @@
 #include <evr.h>
 #include <wrl/client.h>
 #include <intrin.h>
-#include <immintrin.h>
+#if defined(_M_IX86) || defined(_M_X64)
+  #include <immintrin.h>
+  #define NVP_HAS_AVX2_INTRINSICS 1
+#else
+  #define NVP_HAS_AVX2_INTRINSICS 0
+#endif
 
 using Microsoft::WRL::ComPtr;
 using namespace VideoPlayerUtils;
@@ -49,9 +54,11 @@ VideoPlayerInstance::~VideoPlayerInstance() {
 }
 
 // ---------------------------------------------------------------------------
-// SIMD alpha fix (MFVideoFormat_RGB32 leaves the alpha byte undefined).
-// Runtime-dispatched: AVX2 when available, otherwise scalar.
+// Alpha fix (MFVideoFormat_RGB32 leaves the alpha byte undefined).
+// On x86/x64: runtime-dispatched AVX2 with scalar fallback.
+// On ARM64 (and anywhere AVX2 intrinsics aren't available): scalar only.
 // ---------------------------------------------------------------------------
+#if NVP_HAS_AVX2_INTRINSICS
 static bool DetectAvx2() {
     int info[4] = {};
     __cpuid(info, 0);
@@ -59,12 +66,14 @@ static bool DetectAvx2() {
     __cpuidex(info, 7, 0);
     return (info[1] & (1 << 5)) != 0; // EBX bit 5 = AVX2
 }
+#endif
 
 static void ForceAlphaOpaque(BYTE* data, size_t pixelCount) {
-    static const bool kHasAvx2 = DetectAvx2();
     uint32_t* px = reinterpret_cast<uint32_t*>(data);
-
     size_t i = 0;
+
+#if NVP_HAS_AVX2_INTRINSICS
+    static const bool kHasAvx2 = DetectAvx2();
     if (kHasAvx2) {
         const __m256i mask = _mm256_set1_epi32(static_cast<int>(0xFF000000u));
         for (; i + 8 <= pixelCount; i += 8) {
@@ -73,6 +82,8 @@ static void ForceAlphaOpaque(BYTE* data, size_t pixelCount) {
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(px + i), v);
         }
     }
+#endif
+
     for (; i < pixelCount; ++i) px[i] |= 0xFF000000u;
 }
 
