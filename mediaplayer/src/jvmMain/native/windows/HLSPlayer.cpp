@@ -181,11 +181,8 @@ void HLSPlayer::Close() {
     }
     ReleaseTextures();
 
-    if (m_pFrameBuffer) {
-        delete[] m_pFrameBuffer;
-        m_pFrameBuffer = nullptr;
-        m_frameBufferSize = 0;
-    }
+    m_frameBuffer.clear();
+    m_frameBuffer.shrink_to_fit();
 
     m_pContext.Reset();
     m_pDevice.Reset();
@@ -232,12 +229,15 @@ HRESULT HLSPlayer::EnsureTextures(UINT32 w, UINT32 h) {
         return hr;
     }
 
-    const DWORD needed = w * h * 4;
-    if (m_frameBufferSize < needed) {
-        delete[] m_pFrameBuffer;
-        m_pFrameBuffer    = new (std::nothrow) BYTE[needed];
-        m_frameBufferSize = m_pFrameBuffer ? needed : 0;
-        if (!m_pFrameBuffer) return E_OUTOFMEMORY;
+    const size_t needed = static_cast<size_t>(w) * h * 4;
+    if (m_frameBuffer.size() < needed) {
+        try {
+            m_frameBuffer.resize(needed);
+        } catch (const std::bad_alloc&) {
+            m_frameBuffer.clear();
+            m_frameBuffer.shrink_to_fit();
+            return E_OUTOFMEMORY;
+        }
     }
     return S_OK;
 }
@@ -291,10 +291,10 @@ HRESULT HLSPlayer::ReadFrame(BYTE** ppData, DWORD* pDataSize) {
 
     const DWORD dstRowBytes = w * 4;
     if (static_cast<UINT>(mapped.RowPitch) == dstRowBytes) {
-        memcpy(m_pFrameBuffer, mapped.pData, dstRowBytes * h);
+        memcpy(m_frameBuffer.data(), mapped.pData, dstRowBytes * h);
     } else {
         const BYTE* pSrc = static_cast<const BYTE*>(mapped.pData);
-        BYTE* pDst = m_pFrameBuffer;
+        BYTE* pDst = m_frameBuffer.data();
         for (UINT32 y = 0; y < h; ++y) {
             memcpy(pDst, pSrc, dstRowBytes);
             pSrc += mapped.RowPitch;
@@ -304,7 +304,7 @@ HRESULT HLSPlayer::ReadFrame(BYTE** ppData, DWORD* pDataSize) {
     m_pContext->Unmap(m_pStagingTexture.Get(), 0);
 
     m_lastPts  = pts;
-    *ppData    = m_pFrameBuffer;
+    *ppData    = m_frameBuffer.data();
     *pDataSize = w * h * 4;
     return S_OK;
 }

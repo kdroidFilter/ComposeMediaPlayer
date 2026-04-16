@@ -8,6 +8,7 @@
 #include <wrl/client.h>
 #include <atomic>
 #include <cmath>
+#include <vector>
 
 struct VideoPlayerInstance;
 
@@ -60,8 +61,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D>    m_pRenderTarget;
     Microsoft::WRL::ComPtr<ID3D11Texture2D>    m_pStagingTexture;
 
-    BYTE* m_pFrameBuffer    = nullptr;
-    DWORD m_frameBufferSize = 0;
+    std::vector<BYTE> m_frameBuffer;
 
     UINT32 m_nativeWidth  = 0;
     UINT32 m_nativeHeight = 0;

@@ -14,6 +14,11 @@
 // Native API version — bump when the exported API changes.
 #define NATIVE_VIDEO_PLAYER_VERSION 2
 
+// Playback speed bounds — kept in sync with
+// io.github.kdroidfilter.composemediaplayer.VideoPlayerState.{MIN,MAX}_PLAYBACK_SPEED.
+static const float NVP_MIN_PLAYBACK_SPEED = 0.5f;
+static const float NVP_MAX_PLAYBACK_SPEED = 2.0f;
+
 typedef struct VideoMetadata {
     wchar_t title[256];
     LONGLONG duration;

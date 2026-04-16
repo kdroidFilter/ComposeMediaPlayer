@@ -150,15 +150,14 @@ static void CopyPlane(const BYTE* src, LONG srcPitch,
 // HLS fallback for network URLs
 // ---------------------------------------------------------------------------
 static HRESULT OpenMediaHLS(VideoPlayerInstance* pInstance, const wchar_t* url, BOOL startPlayback) {
-    auto* hls = new (std::nothrow) HLSPlayer();
+    // HLSPlayer starts at refcount 1 — Attach takes ownership without AddRef.
+    ComPtr<HLSPlayer> hls;
+    hls.Attach(new (std::nothrow) HLSPlayer());
     if (!hls) return E_OUTOFMEMORY;
 
     HRESULT hr = hls->Initialize(GetD3DDevice(), GetDXGIDeviceManager());
     if (SUCCEEDED(hr)) hr = hls->Open(url);
-    if (FAILED(hr)) {
-        hls->Release(); // refcount 1 → 0 : dtor calls Close()
-        return hr;
-    }
+    if (FAILED(hr)) return hr; // ComPtr releases on scope exit.
 
     pInstance->pHLSPlayer       = hls;
     pInstance->bIsNetworkSource = true;
@@ -259,8 +258,11 @@ static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
             const double frameTimeMs = inst->llCachedTimestamp / 10000.0;
             const double refMs = ComputeReferenceMs(inst);
             const ULONGLONG nowMs = GetCurrentTimeMs();
-            const ULONGLONG heldMs = (inst->llCachedInsertedAtMs != 0)
-                ? (nowMs - inst->llCachedInsertedAtMs) : 0;
+            const ULONGLONG insertedAt = inst->llCachedInsertedAtMs;
+            // Guard against clock skew / reinit: nowMs < insertedAt would
+            // wrap to a huge ULONGLONG and force-deliver a stale frame.
+            const ULONGLONG heldMs = (insertedAt != 0 && nowMs >= insertedAt)
+                ? (nowMs - insertedAt) : 0;
             // Deliver if due, OR if the sample has been sitting too long —
             // avoids an indefinite freeze when the audio clock stalls or
             // drifts (which would otherwise leave refMs permanently behind).
@@ -429,7 +431,7 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
 
     hr = MFCreateSourceReaderFromURL(url, attrs.Get(), pInstance->pSourceReader.ReleaseAndGetAddressOf());
     if (FAILED(hr)) {
-        if (isNetwork && hr == static_cast<HRESULT>(0xC00D36C4))
+        if (isNetwork && hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE)
             return OpenMediaHLS(pInstance, url, startPlayback);
         return hr;
     }
@@ -469,6 +471,11 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
 
         UINT32 nativeCh = 0, nativeSr = 0;
         QueryNativeAudioParams(pInstance->pSourceReader.Get(), &nativeCh, &nativeSr);
+        // ConfigureAudioType normalizes 0/0 to 2/48000 internally, so do the
+        // same here to avoid issuing a redundant fallback attempt with the
+        // exact same parameters.
+        if (nativeCh == 0)   nativeCh = 2;
+        if (nativeSr == 0)   nativeSr = 48000;
 
         auto tryAudioFormat = [&](UINT32 ch, UINT32 sr) -> bool {
             ComPtr<IMFMediaType> wanted;
@@ -493,6 +500,8 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
                 CoTaskMemFree(pWfx);
                 return false;
             }
+            // Transfer ownership of pWfx to the instance — InitWASAPI does
+            // not copy it.
             if (pInstance->pSourceAudioFormat) CoTaskMemFree(pInstance->pSourceAudioFormat);
             pInstance->pSourceAudioFormat = pWfx;
             pInstance->bHasAudio = true;
@@ -500,6 +509,8 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
         };
 
         if (!tryAudioFormat(nativeCh, nativeSr)) {
+            // Only retry with the canonical fallback if the first attempt
+            // actually differed from it.
             if (nativeCh != 2 || nativeSr != 48000) tryAudioFormat(2, 48000);
         }
 
@@ -810,7 +821,13 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
     // separate fast-forward is needed here.
 
     // 5. Atomic audio-side seek: Stop + SetCurrentPosition + Reset under one lock.
+    // Wake any audio-thread wait so it notices bSeekInProgress and bails out
+    // of its feed loop promptly — otherwise it may hold csAudioFeed for up to
+    // 10 ms (hAudioSamplesReadyEvent wait budget) while we're stuck waiting
+    // for the lock below.
     if (pInstance->bHasAudio) {
+        if (pInstance->hAudioSamplesReadyEvent)
+            SetEvent(pInstance->hAudioSamplesReadyEvent.Get());
         ScopedLock lock(pInstance->csAudioFeed);
         if (pInstance->pAudioClient) pInstance->pAudioClient->Stop();
         if (pInstance->pSourceReaderAudio)
@@ -869,13 +886,21 @@ NATIVEVIDEOPLAYER_API HRESULT GetMediaDuration(const VideoPlayerInstance* pInsta
     ComPtr<IMFMediaSource> source;
     HRESULT hr = pInstance->pSourceReader->GetServiceForStream(
         MF_SOURCE_READER_MEDIASOURCE, GUID_NULL, IID_PPV_ARGS(source.GetAddressOf()));
-    if (SUCCEEDED(hr)) {
-        ComPtr<IMFPresentationDescriptor> pd;
-        if (SUCCEEDED(source->CreatePresentationDescriptor(pd.GetAddressOf()))) {
-            if (FAILED(pd->GetUINT64(MF_PD_DURATION, reinterpret_cast<UINT64*>(pDuration))))
-                *pDuration = 0;
-        }
+    if (FAILED(hr)) return hr;
+
+    ComPtr<IMFPresentationDescriptor> pd;
+    hr = source->CreatePresentationDescriptor(pd.GetAddressOf());
+    if (FAILED(hr)) return hr;
+
+    UINT64 dur = 0;
+    hr = pd->GetUINT64(MF_PD_DURATION, &dur);
+    if (FAILED(hr)) {
+        // Live / duration-less source — distinguish from a hard error by
+        // returning S_FALSE with pDuration=0 so callers can gate HLS-style
+        // behavior without treating it as a failure.
+        return S_FALSE;
     }
+    *pDuration = static_cast<LONGLONG>(dur);
     return S_OK;
 }
 
@@ -898,10 +923,13 @@ NATIVEVIDEOPLAYER_API HRESULT SetPlaybackState(VideoPlayerInstance* pInstance, B
             pInstance->llPauseStart.store(0, std::memory_order_relaxed);
             pInstance->llPlaybackStartTime.store(0, std::memory_order_relaxed);
 
+            // Stop the audio thread BEFORE the presentation clock: otherwise
+            // the audio thread keeps calling GetCurrentPadding on an audio
+            // client whose clock was just stopped, yielding spurious errors.
+            if (pInstance->bAudioThreadRunning.load()) StopAudioThread(pInstance);
+
             if (pInstance->bUseClockSync && pInstance->pPresentationClock)
                 pInstance->pPresentationClock->Stop();
-
-            if (pInstance->bAudioThreadRunning.load()) StopAudioThread(pInstance);
 
             pInstance->bHasInitialFrame = false;
             pInstance->pCachedSample.Reset();
@@ -963,8 +991,7 @@ NATIVEVIDEOPLAYER_API void CloseMedia(VideoPlayerInstance* pInstance) {
     if (!pInstance) return;
 
     if (pInstance->pHLSPlayer) {
-        pInstance->pHLSPlayer->Release(); // dtor handles Close()
-        pInstance->pHLSPlayer = nullptr;
+        pInstance->pHLSPlayer.Reset(); // dtor handles Close()
     }
 
     StopAudioThread(pInstance);
@@ -1028,7 +1055,7 @@ NATIVEVIDEOPLAYER_API HRESULT SetPlaybackSpeed(VideoPlayerInstance* pInstance, f
     if (!pInstance) return OP_E_NOT_INITIALIZED;
     if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->SetPlaybackSpeed(speed);
 
-    speed = std::clamp(speed, 0.5f, 2.0f);
+    speed = std::clamp(speed, NVP_MIN_PLAYBACK_SPEED, NVP_MAX_PLAYBACK_SPEED);
 
     if (pInstance->bUseClockSync
         && pInstance->llPlaybackStartTime.load(std::memory_order_relaxed) != 0) {

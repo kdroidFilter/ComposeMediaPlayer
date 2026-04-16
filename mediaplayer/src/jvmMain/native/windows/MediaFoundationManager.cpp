@@ -6,6 +6,7 @@
 #include <mfreadwrite.h>
 #include <dxgi.h>
 #include <atomic>
+#include <cstdio>
 #include <wrl/client.h>
 
 using Microsoft::WRL::ComPtr;
@@ -91,6 +92,17 @@ HRESULT Shutdown() {
     // worker threads MUST be stopped before the DLL is unloaded, or Windows
     // crashes inside KERNELBASE on shutdown (exit 0x87A).
     if (!g_initialized.load()) return S_OK;
+
+    const int live = g_instanceCount.load();
+    if (live > 0) {
+        // Misuse signal: a caller invoked ShutdownMediaFoundation() while
+        // players are still alive. The shutdown proceeds anyway (JVM-exit
+        // semantics) but any surviving instance will crash on its next call.
+        fprintf(stderr,
+                "[ComposeMediaPlayer] ShutdownMediaFoundation called with %d "
+                "live instance(s). Dispose all players before shutdown.\n",
+                live);
+    }
 
     g_enumerator.Reset();
     g_dxgiManager.Reset();

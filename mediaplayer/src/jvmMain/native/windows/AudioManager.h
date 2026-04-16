@@ -11,7 +11,10 @@ struct VideoPlayerInstance;
 
 namespace AudioManager {
 
-HRESULT InitWASAPI(VideoPlayerInstance* pInstance, const WAVEFORMATEX* pSourceFormat = nullptr);
+// InitWASAPI does NOT take ownership of pSourceFormat. The caller is
+// responsible for freeing it (or transferring ownership to the instance
+// via VideoPlayerInstance::pSourceAudioFormat) after the call returns.
+HRESULT InitWASAPI(VideoPlayerInstance* pInstance, const WAVEFORMATEX* pSourceFormat);
 HRESULT PreFillAudioBuffer(VideoPlayerInstance* pInstance);
 HRESULT StartAudioThread(VideoPlayerInstance* pInstance);
 void    StopAudioThread(VideoPlayerInstance* pInstance);

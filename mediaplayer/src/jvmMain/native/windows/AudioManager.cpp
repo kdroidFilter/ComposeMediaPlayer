@@ -95,7 +95,8 @@ int FeedOneSample(VideoPlayerInstance* inst, IMFSourceReader* audioReader,
 {
     UINT32 framesPadding = 0;
     if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding))) return -1;
-    UINT32 framesFree = engineBufferFrames - framesPadding;
+    UINT32 framesFree = (framesPadding < engineBufferFrames)
+        ? engineBufferFrames - framesPadding : 0;
     if (framesFree == 0) return 0;
 
     const UINT32 sampleRate = inst->pSourceAudioFormat
@@ -149,9 +150,13 @@ int FeedOneSample(VideoPlayerInstance* inst, IMFSourceReader* audioReader,
 
         UINT32 wantFrames = (std::min)(totalOutputFrames - outputDone, framesFree);
         if (wantFrames == 0) {
+            // Render buffer full. Wait on hAudioSamplesReadyEvent for the
+            // driver to free room — short timeout keeps us responsive to
+            // seek/shutdown signals.
             WaitForSingleObject(inst->hAudioSamplesReadyEvent.Get(), 5);
             if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding))) break;
-            framesFree = engineBufferFrames - framesPadding;
+            framesFree = (framesPadding < engineBufferFrames)
+                ? engineBufferFrames - framesPadding : 0;
             continue;
         }
 
@@ -206,7 +211,8 @@ int FeedOneSample(VideoPlayerInstance* inst, IMFSourceReader* audioReader,
         outputDone += wantFrames;
 
         if (FAILED(inst->pAudioClient->GetCurrentPadding(&framesPadding))) break;
-        framesFree = engineBufferFrames - framesPadding;
+        framesFree = (framesPadding < engineBufferFrames)
+            ? engineBufferFrames - framesPadding : 0;
     }
 
     if (needsResample) {
@@ -276,7 +282,7 @@ DWORD WINAPI AudioThreadProc(LPVOID lpParam) {
 } // namespace
 
 HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt) {
-    if (!inst) return E_INVALIDARG;
+    if (!inst || !srcFmt) return E_INVALIDARG;
     if (inst->pAudioClient && inst->pRenderClient) {
         inst->bAudioInitialized = true;
         return S_OK;
@@ -285,74 +291,54 @@ HRESULT InitWASAPI(VideoPlayerInstance* inst, const WAVEFORMATEX* srcFmt) {
     IMMDeviceEnumerator* enumerator = MediaFoundation::GetDeviceEnumerator();
     if (!enumerator) return E_FAIL;
 
+    // RAII cleanup: released by name on the single success return.
+    struct CleanupGuard {
+        VideoPlayerInstance* inst;
+        bool armed = true;
+        ~CleanupGuard() {
+            if (!armed) return;
+            inst->pRenderClient.Reset();
+            inst->pAudioClient.Reset();
+            inst->pAudioEndpointVolume.Reset();
+            inst->pDevice.Reset();
+            inst->hAudioSamplesReadyEvent.Reset();
+            inst->bAudioInitialized = false;
+        }
+    } guard{inst};
+
     HRESULT hr = enumerator->GetDefaultAudioEndpoint(
         eRender, eConsole, inst->pDevice.ReleaseAndGetAddressOf());
     if (FAILED(hr)) return hr;
 
     hr = inst->pDevice->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
         reinterpret_cast<void**>(inst->pAudioClient.ReleaseAndGetAddressOf()));
-    if (FAILED(hr)) goto cleanup;
+    if (FAILED(hr)) return hr;
 
     hr = inst->pDevice->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr,
         reinterpret_cast<void**>(inst->pAudioEndpointVolume.ReleaseAndGetAddressOf()));
-    if (FAILED(hr)) goto cleanup;
-
-    {
-        WAVEFORMATEX* mixFmt = nullptr;
-        const WAVEFORMATEX* useFmt = srcFmt;
-        if (!useFmt) {
-            hr = inst->pAudioClient->GetMixFormat(&mixFmt);
-            if (FAILED(hr)) goto cleanup;
-            useFmt = mixFmt;
-        }
-
-        size_t totalSize = sizeof(WAVEFORMATEX) + useFmt->cbSize;
-        inst->pSourceAudioFormat = static_cast<WAVEFORMATEX*>(CoTaskMemAlloc(totalSize));
-        if (!inst->pSourceAudioFormat) {
-            if (mixFmt) CoTaskMemFree(mixFmt);
-            hr = E_OUTOFMEMORY;
-            goto cleanup;
-        }
-        memcpy(inst->pSourceAudioFormat, useFmt, totalSize);
-        if (mixFmt) CoTaskMemFree(mixFmt);
-    }
+    if (FAILED(hr)) return hr;
 
     if (!inst->hAudioSamplesReadyEvent) {
         inst->hAudioSamplesReadyEvent.Reset(CreateEventW(nullptr, FALSE, FALSE, nullptr));
-        if (!inst->hAudioSamplesReadyEvent) {
-            hr = HRESULT_FROM_WIN32(GetLastError());
-            goto cleanup;
-        }
+        if (!inst->hAudioSamplesReadyEvent) return HRESULT_FROM_WIN32(GetLastError());
     }
 
     hr = inst->pAudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                         AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                                         kTargetBufferDuration100ns, 0,
-                                        inst->pSourceAudioFormat, nullptr);
-    if (FAILED(hr)) goto cleanup;
+                                        srcFmt, nullptr);
+    if (FAILED(hr)) return hr;
 
     hr = inst->pAudioClient->SetEventHandle(inst->hAudioSamplesReadyEvent.Get());
-    if (FAILED(hr)) goto cleanup;
+    if (FAILED(hr)) return hr;
 
     hr = inst->pAudioClient->GetService(__uuidof(IAudioRenderClient),
         reinterpret_cast<void**>(inst->pRenderClient.ReleaseAndGetAddressOf()));
-    if (FAILED(hr)) goto cleanup;
+    if (FAILED(hr)) return hr;
 
     inst->bAudioInitialized = true;
+    guard.armed = false;
     return S_OK;
-
-cleanup:
-    inst->pRenderClient.Reset();
-    inst->pAudioClient.Reset();
-    inst->pAudioEndpointVolume.Reset();
-    inst->pDevice.Reset();
-    if (inst->pSourceAudioFormat) {
-        CoTaskMemFree(inst->pSourceAudioFormat);
-        inst->pSourceAudioFormat = nullptr;
-    }
-    inst->hAudioSamplesReadyEvent.Reset();
-    inst->bAudioInitialized = false;
-    return hr;
 }
 
 HRESULT PreFillAudioBuffer(VideoPlayerInstance* inst) {

@@ -11,7 +11,7 @@
 #include <wrl/client.h>
 #include <atomic>
 
-class HLSPlayer;
+#include "HLSPlayer.h"
 
 // Per-player state. All COM pointers use ComPtr, events/critical sections use
 // RAII wrappers. The destructor performs a full teardown; CloseMedia() resets
@@ -82,7 +82,7 @@ struct VideoPlayerInstance {
     // ---- Network / HLS ----
     bool bIsNetworkSource = false;
     bool bIsLiveStream    = false;
-    HLSPlayer* pHLSPlayer = nullptr; // owned when non-null
+    Microsoft::WRL::ComPtr<HLSPlayer> pHLSPlayer;
 
     VideoPlayerInstance() = default;
     ~VideoPlayerInstance();

@@ -269,11 +269,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private val videoReaderMutex = Mutex()
     private val isSeeking = AtomicBoolean(false)
 
-    // Memory optimization for frame processing
-    private val frameQueueSize = 1
+    // Frame channel: one slot, drop-oldest. With triple-buffering on the
+    // producer side, overflow simply means the consumer was slow — safe to
+    // drop. Capacity >1 would just let the pipeline pile up.
     private val frameChannel =
         Channel<FrameData>(
-            capacity = frameQueueSize,
+            capacity = 1,
             onBufferOverflow = BufferOverflow.DROP_OLDEST,
         )
 
@@ -283,10 +284,13 @@ class WindowsVideoPlayerState : VideoPlayerState {
         val timestamp: Double,
     )
 
-    // Double-buffering for zero-copy frame rendering
-    private var skiaBitmapA: Bitmap? = null
-    private var skiaBitmapB: Bitmap? = null
-    private var nextSkiaBitmapA: Boolean = true
+    // Triple-buffering for zero-copy frame rendering: the consumer may still
+    // be driving a frame onto Compose (via currentFrameState) when the
+    // producer writes the next frame. Two bitmaps is racy — with three, the
+    // buffer the producer writes is guaranteed to be distinct from both the
+    // one currently bound to ImageBitmap and the one Compose just finished.
+    private val skiaBitmaps = arrayOfNulls<Bitmap>(3)
+    private var nextBitmapIndex: Int = 0
     @Volatile
     private var lastFrameHash: Int = Int.MIN_VALUE
     private var skiaBitmapWidth: Int = 0
@@ -359,13 +363,26 @@ class WindowsVideoPlayerState : VideoPlayerState {
         // StopAudioThread + MF teardown) but guarantees a clean shutdown.
         if (instance != 0L) {
             if (jobToJoin != null) {
-                try {
-                    kotlinx.coroutines.runBlocking {
-                        kotlinx.coroutines.withTimeoutOrNull(500) {
-                            jobToJoin.join()
-                        }
+                // Avoid runBlocking on the AWT Event Dispatch Thread: if any
+                // child coroutine of `scope` ever chains on Dispatchers.Main
+                // (even indirectly, e.g. Compose effects), joining here would
+                // deadlock. Fall back to a plain Thread.join on EDT — the
+                // 500 ms cap keeps the UI from hanging if the native side
+                // stalls.
+                val deadlineNs = System.nanoTime() + 500_000_000L
+                if (java.awt.EventQueue.isDispatchThread()) {
+                    while (jobToJoin.isActive && System.nanoTime() < deadlineNs) {
+                        try { Thread.sleep(10) } catch (_: InterruptedException) { break }
                     }
-                } catch (_: Exception) { /* ignore */ }
+                } else {
+                    try {
+                        kotlinx.coroutines.runBlocking {
+                            kotlinx.coroutines.withTimeoutOrNull(500) {
+                                jobToJoin.join()
+                            }
+                        }
+                    } catch (_: Exception) { /* ignore */ }
+                }
             }
 
             try {
@@ -389,81 +406,38 @@ class WindowsVideoPlayerState : VideoPlayerState {
         scope.cancel()
     }
 
-    private fun clearAllResourcesSync() {
-        // Clear the frame channel synchronously
-        while (frameChannel.tryReceive().isSuccess) {
-            // Drain the channel
-        }
-
-        // Free bitmaps and frame buffers
-        bitmapLock.write {
-            _currentFrame = null
-            currentFrameState.value = null
-
-            // Don't close bitmaps — see comment in releaseAllResources().
-            skiaBitmapA = null
-            skiaBitmapB = null
-            skiaBitmapWidth = 0
-            skiaBitmapHeight = 0
-            nextSkiaBitmapA = true
-            lastFrameHash = Int.MIN_VALUE
-            // Deferred-close queue: drop refs, let Skia cleaner finalize them
-            // (AWT may still hold the newest one).
-            pendingCloseBitmaps.clear()
-        }
-
-        // Reset all state
-        _currentTime = 0.0
-        _duration = 0.0
-        _progress = 0f
-        _metadata = VideoMetadata()
-        userPaused = false
-        isLoading = false
-        errorMessage = null
-        _error = null
-
-        // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
-        initialFrameRead.set(false)
-    }
-
     private fun releaseAllResources() {
         // Cancel any remaining jobs related to video processing
         videoJob?.cancel()
         resizeJob?.cancel()
 
-        // Drain the frame channel (tryReceive is non-suspending)
         clearFrameChannel()
 
-        // Free bitmaps and frame buffers
+        // Free bitmaps and frame buffers.
+        // Do NOT close the triple-buffer bitmaps here: the ImageBitmap exposed
+        // via currentFrameState shares the same native pixel memory
+        // (asComposeImageBitmap is zero-copy). Compose may still be rendering
+        // the last frame on the AWT-EventQueue thread. Closing now would free
+        // the native memory while Skia reads it, causing an access violation.
+        // Nullifying the references lets the Skia Managed cleaner release them
+        // once Compose (and any other holder) drops its reference.
         bitmapLock.write {
             _currentFrame = null
             currentFrameState.value = null
 
-            // Do NOT close the double-buffer bitmaps here: the ImageBitmap
-            // exposed via currentFrameState shares the same native pixel memory
-            // (asComposeImageBitmap is zero-copy). Compose may still be rendering
-            // the last frame on the AWT-EventQueue thread. Closing now would free
-            // the native memory while Skia reads it, causing an access violation.
-            // Nullifying the references lets the Skia Managed cleaner release them
-            // once Compose (and any other holder) drops its reference.
-            skiaBitmapA = null
-            skiaBitmapB = null
+            for (i in skiaBitmaps.indices) skiaBitmaps[i] = null
             skiaBitmapWidth = 0
             skiaBitmapHeight = 0
-            nextSkiaBitmapA = true
+            nextBitmapIndex = 0
             lastFrameHash = Int.MIN_VALUE
             pendingCloseBitmaps.clear()
         }
 
-        // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
         initialFrameRead.set(false)
     }
 
     private fun clearFrameChannel() {
-        // Drain the frame channel to ensure all items are removed
-        while (frameChannel.tryReceive().isSuccess) {
-            // Intentionally empty - just draining the channel
-        }
+        while (frameChannel.tryReceive().isSuccess) { /* drain */ }
     }
 
     /**
@@ -665,11 +639,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                         _isPlaying = startPlayback
 
                         // Start video processing
-                        videoJob =
-                            scope.launch {
-                                launch { produceFrames() }
-                                launch { consumeFrames() }
-                            }
+                        videoJob = startVideoPipeline()
                     }
                 } catch (e: Exception) {
                     setError("Error while opening media: ${e.message}")
@@ -679,6 +649,15 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 }
             }
         }
+    }
+
+    /**
+     * Launches the producer/consumer coroutine pair that reads frames from
+     * the native side and pushes them to Compose.
+     */
+    private fun startVideoPipeline(): Job = scope.launch {
+        launch { produceFrames() }
+        launch { consumeFrames() }
     }
 
     /**
@@ -819,26 +798,31 @@ class WindowsVideoPlayerState : VideoPlayerState {
         }
         lastFrameHash = newHash
 
-        if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
+        if (skiaBitmaps[0] == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
             bitmapLock.write {
                 // Queue previous bitmaps for deferred close instead of leaking them
                 // to the Skia managed cleaner: closing now would race with Compose
                 // still drawing the last frame on the AWT thread.
-                skiaBitmapA?.let { pendingCloseBitmaps.addLast(PendingCloseBitmap(it, pendingCloseGraceFrames)) }
-                skiaBitmapB?.let { pendingCloseBitmaps.addLast(PendingCloseBitmap(it, pendingCloseGraceFrames)) }
+                for (i in skiaBitmaps.indices) {
+                    skiaBitmaps[i]?.let {
+                        pendingCloseBitmaps.addLast(PendingCloseBitmap(it, pendingCloseGraceFrames))
+                    }
+                    skiaBitmaps[i] = null
+                }
                 val imageInfo = createVideoImageInfo()
-                skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
-                skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
+                for (i in skiaBitmaps.indices) {
+                    skiaBitmaps[i] = Bitmap().apply { allocPixels(imageInfo) }
+                }
                 skiaBitmapWidth = width
                 skiaBitmapHeight = height
-                nextSkiaBitmapA = true
+                nextBitmapIndex = 0
             }
         }
 
         drainPendingCloseBitmaps()
 
-        val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
-        nextSkiaBitmapA = !nextSkiaBitmapA
+        val targetBitmap = skiaBitmaps[nextBitmapIndex]!!
+        nextBitmapIndex = (nextBitmapIndex + 1) % skiaBitmaps.size
 
         val pixmap = targetBitmap.peekPixels()
         if (pixmap == null) {
@@ -990,11 +974,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
         }
 
         if (_hasMedia && (videoJob == null || videoJob?.isActive == false)) {
-            videoJob =
-                scope.launch {
-                    launch { produceFrames() }
-                    launch { consumeFrames() }
-                }
+            videoJob = startVideoPipeline()
         }
     }
 
@@ -1146,10 +1126,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // If the producer was never started (e.g. stop() was called
                 // before the first play), start it now so the new frame shows.
                 if (!isDisposing.get() && (videoJob == null || videoJob?.isActive == false)) {
-                    videoJob = scope.launch {
-                        launch { produceFrames() }
-                        launch { consumeFrames() }
-                    }
+                    videoJob = startVideoPipeline()
                 }
             }
         } finally {
