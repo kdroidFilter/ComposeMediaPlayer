@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.rememberVideoPlayerState
 import sample.app.feed.FeedScreen
 import sample.app.gallery.GalleryScreen
 import sample.app.player.PlayerScreen
@@ -40,14 +42,15 @@ private enum class Screen(val label: String, val icon: ImageVector) {
 fun App() {
     AppTheme {
         var currentScreen by remember { mutableStateOf(Screen.Player) }
+        val playerState = rememberVideoPlayerState()
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val useRail = maxWidth >= 600.dp
 
             if (useRail) {
-                RailLayout(currentScreen, onScreenChange = { currentScreen = it })
+                RailLayout(currentScreen, onScreenChange = { currentScreen = it }, playerState = playerState)
             } else {
-                BarLayout(currentScreen, onScreenChange = { currentScreen = it })
+                BarLayout(currentScreen, onScreenChange = { currentScreen = it }, playerState = playerState)
             }
         }
     }
@@ -55,7 +58,7 @@ fun App() {
 
 // Compact: bottom NavigationBar
 @Composable
-private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit) {
+private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerState: VideoPlayerState) {
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -70,13 +73,13 @@ private fun BarLayout(current: Screen, onScreenChange: (Screen) -> Unit) {
             }
         },
     ) { padding ->
-        ScreenContent(current, Modifier.fillMaxSize().padding(padding))
+        ScreenContent(current, Modifier.fillMaxSize().padding(padding), playerState)
     }
 }
 
 // Medium+: side NavigationRail
 @Composable
-private fun RailLayout(current: Screen, onScreenChange: (Screen) -> Unit) {
+private fun RailLayout(current: Screen, onScreenChange: (Screen) -> Unit, playerState: VideoPlayerState) {
     Row(modifier = Modifier.fillMaxSize()) {
         NavigationRail {
             Spacer(Modifier.weight(1f))
@@ -90,14 +93,14 @@ private fun RailLayout(current: Screen, onScreenChange: (Screen) -> Unit) {
             }
             Spacer(Modifier.weight(1f))
         }
-        ScreenContent(current, Modifier.weight(1f).fillMaxHeight())
+        ScreenContent(current, Modifier.weight(1f).fillMaxHeight(), playerState)
     }
 }
 
 @Composable
-private fun ScreenContent(screen: Screen, modifier: Modifier) {
+private fun ScreenContent(screen: Screen, modifier: Modifier, playerState: VideoPlayerState) {
     when (screen) {
-        Screen.Player -> PlayerScreen(modifier)
+        Screen.Player -> PlayerScreen(modifier, playerState)
         Screen.Gallery -> GalleryScreen(modifier)
         Screen.Feed -> FeedScreen(modifier)
     }

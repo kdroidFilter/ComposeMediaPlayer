@@ -1,9 +1,7 @@
 package sample.app.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
@@ -33,34 +31,12 @@ private val DarkScheme = darkColorScheme(
     outlineVariant = Color(0xFF49454F),
 )
 
-private val LightScheme = lightColorScheme(
-    primary = Color(0xFF5B4FC4),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFE8DEFF),
-    onPrimaryContainer = Color(0xFF1A0063),
-    secondary = Color(0xFF006A6A),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFF9CF1F0),
-    onSecondaryContainer = Color(0xFF002020),
-    tertiary = Color(0xFF8C4A3B),
-    onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFFFDAD4),
-    onTertiaryContainer = Color(0xFF3A0905),
-    background = Color(0xFFFCF8FF),
-    onBackground = Color(0xFF1C1B1F),
-    surface = Color(0xFFFCF8FF),
-    onSurface = Color(0xFF1C1B1F),
-    surfaceVariant = Color(0xFFE8E0F0),
-    onSurfaceVariant = Color(0xFF49454F),
-)
-
 @Composable
 fun AppTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkScheme else LightScheme,
+        colorScheme = DarkScheme,
         content = content,
     )
 }
