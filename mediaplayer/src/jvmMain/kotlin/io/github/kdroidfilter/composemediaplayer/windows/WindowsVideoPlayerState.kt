@@ -292,6 +292,14 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private var skiaBitmapWidth: Int = 0
     private var skiaBitmapHeight: Int = 0
 
+    // Bitmaps awaiting safe closure. When the video resolution changes mid-stream
+    // (HLS adaptive bitrate) the old double-buffer bitmaps may still be read by
+    // Compose on the AWT thread via currentFrameState. We defer close() by a few
+    // consumed frames so Compose has swapped to the new bitmap first.
+    private data class PendingCloseBitmap(val bitmap: Bitmap, var framesLeft: Int)
+    private val pendingCloseBitmaps = ArrayDeque<PendingCloseBitmap>()
+    private val pendingCloseGraceFrames: Int = 4
+
     // Adaptive frame interval (ms) based on the video's native frame rate.
     // Mirrors macOS approach: poll at the video frame rate, not faster.
     // This prevents starving the audio thread on the shared SourceReader.
@@ -399,6 +407,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
             skiaBitmapHeight = 0
             nextSkiaBitmapA = true
             lastFrameHash = Int.MIN_VALUE
+            // Deferred-close queue: drop refs, let Skia cleaner finalize them
+            // (AWT may still hold the newest one).
+            pendingCloseBitmaps.clear()
         }
 
         // Reset all state
@@ -441,6 +452,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
             skiaBitmapHeight = 0
             nextSkiaBitmapA = true
             lastFrameHash = Int.MIN_VALUE
+            pendingCloseBitmaps.clear()
         }
 
         // Reset initialFrameRead flag to ensure we read an initial frame when reinitialized
@@ -809,15 +821,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
 
         if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
             bitmapLock.write {
-                // Do NOT close the previous bitmaps: the most recent one is
-                // shared (zero-copy) with the ImageBitmap currently held by
-                // Compose via currentFrameState and may still be drawn on the
-                // AWT-EventQueue. Closing destroys the underlying Skia peer
-                // and causes a null-pointer crash in Image.makeFromBitmap.
-                // Same pattern as releaseAllResources(): drop the reference
-                // and let the Skia managed cleaner reclaim it once Compose
-                // releases its hold. Sacrifices a frame's worth of RAM on
-                // resolution changes — the correct trade-off.
+                // Queue previous bitmaps for deferred close instead of leaking them
+                // to the Skia managed cleaner: closing now would race with Compose
+                // still drawing the last frame on the AWT thread.
+                skiaBitmapA?.let { pendingCloseBitmaps.addLast(PendingCloseBitmap(it, pendingCloseGraceFrames)) }
+                skiaBitmapB?.let { pendingCloseBitmaps.addLast(PendingCloseBitmap(it, pendingCloseGraceFrames)) }
                 val imageInfo = createVideoImageInfo()
                 skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
                 skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
@@ -826,6 +834,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 nextSkiaBitmapA = true
             }
         }
+
+        drainPendingCloseBitmaps()
 
         val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
         nextSkiaBitmapA = !nextSkiaBitmapA
@@ -1227,6 +1237,25 @@ class WindowsVideoPlayerState : VideoPlayerState {
      * @return ImageInfo configured for the current video frame
      */
     private fun createVideoImageInfo() = ImageInfo(videoWidth, videoHeight, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+
+    private fun drainPendingCloseBitmaps() {
+        if (pendingCloseBitmaps.isEmpty()) return
+        bitmapLock.write {
+            val iterator = pendingCloseBitmaps.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                entry.framesLeft -= 1
+                if (entry.framesLeft <= 0) {
+                    try {
+                        entry.bitmap.close()
+                    } catch (_: Throwable) {
+                        // Ignore: bitmap may already be released by Skia cleaner.
+                    }
+                    iterator.remove()
+                }
+            }
+        }
+    }
 
     /**
      * Sets the playback state (playing or paused)
