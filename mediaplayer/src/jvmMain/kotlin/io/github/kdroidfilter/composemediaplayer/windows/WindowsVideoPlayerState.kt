@@ -47,6 +47,7 @@ import org.jetbrains.skia.ImageInfo
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.write
 
@@ -72,7 +73,18 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 val hr = WindowsNativeBridge.InitMediaFoundation()
                 if (hr < 0) {
                     windowsLogger.e { "Media Foundation initialization failed (hr=0x${hr.toString(16)})" }
+                    return
                 }
+                // Tear MF down on JVM exit — otherwise MF worker threads stay
+                // alive while the DLL is unloaded, corrupting KERNELBASE
+                // internals on shutdown (crash 0x87A).
+                try {
+                    Runtime.getRuntime().addShutdownHook(
+                        Thread {
+                            try { WindowsNativeBridge.ShutdownMediaFoundation() } catch (_: Throwable) {}
+                        }
+                    )
+                } catch (_: Throwable) { /* best effort */ }
             }
         }
 
@@ -243,6 +255,20 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private var videoJob: Job? = null
     private var resizeJob: Job? = null
 
+    // Seek coalescing: rapid slider drags overwrite the target; only the
+    // latest value is actually seeked. seekInFlight acts as the "a loop is
+    // draining the target" claim.
+    private val pendingSeekTarget = AtomicLong(Long.MIN_VALUE)
+    private val seekInFlight = AtomicBoolean(false)
+
+// Serializes the native video reader: ReadVideoFrame / UnlockVideoFrame
+    // (held by the producer coroutine) and SeekMedia (held by the seek flow).
+    // This lets us seek *without* cancelling & restarting the producer — a
+    // pattern that turned out to behave inconsistently under GraalVM native
+    // image, leaving the video frozen after the first seek.
+    private val videoReaderMutex = Mutex()
+    private val isSeeking = AtomicBoolean(false)
+
     // Memory optimization for frame processing
     private val frameQueueSize = 1
     private val frameChannel =
@@ -261,6 +287,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private var skiaBitmapA: Bitmap? = null
     private var skiaBitmapB: Bitmap? = null
     private var nextSkiaBitmapA: Boolean = true
+    @Volatile
     private var lastFrameHash: Int = Int.MIN_VALUE
     private var skiaBitmapWidth: Int = 0
     private var skiaBitmapHeight: Int = 0
@@ -299,40 +326,56 @@ class WindowsVideoPlayerState : VideoPlayerState {
             return // Already disposing
         }
 
-        // Stop coroutines first — non-blocking
-        videoJob?.cancel()
+        // Stop coroutines first. The producer reads native state under
+        // videoReaderMutex; we must wait for it to exit its critical section
+        // before tearing down the native reader, otherwise CloseMedia can
+        // free memory the producer is still dereferencing (exit 2170).
+        val jobToJoin = videoJob
+        videoJob = null
+        jobToJoin?.cancel()
         resizeJob?.cancel()
         _isPlaying = false
         _hasMedia = false
 
-        // Release Kotlin-side resources immediately (bitmaps, channel)
         releaseAllResources()
 
-        // Native cleanup on a background thread so dispose() never blocks the UI.
-        // scope is about to be cancelled, so use a detached thread.
         val instance = videoPlayerInstance
         videoPlayerInstance = 0L
         lastUri = null
 
+        // Native cleanup must run SYNCHRONOUSLY. Compose Desktop's window close
+        // ultimately calls System.exit, which will not wait for an arbitrary
+        // background thread: the DLL gets unloaded while the native audio
+        // thread is still running against freed globals, crashing the process
+        // (exit 2170). Doing it here blocks the caller briefly (<500 ms for
+        // StopAudioThread + MF teardown) but guarantees a clean shutdown.
         if (instance != 0L) {
-            Thread {
+            if (jobToJoin != null) {
                 try {
-                    player.SetPlaybackState(instance, false, true)
-                } catch (e: Exception) {
-                    windowsLogger.e { "Exception stopping playback: ${e.message}" }
-                }
-                try {
-                    player.CloseMedia(instance)
-                } catch (e: Exception) {
-                    windowsLogger.e { "Exception closing media: ${e.message}" }
-                }
-                instanceVolumes.remove(instance)
-                try {
-                    WindowsNativeBridge.destroyInstance(instance)
-                } catch (e: Exception) {
-                    windowsLogger.e { "Exception destroying instance: ${e.message}" }
-                }
-            }.start()
+                    kotlinx.coroutines.runBlocking {
+                        kotlinx.coroutines.withTimeoutOrNull(500) {
+                            jobToJoin.join()
+                        }
+                    }
+                } catch (_: Exception) { /* ignore */ }
+            }
+
+            try {
+                player.SetPlaybackState(instance, false, true)
+            } catch (e: Exception) {
+                windowsLogger.e { "Exception stopping playback: ${e.message}" }
+            }
+            try {
+                player.CloseMedia(instance)
+            } catch (e: Exception) {
+                windowsLogger.e { "Exception closing media: ${e.message}" }
+            }
+            instanceVolumes.remove(instance)
+            try {
+                WindowsNativeBridge.destroyInstance(instance)
+            } catch (e: Exception) {
+                windowsLogger.e { "Exception destroying instance: ${e.message}" }
+            }
         }
 
         scope.cancel()
@@ -686,115 +729,17 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 continue
             }
 
-            try {
-                val hrArr = IntArray(1)
-                val srcBuffer = player.ReadVideoFrame(instance, hrArr)
+            // Short-circuit while a seek is in progress — avoids contending
+            // on videoReaderMutex which the seek flow is holding.
+            if (isSeeking.get()) {
+                delay(5)
+                continue
+            }
 
-                if (hrArr[0] < 0 || srcBuffer == null) {
-                    yield()
-                    continue
+            val produced = try {
+                videoReaderMutex.withLock {
+                    processOneFrame(instance)
                 }
-
-                // Re-query video size — HLS adaptive bitrate may change resolution
-                val sizeArr = IntArray(2)
-                player.GetVideoSize(instance, sizeArr)
-                if (sizeArr[0] > 0 &&
-                    sizeArr[1] > 0 &&
-                    (sizeArr[0] != videoWidth || sizeArr[1] != videoHeight)
-                ) {
-                    videoWidth = sizeArr[0]
-                    videoHeight = sizeArr[1]
-                }
-
-                val width = videoWidth
-                val height = videoHeight
-
-                if (width <= 0 || height <= 0) {
-                    player.UnlockVideoFrame(instance)
-                    yield()
-                    continue
-                }
-
-                srcBuffer.rewind()
-
-                val pixelCount = width * height
-
-                // Calculate frame hash to detect identical frames
-                val newHash = calculateFrameHash(srcBuffer, pixelCount)
-                if (newHash == lastFrameHash) {
-                    player.UnlockVideoFrame(instance)
-                    yield()
-                    continue
-                }
-                lastFrameHash = newHash
-
-                // Reallocate bitmaps if dimensions changed
-                if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
-                    bitmapLock.write {
-                        skiaBitmapA?.close()
-                        skiaBitmapB?.close()
-
-                        val imageInfo = createVideoImageInfo()
-                        skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
-                        skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
-                        skiaBitmapWidth = width
-                        skiaBitmapHeight = height
-                        nextSkiaBitmapA = true
-                    }
-                }
-
-                // Select the target bitmap (double-buffering)
-                val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
-                nextSkiaBitmapA = !nextSkiaBitmapA
-
-                // Get direct access to bitmap pixels via peekPixels (zero-copy access)
-                val pixmap = targetBitmap.peekPixels()
-                if (pixmap == null) {
-                    player.UnlockVideoFrame(instance)
-                    windowsLogger.e { "Failed to get pixmap from bitmap" }
-                    yield()
-                    continue
-                }
-
-                val pixelsAddr = pixmap.addr
-                if (pixelsAddr == 0L) {
-                    player.UnlockVideoFrame(instance)
-                    windowsLogger.e { "Invalid pixel address" }
-                    yield()
-                    continue
-                }
-
-                // Single memory copy: native buffer → Skia bitmap
-                val dstRowBytes = pixmap.rowBytes
-                val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
-                val dstBuffer =
-                    WindowsNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
-                        ?: run {
-                            player.UnlockVideoFrame(instance)
-                            yield()
-                            continue
-                        }
-
-                srcBuffer.rewind()
-                copyBgraFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
-
-                player.UnlockVideoFrame(instance)
-
-                // Get frame timestamp
-                val posArr = LongArray(1)
-                val frameTime =
-                    if (player.GetMediaPosition(instance, posArr) >= 0) {
-                        posArr[0] / 10000000.0
-                    } else {
-                        0.0
-                    }
-
-                // Send frame to channel
-                frameChannel.trySend(FrameData(targetBitmap, frameTime))
-
-                // Native AcquireNextSample already paces video to the audio
-                // clock via PreciseSleepHighRes — no additional delay needed.
-                delay(1)
             } catch (e: CancellationException) {
                 break
             } catch (e: Exception) {
@@ -802,8 +747,120 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     setError("Error while reading a frame: ${e.message}")
                 }
                 delay(100)
+                null
+            }
+
+            when (produced) {
+                ProduceOutcome.NotReady -> delay(2)
+                ProduceOutcome.SkipIteration -> yield()
+                is ProduceOutcome.Frame -> {
+                    frameChannel.trySend(FrameData(produced.bitmap, produced.timestamp))
+                    delay(1)
+                }
+                null -> { /* exception already handled */ }
             }
         }
+    }
+
+    /**
+     * Outcome of a single frame-read pass, consumed by the produceFrames loop.
+     */
+    private sealed interface ProduceOutcome {
+        data object NotReady : ProduceOutcome               // native says "retry later"
+        data object SkipIteration : ProduceOutcome          // frame dropped / duplicate
+        data class  Frame(val bitmap: Bitmap, val timestamp: Double) : ProduceOutcome
+    }
+
+    /**
+     * Reads one frame from the native reader, copies it to the next Skia
+     * bitmap, and returns the outcome. Must be called under
+     * [videoReaderMutex] — this method calls ReadVideoFrame / UnlockVideoFrame.
+     */
+    private fun processOneFrame(instance: Long): ProduceOutcome {
+        val hrArr = IntArray(1)
+        val srcBuffer = player.ReadVideoFrame(instance, hrArr) ?: return ProduceOutcome.NotReady
+        if (hrArr[0] < 0) return ProduceOutcome.NotReady
+
+        // HLS adaptive bitrate may change the decoded size mid-stream.
+        val sizeArr = IntArray(2)
+        player.GetVideoSize(instance, sizeArr)
+        if (sizeArr[0] > 0 && sizeArr[1] > 0 &&
+            (sizeArr[0] != videoWidth || sizeArr[1] != videoHeight)
+        ) {
+            videoWidth = sizeArr[0]
+            videoHeight = sizeArr[1]
+        }
+
+        val width = videoWidth
+        val height = videoHeight
+        if (width <= 0 || height <= 0) {
+            player.UnlockVideoFrame(instance)
+            return ProduceOutcome.SkipIteration
+        }
+
+        srcBuffer.rewind()
+        val pixelCount = width * height
+        val newHash = calculateFrameHash(srcBuffer, pixelCount)
+        if (newHash == lastFrameHash) {
+            player.UnlockVideoFrame(instance)
+            return ProduceOutcome.SkipIteration
+        }
+        lastFrameHash = newHash
+
+        if (skiaBitmapA == null || skiaBitmapWidth != width || skiaBitmapHeight != height) {
+            bitmapLock.write {
+                // Do NOT close the previous bitmaps: the most recent one is
+                // shared (zero-copy) with the ImageBitmap currently held by
+                // Compose via currentFrameState and may still be drawn on the
+                // AWT-EventQueue. Closing destroys the underlying Skia peer
+                // and causes a null-pointer crash in Image.makeFromBitmap.
+                // Same pattern as releaseAllResources(): drop the reference
+                // and let the Skia managed cleaner reclaim it once Compose
+                // releases its hold. Sacrifices a frame's worth of RAM on
+                // resolution changes — the correct trade-off.
+                val imageInfo = createVideoImageInfo()
+                skiaBitmapA = Bitmap().apply { allocPixels(imageInfo) }
+                skiaBitmapB = Bitmap().apply { allocPixels(imageInfo) }
+                skiaBitmapWidth = width
+                skiaBitmapHeight = height
+                nextSkiaBitmapA = true
+            }
+        }
+
+        val targetBitmap = if (nextSkiaBitmapA) skiaBitmapA!! else skiaBitmapB!!
+        nextSkiaBitmapA = !nextSkiaBitmapA
+
+        val pixmap = targetBitmap.peekPixels()
+        if (pixmap == null) {
+            player.UnlockVideoFrame(instance)
+            windowsLogger.e { "Failed to get pixmap from bitmap" }
+            return ProduceOutcome.SkipIteration
+        }
+        val pixelsAddr = pixmap.addr
+        if (pixelsAddr == 0L) {
+            player.UnlockVideoFrame(instance)
+            windowsLogger.e { "Invalid pixel address" }
+            return ProduceOutcome.SkipIteration
+        }
+
+        val dstRowBytes = pixmap.rowBytes
+        val dstSizeBytes = dstRowBytes.toLong() * height.toLong()
+        val dstBuffer = WindowsNativeBridge.nWrapPointer(pixelsAddr, dstSizeBytes)
+        if (dstBuffer == null) {
+            player.UnlockVideoFrame(instance)
+            return ProduceOutcome.SkipIteration
+        }
+
+        srcBuffer.rewind()
+        copyBgraFrame(srcBuffer, dstBuffer, width, height, dstRowBytes)
+        player.UnlockVideoFrame(instance)
+
+        val posArr = LongArray(1)
+        val frameTime =
+            if (player.GetMediaPosition(instance, posArr) >= 0) posArr[0] / 10000000.0
+            else 0.0
+
+        return ProduceOutcome.Frame(targetBitmap, frameTime)
     }
 
     /**
@@ -842,12 +899,20 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 }
 
                 _currentTime = frameData.timestamp
-                _progress =
-                    if (_duration > 0.0) {
-                        (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
-                    } else {
-                        0f // Live stream — no meaningful progress
-                    }
+                // Don't clobber _progress while the user is dragging the
+                // slider: sliderPos is backed by _progress, and seekFinished()
+                // reads sliderPos to decide where to seek. Overwriting it with
+                // the current playback position would make the drag seek land
+                // wherever the video happened to be, not where the user
+                // released.
+                if (!_userDragging) {
+                    _progress =
+                        if (_duration > 0.0) {
+                            (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
+                        } else {
+                            0f // Live stream — no meaningful progress
+                        }
+                }
                 isLoading = false
 
                 delay(1)
@@ -978,74 +1043,108 @@ class WindowsVideoPlayerState : VideoPlayerState {
         if (isDisposing.get()) return
         if (_duration <= 0.0) return // Live stream — seeking not supported
 
-        executeMediaOperation(
-            operation = "seek",
-            precondition = _hasMedia && videoPlayerInstance != 0L,
-        ) {
-            val instance = videoPlayerInstance
-            if (instance != 0L) {
+        val clamped = value.coerceIn(0f, 1000f)
+        val targetPos = (_duration * (clamped / 1000f) * 10000000).toLong()
+
+        // Latch the newest target; whoever is running the seek loop will see it.
+        pendingSeekTarget.set(targetPos)
+
+        // Optimistic UI so the slider tracks the drag smoothly even while the
+        // native seek is still settling.
+        _progress = (clamped / 1000f).coerceIn(0f, 1f)
+        _currentTime = _duration * _progress
+
+        scheduleSeek()
+    }
+
+    /**
+     * Launches the seek loop if no other loop is currently draining the target.
+     * If multiple `seekTo` calls arrive in quick succession, only the latest
+     * target is actually processed — intermediate values are coalesced.
+     */
+    private fun scheduleSeek() {
+        if (!seekInFlight.compareAndSet(false, true)) return
+
+        scope.launch {
+            try {
+                while (true) {
+                    val target = pendingSeekTarget.getAndSet(Long.MIN_VALUE)
+                    if (target == Long.MIN_VALUE) break
+                    performSeek(target)
+                }
+            } finally {
+                seekInFlight.set(false)
+                // Tiny race: a caller may have enqueued a target between our
+                // last getAndSet and releasing the claim. Re-check & re-launch.
+                if (pendingSeekTarget.get() != Long.MIN_VALUE) scheduleSeek()
+            }
+        }
+    }
+
+    /**
+     * Executes a single native seek.
+     *
+     * Strategy: keep the producer/consumer coroutines alive and instead
+     * serialize native reader access with [videoReaderMutex] + [isSeeking].
+     * Cancelling & relaunching `videoJob` on every seek proved fragile
+     * under GraalVM native-image (the relaunched job sometimes never ran,
+     * leaving audio but no video).
+     */
+    private suspend fun performSeek(targetPos: Long) {
+        val loadingTrigger = scope.launch {
+            delay(200)
+            if (!isDisposing.get()) isLoading = true
+        }
+
+        try {
+            mediaOperationMutex.withLock {
+                if (isDisposing.get()) return@withLock
+                val instance = videoPlayerInstance
+                if (instance == 0L || !_hasMedia) return@withLock
+
+                isSeeking.set(true)
                 try {
-                    isLoading = true
-                    // If the video was playing before seeking, we should reset userPaused
-                    if (_isPlaying) {
-                        userPaused = false
-                    }
+                    videoReaderMutex.withLock {
+                        // Inside the reader mutex: no concurrent ReadVideoFrame.
+                        initialFrameRead.set(false)
+                        lastFrameHash = Int.MIN_VALUE
+                        clearFrameChannel()
 
-                    // Reset initialFrameRead flag to ensure we read a new frame after seeking
-                    // This is especially important if the player is paused
-                    initialFrameRead.set(false)
-
-                    // Reset frame hash to ensure the first frame after seek is always processed
-                    lastFrameHash = Int.MIN_VALUE
-
-                    videoJob?.cancelAndJoin()
-                    clearFrameChannel()
-
-                    val targetPos = (_duration * (value / 1000f) * 10000000).toLong()
-                    var hr = player.SeekMedia(instance, targetPos)
-                    if (hr < 0) {
-                        delay(50)
-                        hr = player.SeekMedia(instance, targetPos)
+                        var hr = player.SeekMedia(instance, targetPos)
+                        if (hr < 0) {
+                            delay(30)
+                            hr = player.SeekMedia(instance, targetPos)
+                        }
                         if (hr < 0) {
                             setError("Seek failed (hr=0x${hr.toString(16)})")
-                            return@executeMediaOperation
+                            return@withLock
+                        }
+
+                        val posArr = LongArray(1)
+                        if (player.GetMediaPosition(instance, posArr) >= 0) {
+                            _currentTime = posArr[0] / 10000000.0
+                            _progress =
+                                if (_duration > 0.0)
+                                    (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
+                                else 0f
                         }
                     }
-
-                    val posArr2 = LongArray(1)
-                    if (player.GetMediaPosition(instance, posArr2) >= 0) {
-                        _currentTime = posArr2[0] / 10000000.0
-                        _progress =
-                            if (_duration > 0.0) {
-                                (_currentTime / _duration).toFloat().coerceIn(0f, 1f)
-                            } else {
-                                0f
-                            }
-                    }
-
-                    if (!isDisposing.get()) {
-                        videoJob =
-                            scope.launch {
-                                launch { produceFrames() }
-                                launch { consumeFrames() }
-                            }
-                    }
-
-                    delay(8)
-
-                    // If the player is paused, ensure isLoading is set to false
-                    // This prevents the UI from showing loading state indefinitely after seeking when paused
-                    if (userPaused) {
-                        isLoading = false
-                    }
-                } catch (e: Exception) {
-                    setError("Error during seek: ${e.message}")
                 } finally {
-                    // Ensure isLoading is always set to false, even if an exception occurs
-                    // This is especially important when the player is paused
-                    isLoading = false
+                    isSeeking.set(false)
+                }
+
+                // If the producer was never started (e.g. stop() was called
+                // before the first play), start it now so the new frame shows.
+                if (!isDisposing.get() && (videoJob == null || videoJob?.isActive == false)) {
+                    videoJob = scope.launch {
+                        launch { produceFrames() }
+                        launch { consumeFrames() }
+                    }
                 }
             }
+        } finally {
+            loadingTrigger.cancel()
+            isLoading = false
         }
     }
 
@@ -1178,19 +1277,27 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private suspend fun waitForPlaybackState(allowInitialFrame: Boolean = false): Boolean {
         if (_isPlaying) return true
 
-        // When paused, allow the producer to read exactly one frame for display
+        // When paused, allow the producer to read exactly one frame for display.
         if (userPaused && allowInitialFrame && !initialFrameRead.getAndSet(true)) {
             return true
         }
 
         if (isLoading) isLoading = false
 
-        try {
-            snapshotFlow { _isPlaying }.filter { it }.first()
-        } catch (e: CancellationException) {
-            throw e
+        // Polling wait — wakes up on either _isPlaying turning true OR
+        // initialFrameRead being reset (e.g. after a paused seek, where the
+        // producer must fetch & display the new frame without needing
+        // cancellation/restart of its coroutine).
+        while (scope.isActive && _hasMedia && !isDisposing.get()) {
+            if (_isPlaying) return true
+            if (userPaused && allowInitialFrame && !initialFrameRead.getAndSet(true)) return true
+            try {
+                delay(40)
+            } catch (e: CancellationException) {
+                throw e
+            }
         }
-        return _isPlaying
+        return false
     }
 
     /** Tracks how many consecutive iterations we've been waiting for resize */
