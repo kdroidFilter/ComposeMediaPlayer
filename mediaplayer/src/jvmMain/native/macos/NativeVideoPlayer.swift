@@ -747,15 +747,22 @@ class MacVideoPlayer {
                         self.nativeVideoWidth = self.frameWidth
                         self.nativeVideoHeight = self.frameHeight
 
+                        // Build a video composition that applies the preferred transform so
+                        // that AVPlayerItemVideoOutput delivers pixel buffers already rotated
+                        // to display orientation (fixes portrait videos rendering sideways).
+                        let videoComposition: AVVideoComposition? = self.isHLSStream
+                            ? nil
+                            : (try? await AVVideoComposition.videoComposition(withPropertiesOf: asset))
+
                         // Continue with player setup
-                        self.setupVideoOutputAndPlayer(with: asset)
+                        self.setupVideoOutputAndPlayer(with: asset, videoComposition: videoComposition)
                     } catch {
                         print("Error loading video track properties: \(error.localizedDescription)")
                         // Use default dimensions for HLS if loading fails
                         if self.isHLSStream {
                             self.frameWidth = 1920
                             self.frameHeight = 1080
-                            self.setupVideoOutputAndPlayer(with: asset)
+                            self.setupVideoOutputAndPlayer(with: asset, videoComposition: nil)
                         }
                     }
                 }
@@ -770,8 +777,14 @@ class MacVideoPlayer {
                 nativeVideoWidth = frameWidth
                 nativeVideoHeight = frameHeight
 
+                // Build a video composition that applies the preferred transform (see modern
+                // path above for rationale). Skip for HLS streams.
+                let videoComposition: AVVideoComposition? = isHLSStream
+                    ? nil
+                    : AVMutableVideoComposition(propertiesOf: asset)
+
                 // Continue with player setup
-                setupVideoOutputAndPlayer(with: asset)
+                setupVideoOutputAndPlayer(with: asset, videoComposition: videoComposition)
             }
         }
     }
@@ -825,7 +838,7 @@ class MacVideoPlayer {
     }
 
     // Helper method to setup video output and player
-    private func setupVideoOutputAndPlayer(with asset: AVAsset) {
+    private func setupVideoOutputAndPlayer(with asset: AVAsset, videoComposition: AVVideoComposition? = nil) {
         // Create attributes for the CVPixelBuffer (BGRA format) with IOSurface for better performance
         let pixelBufferAttributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
@@ -836,6 +849,12 @@ class MacVideoPlayer {
         videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: pixelBufferAttributes)
 
         let item = AVPlayerItem(asset: asset)
+
+        // Apply the video composition (if any) so that pixel buffers delivered to
+        // AVPlayerItemVideoOutput are pre-rotated to the display orientation.
+        if let videoComposition = videoComposition {
+            item.videoComposition = videoComposition
+        }
 
         // Configure for HLS if needed
         if isHLSStream {

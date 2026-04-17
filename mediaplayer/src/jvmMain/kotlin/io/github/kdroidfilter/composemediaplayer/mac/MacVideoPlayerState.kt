@@ -681,22 +681,23 @@ class MacVideoPlayerState : VideoPlayerState {
             }
 
             // Check for looping
-            checkLoopingAsync(current, duration)
+            checkLoopingAsync()
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             macLogger.e { "Error in updatePositionAsync: ${e.message}" }
         }
     }
 
-    /** Checks if looping is enabled and restarts the video if needed. */
-    private suspend fun checkLoopingAsync(
-        current: Double,
-        duration: Double,
-    ) {
+    /** Checks if playback has ended and triggers loop or stop accordingly. */
+    private suspend fun checkLoopingAsync() {
         val ptr = playerPtr
-        val ended = ptr != 0L && MacNativeBridge.nConsumeDidPlayToEnd(ptr)
-        // Also check position as fallback for content where the notification may not fire
-        if (!ended && (duration <= 0 || current < duration - 0.5)) return
+        if (ptr == 0L) return
+
+        // Trust AVPlayerItemDidPlayToEndTime: it fires reliably on macOS for both
+        // file and HLS playback. A position-based fallback (current >= duration - x)
+        // is dangerous because it stops playback x seconds early — the slider
+        // freezes at (duration - x) / duration instead of reaching 100%.
+        if (!MacNativeBridge.nConsumeDidPlayToEnd(ptr)) return
 
         if (loop) {
             macLogger.d { "checkLoopingAsync() - Loop enabled, restarting video" }
