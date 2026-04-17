@@ -1,8 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
-import kotlin.concurrent.AtomicInt
 import platform.Foundation.NSURLCache
+import kotlin.concurrent.AtomicInt
 
 private val cacheLogger = TaggedLogger("iOSVideoCache")
 

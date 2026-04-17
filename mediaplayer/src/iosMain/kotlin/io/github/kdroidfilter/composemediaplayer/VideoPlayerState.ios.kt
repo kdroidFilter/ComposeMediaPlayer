@@ -164,6 +164,9 @@ open class DefaultVideoPlayerState(
     private var backgroundObserver: Any? = null
     private var foregroundObserver: Any? = null
 
+    // Background behavior
+    override var pauseOnBackground: Boolean = true
+
     // Flag to track if player was playing before going to background
     private var wasPlayingBeforeBackground: Boolean = false
 
@@ -401,11 +404,13 @@ open class DefaultVideoPlayerState(
                 // Store current playing state before background
                 wasPlayingBeforeBackground = _isPlaying
 
-                // If player is paused by the system, update our state to match
-                player?.let { player ->
-                    if (player.rate == 0.0f) {
-                        iosLogger.d { "Player was paused by system, updating isPlaying state" }
-                        _isPlaying = false
+                if (pauseOnBackground) {
+                    // If player is paused by the system, update our state to match
+                    player?.let { player ->
+                        if (player.rate == 0.0f) {
+                            iosLogger.d { "Player was paused by system, updating isPlaying state" }
+                            _isPlaying = false
+                        }
                     }
                 }
             }
@@ -422,7 +427,7 @@ open class DefaultVideoPlayerState(
                 if (wasPlayingBeforeBackground) {
                     iosLogger.d { "Player was playing before background, resuming" }
                     player?.let { player ->
-                        // Only resume if the player is overridely paused
+                        // Only resume if the player is paused
                         if (player.rate == 0.0f) {
                             player.playImmediatelyAtRate(_playbackSpeed)
                         }

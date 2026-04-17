@@ -47,6 +47,7 @@
   - [Fullscreen Mode](#️-fullscreen-mode)
   - [Picture-in-Picture (PiP)](#-picture-in-picture-pip)
   - [Audio Mode](#-audio-mode)
+  - [Background Playback Behavior](#-background-playback-behavior)
 - [Video Caching](#-video-caching)
 - [Metadata Support](#-metadata-support)
   - [Example Usage](#example-usage)
@@ -71,6 +72,7 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 - **Fullscreen Mode**: Toggle between windowed and fullscreen playback modes.
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
 - **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
+- **Background Playback Control**: Automatically pauses on background and resumes on foreground (Android & iOS), with an opt-out for background audio playback.
 - **Video Caching**: Opt-in disk caching for video data on Android and iOS, ideal for scroll-based UIs.
 - **Error handling** Simple error handling for network or playback issues.
 
@@ -214,11 +216,11 @@ VideoPlayerSurface(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     // Your custom controls here
-                    IconButton(onClick = { 
-                        if (playerState.isPlaying) playerState.pause() else playerState.play() 
+                    IconButton(onClick = {
+                        if (playerState.isPlaying) playerState.pause() else playerState.play()
                     }) {
                         Icon(
-                            imageVector = if (playerState.isPlaying) 
+                            imageVector = if (playerState.isPlaying)
                                 Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = "Play/Pause",
                             tint = Color.White
@@ -374,7 +376,7 @@ playerState.error?.let { error ->
 
 To detect if the video is buffering:
 
-```kotlin 
+```kotlin
 if (playerState.isLoading) {
     CircularProgressIndicator()
 }
@@ -545,6 +547,27 @@ val playerState = rememberVideoPlayerState(
 > [!NOTE]
 > Audio mode is only effective on **Android** and **iOS**. On desktop and web, the parameter is accepted but ignored.
 
+### 📱 Background Playback Behavior
+
+By default, the player automatically pauses when the app moves to the background and resumes when returning to the foreground. You can disable this to allow audio to keep playing in the background:
+
+```kotlin
+val playerState = rememberVideoPlayerState()
+
+// Allow playback to continue in the background (audio will keep playing)
+playerState.pauseOnBackground = false
+```
+
+| Platform | Default behavior | `pauseOnBackground = false` |
+| :--- | :--- | :--- |
+| **Android** | Pauses on `ON_STOP`, resumes on `ON_START` | Audio continues in background |
+| **iOS** | Pauses on `didEnterBackground`, resumes on `willEnterForeground` | Audio continues in background (requires `AVAudioSessionCategoryPlayback`) |
+| **Desktop** | No effect | No effect |
+| **Web** | No effect | No effect |
+
+> [!NOTE]
+> When Picture-in-Picture is active, the player keeps playing regardless of the `pauseOnBackground` setting.
+
 ### 💾 Video Caching
 
 You can enable disk-based caching so that video data fetched via `openUri()` is stored locally. Subsequent plays of the same URL load from the cache instead of re-downloading, which is especially useful for scroll-based UIs like TikTok/Reels-style `VerticalPager`.
@@ -670,7 +693,7 @@ fun App() {
                 ) {
                     Text("Play Video")
                 }
-                
+
                 Button(
                     onClick = {
                         val url = "http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
