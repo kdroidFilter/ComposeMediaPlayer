@@ -207,12 +207,15 @@ private fun VideoPlayerContent(
                 },
                 update = { playerView ->
                     try {
-                        // Verify that the player is still valid before updating
-                        if (playerState is DefaultVideoPlayerState &&
-                            playerState.exoPlayer != null &&
-                            playerView.player != null
-                        ) {
-                            // Update the resize mode when contentScale changes
+                        val state = playerState as? DefaultVideoPlayerState
+                        if (state?.exoPlayer != null) {
+                            // Re-attach after LazyList recycle: onReset nulls playerView.player
+                            // and calls onPause(). Without this, the surface stays blank until
+                            // the user navigates away and back.
+                            if (playerView.player == null) {
+                                state.attachPlayerView(playerView)
+                                playerView.onResume()
+                            }
                             playerView.resizeMode = mapContentScaleToResizeMode(contentScale)
                         }
                     } catch (e: Exception) {
