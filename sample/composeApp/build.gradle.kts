@@ -132,7 +132,8 @@ nucleus.application {
         jvmVendor = JvmVendorSpec.BELLSOFT
         buildArgs.addAll(
             "-H:+AddAllCharsets",
-            "-Djava.awt.headless=false"
+            "-Djava.awt.headless=false",
+            "--enable-url-protocols=http,https"
         )
     }
 }

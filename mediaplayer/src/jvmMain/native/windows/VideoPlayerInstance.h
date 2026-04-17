@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ComHelpers.h"
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -7,74 +8,85 @@
 #include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <endpointvolume.h>
+#include <wrl/client.h>
 #include <atomic>
 
-// Forward declaration
-class HLSPlayer;
+#include "HLSPlayer.h"
 
-/**
- * @brief Structure to encapsulate the state of a video player instance.
- */
+// Per-player state. All COM pointers use ComPtr, events/critical sections use
+// RAII wrappers. The destructor performs a full teardown; CloseMedia() resets
+// the fields that describe the *current* media so the object can be reused.
 struct VideoPlayerInstance {
-    // Video related members
-    IMFSourceReader* pSourceReader = nullptr; // Single reader for both audio & video
-    IMFMediaBuffer* pLockedBuffer = nullptr;
-    BYTE* pLockedBytes = nullptr;
-    DWORD lockedMaxSize = 0;
-    DWORD lockedCurrSize = 0;
-    UINT32 videoWidth = 0;
-    UINT32 videoHeight = 0;
-    UINT32 nativeWidth = 0;   // Original video resolution (before scaling)
-    UINT32 nativeHeight = 0;
-    BOOL bEOF = FALSE;
+    // ---- Video source reader ----
+    Microsoft::WRL::ComPtr<IMFSourceReader> pSourceReader;
+    Microsoft::WRL::ComPtr<IMFMediaBuffer>  pLockedBuffer;
+    BYTE*  pLockedBytes     = nullptr;
+    DWORD  lockedMaxSize    = 0;
+    DWORD  lockedCurrSize   = 0;
+    UINT32 videoWidth       = 0;
+    UINT32 videoHeight      = 0;
+    UINT32 nativeWidth      = 0;
+    UINT32 nativeHeight     = 0;
+    std::atomic<bool> bEOF{false};
 
-    // Frame caching for paused state
-    IMFSample* pCachedSample = nullptr;     // Cached sample for paused state
-    BOOL bHasInitialFrame = FALSE;          // Whether we've read an initial frame when paused
+    // Frame caching: used when paused, and when the decoded frame arrived
+    // earlier than its presentation time (replaces the sleep-in-render-path
+    // pattern so the JNI thread never blocks).
+    Microsoft::WRL::ComPtr<IMFSample> pCachedSample;
+    LONGLONG llCachedTimestamp = 0;
+    ULONGLONG llCachedInsertedAtMs = 0; // wall-clock time when pCachedSample was stored
+    bool bHasInitialFrame      = false;
 
-    // Audio related members
-    IMFSourceReader* pSourceReaderAudio = nullptr; // Separate reader for audio (no serialization with video)
-    BOOL bHasAudio = FALSE;
-    BOOL bAudioInitialized = FALSE;
-    IAudioClient* pAudioClient = nullptr;
-    IAudioRenderClient* pRenderClient = nullptr;
-    IMMDevice* pDevice = nullptr;
-    WAVEFORMATEX* pSourceAudioFormat = nullptr;
-    HANDLE hAudioSamplesReadyEvent = nullptr;
-    HANDLE hAudioThread = nullptr;
-    BOOL bAudioThreadRunning = FALSE;
-    HANDLE hAudioReadyEvent = nullptr;
-    IAudioEndpointVolume* pAudioEndpointVolume = nullptr;
+    // ---- Audio ----
+    Microsoft::WRL::ComPtr<IMFSourceReader>      pSourceReaderAudio;
+    Microsoft::WRL::ComPtr<IAudioClient>         pAudioClient;
+    Microsoft::WRL::ComPtr<IAudioRenderClient>   pRenderClient;
+    Microsoft::WRL::ComPtr<IMMDevice>            pDevice;
+    Microsoft::WRL::ComPtr<IAudioEndpointVolume> pAudioEndpointVolume;
 
-    // WASAPI latency: updated by audio thread, read by video thread for A/V sync
+    bool bHasAudio         = false;
+    bool bAudioInitialized = false;
+
+    WAVEFORMATEX* pSourceAudioFormat = nullptr; // allocated with CoTaskMemAlloc
+
+    VideoPlayerUtils::UniqueHandle hAudioSamplesReadyEvent;
+    VideoPlayerUtils::UniqueHandle hAudioResumeEvent;  // manual-reset; signaled while playing
+    VideoPlayerUtils::UniqueHandle hAudioThread;
+    std::atomic<bool> bAudioThreadRunning{false};
+
+    // WASAPI latency (ms), updated by audio thread, read by video thread.
     std::atomic<double> audioLatencyMs{0.0};
 
-    // Protects WASAPI GetBuffer/ReleaseBuffer vs Stop/Reset/Start during seeks
-    CRITICAL_SECTION csAudioFeed{};
+    // Protects GetBuffer/ReleaseBuffer vs Stop/Reset/Start during seeks.
+    VideoPlayerUtils::CriticalSection csAudioFeed;
 
-    // Media Foundation clock for synchronization
-    IMFPresentationClock* pPresentationClock = nullptr;
-    IMFMediaSource* pMediaSource = nullptr;
-    BOOL bUseClockSync = FALSE;
+    // ---- Presentation clock ----
+    Microsoft::WRL::ComPtr<IMFPresentationClock> pPresentationClock;
+    Microsoft::WRL::ComPtr<IMFMediaSource>       pMediaSource;
+    bool bUseClockSync = false;
 
-    // Timing and synchronization
-    LONGLONG llCurrentPosition = 0;
-    ULONGLONG llPlaybackStartTime = 0;
-    ULONGLONG llTotalPauseTime = 0;
-    ULONGLONG llPauseStart = 0;
-    CRITICAL_SECTION csClockSync{};
-    BOOL bSeekInProgress = FALSE;
+    // ---- Timing ----
+    // Shared across JNI, audio, and render threads: all atomic.
+    std::atomic<LONGLONG>  llCurrentPosition{0};
+    std::atomic<ULONGLONG> llPlaybackStartTime{0};
+    std::atomic<ULONGLONG> llTotalPauseTime{0};
+    std::atomic<ULONGLONG> llPauseStart{0};
+    std::atomic<bool>      bSeekInProgress{false};
+    VideoPlayerUtils::CriticalSection csClockSync; // guards composite seek operations
 
-    // Playback control (atomic for lock-free access from the audio thread)
-    std::atomic<float> instanceVolume{1.0f}; // Volume specific to this instance (1.0 = 100%)
-    std::atomic<float> playbackSpeed{1.0f};  // Playback speed (1.0 = 100%)
+    // ---- Playback control ----
+    std::atomic<float> instanceVolume{1.0f};
+    std::atomic<float> playbackSpeed{1.0f};
+    double resampleFracPos = 0.0; // audio thread only
 
-    // Audio resampling fractional position for playback speed (audio thread only)
-    double resampleFracPos = 0.0;
+    // ---- Network / HLS ----
+    bool bIsNetworkSource = false;
+    bool bIsLiveStream    = false;
+    Microsoft::WRL::ComPtr<HLSPlayer> pHLSPlayer;
 
+    VideoPlayerInstance() = default;
+    ~VideoPlayerInstance();
 
-    // Network / HLS streaming
-    BOOL bIsNetworkSource = FALSE;  // TRUE when URL is http:// or https://
-    BOOL bIsLiveStream = FALSE;     // TRUE when duration is unknown (live HLS)
-    HLSPlayer* pHLSPlayer = nullptr; // Non-null when playing HLS via IMFMediaEngine
+    VideoPlayerInstance(const VideoPlayerInstance&) = delete;
+    VideoPlayerInstance& operator=(const VideoPlayerInstance&) = delete;
 };

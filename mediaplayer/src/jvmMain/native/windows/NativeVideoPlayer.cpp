@@ -7,28 +7,93 @@
 #include "HLSPlayer.h"
 #include <algorithm>
 #include <cstring>
+#include <cstdint>
+#include <memory>
 #include <mfapi.h>
 #include <mferror.h>
 #include <string>
 #include <cctype>
-
-// For IMF2DBuffer and IMF2DBuffer2 interfaces
 #include <evr.h>
+#include <wrl/client.h>
+#include <intrin.h>
+#if defined(_M_IX86) || defined(_M_X64)
+  #include <immintrin.h>
+  #define NVP_HAS_AVX2_INTRINSICS 1
+#else
+  #define NVP_HAS_AVX2_INTRINSICS 0
+#endif
 
+using Microsoft::WRL::ComPtr;
 using namespace VideoPlayerUtils;
 using namespace MediaFoundation;
 using namespace AudioManager;
 
 // ---------------------------------------------------------------------------
-// Helper: detect HTTP/HTTPS URLs (network streaming sources incl. HLS)
+// Constants
 // ---------------------------------------------------------------------------
-static bool IsNetworkUrl(const wchar_t* url) {
-    return (_wcsnicmp(url, L"http://", 7) == 0 || _wcsnicmp(url, L"https://", 8) == 0);
+static constexpr UINT   kDefaultFrameRateNum    = 30;
+static constexpr UINT   kDefaultFrameRateDenom  = 1;
+static constexpr double kFrameSkipThreshold     = 3.0; // frame intervals
+static constexpr double kFrameAheadMinMs        = 1.0;
+
+// ---------------------------------------------------------------------------
+// Debug printing
+// ---------------------------------------------------------------------------
+#ifdef _DEBUG
+  #define PrintHR(msg, hr) fprintf(stderr, "%s (hr=0x%08x)\n", msg, static_cast<unsigned int>(hr))
+#else
+  #define PrintHR(msg, hr) ((void)0)
+#endif
+
+
+// ---------------------------------------------------------------------------
+// VideoPlayerInstance dtor — RAII teardown
+// ---------------------------------------------------------------------------
+VideoPlayerInstance::~VideoPlayerInstance() {
+    CloseMedia(this);
 }
 
 // ---------------------------------------------------------------------------
-// Helper: detect HLS URLs (.m3u8 anywhere in URL, case-insensitive)
+// Alpha fix (MFVideoFormat_RGB32 leaves the alpha byte undefined).
+// On x86/x64: runtime-dispatched AVX2 with scalar fallback.
+// On ARM64 (and anywhere AVX2 intrinsics aren't available): scalar only.
 // ---------------------------------------------------------------------------
+#if NVP_HAS_AVX2_INTRINSICS
+static bool DetectAvx2() {
+    int info[4] = {};
+    __cpuid(info, 0);
+    if (info[0] < 7) return false;
+    __cpuidex(info, 7, 0);
+    return (info[1] & (1 << 5)) != 0; // EBX bit 5 = AVX2
+}
+#endif
+
+static void ForceAlphaOpaque(BYTE* data, size_t pixelCount) {
+    uint32_t* px = reinterpret_cast<uint32_t*>(data);
+    size_t i = 0;
+
+#if NVP_HAS_AVX2_INTRINSICS
+    static const bool kHasAvx2 = DetectAvx2();
+    if (kHasAvx2) {
+        const __m256i mask = _mm256_set1_epi32(static_cast<int>(0xFF000000u));
+        for (; i + 8 <= pixelCount; i += 8) {
+            __m256i v = _mm256_loadu_si256(reinterpret_cast<__m256i*>(px + i));
+            v = _mm256_or_si256(v, mask);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(px + i), v);
+        }
+    }
+#endif
+
+    for (; i < pixelCount; ++i) px[i] |= 0xFF000000u;
+}
+
+// ---------------------------------------------------------------------------
+// URL helpers
+// ---------------------------------------------------------------------------
+static bool IsNetworkUrl(const wchar_t* url) {
+    return _wcsnicmp(url, L"http://", 7) == 0 || _wcsnicmp(url, L"https://", 8) == 0;
+}
+
 static bool IsHLSUrl(const wchar_t* url) {
     if (!url) return false;
     std::wstring lower(url);
@@ -37,100 +102,94 @@ static bool IsHLSUrl(const wchar_t* url) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: open HLS media via IMFMediaEngine
+// MediaType change handler — extracted to kill duplication.
+// ---------------------------------------------------------------------------
+static void HandleMediaTypeChanges(VideoPlayerInstance* inst, DWORD flags) {
+    if (flags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED) {
+        ComPtr<IMFMediaType> newType;
+        if (SUCCEEDED(MFCreateMediaType(newType.GetAddressOf()))) {
+            newType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+            newType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+            inst->pSourceReader->SetCurrentMediaType(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, newType.Get());
+        }
+    }
+    if (flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
+        ComPtr<IMFMediaType> current;
+        if (SUCCEEDED(inst->pSourceReader->GetCurrentMediaType(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, current.GetAddressOf()))) {
+            UINT32 newW = 0, newH = 0;
+            MFGetAttributeSize(current.Get(), MF_MT_FRAME_SIZE, &newW, &newH);
+            if (newW > 0 && newH > 0) {
+                inst->videoWidth  = newW;
+                inst->videoHeight = newH;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Copy a decoded frame into a caller-provided buffer.
+// ---------------------------------------------------------------------------
+static void CopyPlane(const BYTE* src, LONG srcPitch,
+                      BYTE* dst, DWORD dstPitch,
+                      DWORD rowBytes, UINT32 height) {
+    if (static_cast<LONG>(dstPitch) == srcPitch && static_cast<LONG>(rowBytes) == srcPitch) {
+        memcpy(dst, src, static_cast<size_t>(rowBytes) * height);
+        return;
+    }
+    const DWORD copyBytes = (std::min)(rowBytes, dstPitch);
+    for (UINT32 y = 0; y < height; ++y) {
+        memcpy(dst, src, copyBytes);
+        src += srcPitch;
+        dst += dstPitch;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HLS fallback for network URLs
 // ---------------------------------------------------------------------------
 static HRESULT OpenMediaHLS(VideoPlayerInstance* pInstance, const wchar_t* url, BOOL startPlayback) {
-    auto* hlsPlayer = new (std::nothrow) HLSPlayer();
-    if (!hlsPlayer) return E_OUTOFMEMORY;
+    // HLSPlayer starts at refcount 1 — Attach takes ownership without AddRef.
+    ComPtr<HLSPlayer> hls;
+    hls.Attach(new (std::nothrow) HLSPlayer());
+    if (!hls) return E_OUTOFMEMORY;
 
-    HRESULT hr = hlsPlayer->Initialize(MediaFoundation::GetD3DDevice(),
-                                        MediaFoundation::GetDXGIDeviceManager());
-    if (FAILED(hr)) {
-        delete hlsPlayer;
-        return hr;
-    }
+    HRESULT hr = hls->Initialize(GetD3DDevice(), GetDXGIDeviceManager());
+    if (SUCCEEDED(hr)) hr = hls->Open(url);
+    if (FAILED(hr)) return hr; // ComPtr releases on scope exit.
 
-    hr = hlsPlayer->Open(url);
-    if (FAILED(hr)) {
-        hlsPlayer->Close();
-        delete hlsPlayer;
-        return hr;
-    }
+    pInstance->pHLSPlayer       = hls;
+    pInstance->bIsNetworkSource = true;
 
-    pInstance->pHLSPlayer      = hlsPlayer;
-    pInstance->bIsNetworkSource = TRUE;
-
-    // Dimensions
-    hlsPlayer->GetVideoSize(&pInstance->videoWidth, &pInstance->videoHeight);
+    hls->GetVideoSize(&pInstance->videoWidth, &pInstance->videoHeight);
     pInstance->nativeWidth  = pInstance->videoWidth;
     pInstance->nativeHeight = pInstance->videoHeight;
 
-    // Duration (0 → live stream)
     LONGLONG duration = 0;
-    hlsPlayer->GetDuration(&duration);
-    pInstance->bIsLiveStream = (duration == 0) ? TRUE : FALSE;
-
-    // Audio is handled internally by the engine
-    pInstance->bHasAudio = TRUE;
+    hls->GetDuration(&duration);
+    pInstance->bIsLiveStream = (duration == 0);
+    pInstance->bHasAudio = true;
 
     if (startPlayback) {
-        hlsPlayer->SetPlaying(TRUE);
-        pInstance->llPlaybackStartTime = GetCurrentTimeMs();
-        pInstance->llTotalPauseTime = 0;
-        pInstance->llPauseStart     = 0;
+        hls->SetPlaying(TRUE);
+        pInstance->llPlaybackStartTime.store(GetCurrentTimeMs(), std::memory_order_relaxed);
+        pInstance->llTotalPauseTime.store(0, std::memory_order_relaxed);
+        pInstance->llPauseStart.store(0, std::memory_order_relaxed);
     }
-
     return S_OK;
 }
 
-// Error code definitions from header
-#define OP_E_NOT_INITIALIZED     ((HRESULT)0x80000001L)
-#define OP_E_ALREADY_INITIALIZED ((HRESULT)0x80000002L)
-#define OP_E_INVALID_PARAMETER   ((HRESULT)0x80000003L)
-
-// Debug print macro
-#ifdef _DEBUG
-#define PrintHR(msg, hr) fprintf(stderr, "%s (hr=0x%08x)\n", msg, static_cast<unsigned int>(hr))
-#else
-#define PrintHR(msg, hr) ((void)0)
-#endif
-
 // ---------------------------------------------------------------------------
-// Named constants for synchronization thresholds (issue #6)
-// ---------------------------------------------------------------------------
-
-// Default frame rate used when the actual rate cannot be determined
-static constexpr UINT kDefaultFrameRateNum   = 30;
-static constexpr UINT kDefaultFrameRateDenom = 1;
-
-// A video frame that is more than this many frame intervals late is skipped
-static constexpr double kFrameSkipThreshold = 3.0;
-
-// Minimum "ahead" time (ms) before the renderer sleeps to pace the output
-static constexpr double kFrameAheadMinMs = 1.0;
-
-// Maximum wait time is clamped to this many frame intervals
-static constexpr double kFrameMaxWaitIntervals = 2.0;
-
-// Stabilisation delay (ms) used around audio client stop/start during seeks
-static constexpr DWORD kSeekAudioSettleMs = 5;
-
-// ---------------------------------------------------------------------------
-// Helper: safely release a COM object
-// ---------------------------------------------------------------------------
-static inline void SafeRelease(IUnknown* obj) { if (obj) obj->Release(); }
-
-// ---------------------------------------------------------------------------
-// Helper: configure an MF audio media type with the given parameters.
-//         If channels/sampleRate are 0, defaults of 2 / 48000 are used.
+// Audio format configuration
 // ---------------------------------------------------------------------------
 static HRESULT ConfigureAudioType(IMFMediaType* pType, UINT32 channels, UINT32 sampleRate) {
-    if (channels == 0)    channels = 2;
-    if (sampleRate == 0)  sampleRate = 48000;
+    if (channels == 0)   channels = 2;
+    if (sampleRate == 0) sampleRate = 48000;
 
-    UINT32 bitsPerSample = 16;
-    UINT32 blockAlign    = channels * (bitsPerSample / 8);
-    UINT32 avgBytesPerSec = sampleRate * blockAlign;
+    const UINT32 bitsPerSample  = 16;
+    const UINT32 blockAlign     = channels * (bitsPerSample / 8);
+    const UINT32 avgBytesPerSec = sampleRate * blockAlign;
 
     pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
     pType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
@@ -142,604 +201,437 @@ static HRESULT ConfigureAudioType(IMFMediaType* pType, UINT32 channels, UINT32 s
     return S_OK;
 }
 
-// ---------------------------------------------------------------------------
-// Helper: query the native channel count and sample rate of the first audio
-//         stream so that the PCM conversion preserves them (issue #2).
-// ---------------------------------------------------------------------------
-static void QueryNativeAudioParams(IMFSourceReader* pReader, UINT32* pChannels, UINT32* pSampleRate) {
-    *pChannels   = 0;
-    *pSampleRate = 0;
-    if (!pReader) return;
+static void QueryNativeAudioParams(IMFSourceReader* reader, UINT32* channels, UINT32* sampleRate) {
+    *channels = 0;
+    *sampleRate = 0;
+    if (!reader) return;
 
-    IMFMediaType* pNativeType = nullptr;
-    HRESULT hr = pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &pNativeType);
-    if (SUCCEEDED(hr) && pNativeType) {
-        pNativeType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, pChannels);
-        pNativeType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, pSampleRate);
-        pNativeType->Release();
+    ComPtr<IMFMediaType> nativeType;
+    if (SUCCEEDED(reader->GetNativeMediaType(
+            MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nativeType.GetAddressOf()))) {
+        nativeType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
+        nativeType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Helper: acquire the next video sample (handles pause/cache and timing sync).
-//
-// Returns:
-//   S_OK    – *ppSample is set (may be nullptr if the frame was skipped).
-//   S_FALSE – end of stream reached (bEOF set on the instance).
-//   other   – error HRESULT.
+// Compute the presentation reference time used to decide whether a decoded
+// frame should be displayed now, skipped, or cached for later.
 // ---------------------------------------------------------------------------
-static HRESULT AcquireNextSample(VideoPlayerInstance* pInstance, IMFSample** ppSample) {
-    *ppSample = nullptr;
+static double ComputeReferenceMs(const VideoPlayerInstance* inst) {
+    if (inst->bHasAudio) {
+        const double audioFedMs = inst->llCurrentPosition.load(std::memory_order_relaxed) / 10000.0;
+        const double latencyMs  = inst->audioLatencyMs.load(std::memory_order_relaxed);
+        return audioFedMs - latencyMs;
+    }
+    const LONGLONG now = static_cast<LONGLONG>(GetCurrentTimeMs());
+    const LONGLONG start = static_cast<LONGLONG>(inst->llPlaybackStartTime.load(std::memory_order_relaxed));
+    const LONGLONG pauseTotal = static_cast<LONGLONG>(inst->llTotalPauseTime.load(std::memory_order_relaxed));
+    return static_cast<double>(now - start - pauseTotal) * inst->playbackSpeed.load(std::memory_order_relaxed);
+}
 
-    BOOL isPaused = (pInstance->llPauseStart != 0);
-    IMFSample* pSample = nullptr;
-    HRESULT hr = S_OK;
-    DWORD streamIndex = 0, dwFlags = 0;
-    LONGLONG llTimestamp = 0;
+// ---------------------------------------------------------------------------
+// Read the next video frame. Returns a sample ready to be displayed or
+// nullptr when the frame is not yet due (caller should try again later).
+// No blocking sleeps: early frames are cached to avoid stalling the JNI
+// render thread.
+// ---------------------------------------------------------------------------
+static HRESULT AcquireNextSample(VideoPlayerInstance* inst, IMFSample** ppOut) {
+    *ppOut = nullptr;
 
-    if (isPaused) {
-        // ----- Paused path: read one frame and cache, or reuse cached frame -----
-        if (!pInstance->bHasInitialFrame) {
-            hr = pInstance->pSourceReader->ReadSample(
+    const bool isPaused = (inst->llPauseStart.load(std::memory_order_relaxed) != 0);
+    ComPtr<IMFSample> sample;
+    LONGLONG ts = 0;
+
+    UINT frNum = kDefaultFrameRateNum, frDenom = kDefaultFrameRateDenom;
+    GetVideoFrameRate(inst, &frNum, &frDenom);
+    if (frNum == 0) { frNum = kDefaultFrameRateNum; frDenom = kDefaultFrameRateDenom; }
+    const double frameIntervalMs = 1000.0 * frDenom / frNum;
+    const double lateThresholdMs = -frameIntervalMs * kFrameSkipThreshold;
+
+    // 1) Cached-sample path: a previously-read frame that was "too early".
+    if (inst->pCachedSample) {
+        if (isPaused) {
+            inst->pCachedSample.CopyTo(sample.GetAddressOf());
+            ts = inst->llCachedTimestamp;
+        } else {
+            const double frameTimeMs = inst->llCachedTimestamp / 10000.0;
+            const double refMs = ComputeReferenceMs(inst);
+            const ULONGLONG nowMs = GetCurrentTimeMs();
+            const ULONGLONG insertedAt = inst->llCachedInsertedAtMs;
+            // Guard against clock skew / reinit: nowMs < insertedAt would
+            // wrap to a huge ULONGLONG and force-deliver a stale frame.
+            const ULONGLONG heldMs = (insertedAt != 0 && nowMs >= insertedAt)
+                ? (nowMs - insertedAt) : 0;
+            // Deliver if due, OR if the sample has been sitting too long —
+            // avoids an indefinite freeze when the audio clock stalls or
+            // drifts (which would otherwise leave refMs permanently behind).
+            if (frameTimeMs - refMs > kFrameAheadMinMs && heldMs < 300) {
+                return S_OK; // still too early, wait
+            }
+            sample = std::move(inst->pCachedSample);
+            inst->pCachedSample.Reset();
+            inst->llCachedInsertedAtMs = 0;
+            ts = inst->llCachedTimestamp;
+        }
+    }
+
+    // 2) Fresh-read path: drop anything late, return the first in-window
+    //    frame (or cache the first too-early one). We never hand a late
+    //    sample to the caller — stale frames are pure waste, the picture
+    //    should jump to "now", not replay what was missed.
+    if (!sample) {
+        constexpr int kMaxReadIterations = 64;
+        constexpr ULONGLONG kMaxReadBudgetMs = 25;
+        const ULONGLONG budgetStart = GetCurrentTimeMs();
+
+        for (int iter = 0; iter < kMaxReadIterations; ++iter) {
+            DWORD streamIndex = 0, flags = 0;
+            LONGLONG sampleTs = 0;
+            ComPtr<IMFSample> s;
+            HRESULT hr = inst->pSourceReader->ReadSample(
                 MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0,
-                &streamIndex, &dwFlags, &llTimestamp, &pSample);
+                &streamIndex, &flags, &sampleTs, s.GetAddressOf());
             if (FAILED(hr)) return hr;
 
-            if (dwFlags & MF_SOURCE_READERF_ENDOFSTREAM) {
-                pInstance->bEOF = TRUE;
-                if (pSample) pSample->Release();
+            if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+                inst->bEOF.store(true);
                 return S_FALSE;
             }
 
-            // HLS adaptive bitrate: handle media type changes (resolution switch)
-            if (dwFlags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED) {
-                // Re-apply desired output format after native format change
-                IMFMediaType* pNewType = nullptr;
-                if (SUCCEEDED(MFCreateMediaType(&pNewType))) {
-                    pNewType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-                    pNewType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-                    pInstance->pSourceReader->SetCurrentMediaType(
-                        MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pNewType);
-                    SafeRelease(pNewType);
+            HandleMediaTypeChanges(inst, flags);
+
+            if (!s) {
+                // Decoder starved — yield back to the caller.
+                return S_OK;
+            }
+
+            // Paused path: cache the first frame for initial display.
+            if (isPaused) {
+                if (!inst->bHasInitialFrame) {
+                    s.CopyTo(inst->pCachedSample.ReleaseAndGetAddressOf());
+                    inst->llCachedTimestamp = sampleTs;
+                    inst->llCachedInsertedAtMs = GetCurrentTimeMs();
+                    inst->bHasInitialFrame = true;
                 }
+                sample = std::move(s);
+                ts = sampleTs;
+                break;
             }
-            if (dwFlags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
-                IMFMediaType* pCurrent = nullptr;
-                if (SUCCEEDED(pInstance->pSourceReader->GetCurrentMediaType(
-                        MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrent))) {
-                    UINT32 newW = 0, newH = 0;
-                    MFGetAttributeSize(pCurrent, MF_MT_FRAME_SIZE, &newW, &newH);
-                    if (newW > 0 && newH > 0) {
-                        pInstance->videoWidth = newW;
-                        pInstance->videoHeight = newH;
-                    }
-                    SafeRelease(pCurrent);
+
+            inst->bHasInitialFrame = true;
+            if (!inst->bHasAudio) {
+                inst->llCurrentPosition.store(sampleTs, std::memory_order_relaxed);
+            }
+
+            // No timestamp → hand it over unconditionally.
+            if (sampleTs <= 0) {
+                sample = std::move(s);
+                ts = sampleTs;
+                break;
+            }
+
+            const double frameTimeMs = sampleTs / 10000.0;
+            const double refMs = ComputeReferenceMs(inst);
+            const double diffMs = frameTimeMs - refMs;
+
+            if (diffMs < lateThresholdMs) {
+                // Stale — discard and keep reading. Do not cache, do not
+                // deliver: we want to display what's happening NOW, not
+                // replay pre-seek keyframes or frames skipped during a
+                // UI stall.
+                if (iter >= 3 && GetCurrentTimeMs() - budgetStart > kMaxReadBudgetMs) {
+                    // Budget exhausted; yield so the caller can do something
+                    // else. Next call resumes draining from here.
+                    return S_OK;
                 }
+                continue;
             }
 
-            if (!pSample) return S_OK; // decoder starved
-
-            if (pInstance->pCachedSample) {
-                pInstance->pCachedSample->Release();
-                pInstance->pCachedSample = nullptr;
+            if (diffMs > frameIntervalMs) {
+                // Too early — cache so the next call on the normal render
+                // cadence can deliver it.
+                s.CopyTo(inst->pCachedSample.ReleaseAndGetAddressOf());
+                inst->llCachedTimestamp = sampleTs;
+                inst->llCachedInsertedAtMs = GetCurrentTimeMs();
+                return S_OK;
             }
-            pSample->AddRef();
-            pInstance->pCachedSample = pSample;
-            pInstance->bHasInitialFrame = TRUE;
-        } else {
-            if (pInstance->pCachedSample) {
-                pSample = pInstance->pCachedSample;
-                pSample->AddRef();
-            } else {
-                return S_OK; // no cached sample available
-            }
-        }
-    } else {
-        // ----- Playing path: decode a new frame -----
-        hr = pInstance->pSourceReader->ReadSample(
-            MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0,
-            &streamIndex, &dwFlags, &llTimestamp, &pSample);
-        if (FAILED(hr)) return hr;
 
-        if (dwFlags & MF_SOURCE_READERF_ENDOFSTREAM) {
-            pInstance->bEOF = TRUE;
-            if (pSample) pSample->Release();
-            return S_FALSE;
-        }
-
-        // HLS adaptive bitrate: handle media type changes (resolution switch)
-        if (dwFlags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED) {
-            IMFMediaType* pNewType = nullptr;
-            if (SUCCEEDED(MFCreateMediaType(&pNewType))) {
-                pNewType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-                pNewType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-                pInstance->pSourceReader->SetCurrentMediaType(
-                    MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pNewType);
-                SafeRelease(pNewType);
-            }
-        }
-        if (dwFlags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) {
-            IMFMediaType* pCurrent = nullptr;
-            if (SUCCEEDED(pInstance->pSourceReader->GetCurrentMediaType(
-                    MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrent))) {
-                UINT32 newW = 0, newH = 0;
-                MFGetAttributeSize(pCurrent, MF_MT_FRAME_SIZE, &newW, &newH);
-                if (newW > 0 && newH > 0) {
-                    pInstance->videoWidth = newW;
-                    pInstance->videoHeight = newH;
-                }
-                SafeRelease(pCurrent);
-            }
-        }
-
-        if (!pSample) return S_OK; // decoder starved
-
-        // Release any cached sample from a previous pause — not needed during playback
-        if (pInstance->pCachedSample) {
-            pInstance->pCachedSample->Release();
-            pInstance->pCachedSample = nullptr;
-        }
-
-        pInstance->bHasInitialFrame = TRUE;
-
-        // Only update position from video if there's no audio track.
-        if (!pInstance->bHasAudio) {
-            pInstance->llCurrentPosition = llTimestamp;
+            // In display window — deliver.
+            sample = std::move(s);
+            ts = sampleTs;
+            break;
         }
     }
 
-    // ----- Frame timing synchronization -----
-    // Audio-master model (like AVPlayer on macOS): video syncs to the audio
-    // position, not to a wall clock.  This guarantees lip-sync because both
-    // streams share the same time reference.
-    //
-    // For video-only files (no audio), fall back to wall-clock sync.
-    if (!isPaused && llTimestamp > 0) {
-
-        double frameTimeMs = llTimestamp / 10000.0;
-
-        UINT frameRateNum = kDefaultFrameRateNum, frameRateDenom = kDefaultFrameRateDenom;
-        GetVideoFrameRate(pInstance, &frameRateNum, &frameRateDenom);
-        if (frameRateNum == 0) {
-            frameRateNum  = kDefaultFrameRateNum;
-            frameRateDenom = kDefaultFrameRateDenom;
-        }
-        double frameIntervalMs = 1000.0 * frameRateDenom / frameRateNum;
-
-        double referenceMs;
-        if (pInstance->bHasAudio) {
-            // Audio-master: use the audio position heard by the user right now.
-            // llCurrentPosition = PTS of the last sample fed to WASAPI.
-            // audioLatencyMs    = how much of the WASAPI buffer hasn't played yet.
-            double audioFedMs = pInstance->llCurrentPosition / 10000.0;
-            double latencyMs  = pInstance->audioLatencyMs.load(std::memory_order_relaxed);
-            referenceMs = audioFedMs - latencyMs;
-        } else {
-            // No audio: wall-clock fallback
-            LONGLONG currentTimeMs = GetCurrentTimeMs();
-            LONGLONG elapsedMs = currentTimeMs - pInstance->llPlaybackStartTime - pInstance->llTotalPauseTime;
-            referenceMs = elapsedMs * pInstance->playbackSpeed.load();
-        }
-
-        double diffMs = frameTimeMs - referenceMs;
-
-        if (diffMs < -frameIntervalMs * kFrameSkipThreshold) {
-            // Frame is very late — skip it
-            pSample->Release();
-            *ppSample = nullptr;
-            return S_OK;
-        } else if (diffMs > kFrameAheadMinMs) {
-            double waitTime = std::min(diffMs, frameIntervalMs * kFrameMaxWaitIntervals);
-            PreciseSleepHighRes(waitTime);
-        }
-    }
-
-    *ppSample = pSample;
+    if (!sample) return S_OK;
+    sample.CopyTo(ppOut);
     return S_OK;
 }
 
 // ====================================================================
-// API Implementation
+// Exported API
 // ====================================================================
 
-NATIVEVIDEOPLAYER_API int GetNativeVersion() {
-    return NATIVE_VIDEO_PLAYER_VERSION;
-}
+NATIVEVIDEOPLAYER_API int GetNativeVersion() { return NATIVE_VIDEO_PLAYER_VERSION; }
 
-NATIVEVIDEOPLAYER_API HRESULT InitMediaFoundation() {
-    return Initialize();
-}
+NATIVEVIDEOPLAYER_API HRESULT InitMediaFoundation() { return Initialize(); }
 
 NATIVEVIDEOPLAYER_API HRESULT CreateVideoPlayerInstance(VideoPlayerInstance** ppInstance) {
-    if (!ppInstance)
-        return E_INVALIDARG;
+    if (!ppInstance) return E_INVALIDARG;
 
-    // Ensure Media Foundation is initialized
     if (!IsInitialized()) {
         HRESULT hr = Initialize();
-        if (FAILED(hr))
-            return hr;
+        if (FAILED(hr)) return hr;
     }
 
-    auto* pInstance = new (std::nothrow) VideoPlayerInstance();
-    if (!pInstance)
-        return E_OUTOFMEMORY;
+    auto inst = std::unique_ptr<VideoPlayerInstance>(new (std::nothrow) VideoPlayerInstance());
+    if (!inst) return E_OUTOFMEMORY;
 
-    InitializeCriticalSection(&pInstance->csClockSync);
-    InitializeCriticalSection(&pInstance->csAudioFeed);
-    pInstance->bUseClockSync = TRUE;
-
-    pInstance->hAudioReadyEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-    if (!pInstance->hAudioReadyEvent) {
-        DeleteCriticalSection(&pInstance->csAudioFeed);
-        DeleteCriticalSection(&pInstance->csClockSync);
-        delete pInstance;
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-
+    inst->bUseClockSync = true;
     IncrementInstanceCount();
-    *ppInstance = pInstance;
+    *ppInstance = inst.release();
     return S_OK;
 }
 
 NATIVEVIDEOPLAYER_API void DestroyVideoPlayerInstance(VideoPlayerInstance* pInstance) {
-    if (pInstance) {
-        CloseMedia(pInstance);
-
-        if (pInstance->pCachedSample) {
-            pInstance->pCachedSample->Release();
-            pInstance->pCachedSample = nullptr;
-        }
-
-        DeleteCriticalSection(&pInstance->csAudioFeed);
-        DeleteCriticalSection(&pInstance->csClockSync);
-        delete pInstance;
-        DecrementInstanceCount();
-    }
+    if (!pInstance) return;
+    delete pInstance; // dtor calls CloseMedia
+    DecrementInstanceCount();
 }
 
 NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wchar_t* url, BOOL startPlayback) {
-    if (!pInstance || !url)
-        return OP_E_INVALID_PARAMETER;
-    if (!IsInitialized())
-        return OP_E_NOT_INITIALIZED;
+    if (!pInstance || !url) return OP_E_INVALID_PARAMETER;
+    if (!IsInitialized()) return OP_E_NOT_INITIALIZED;
 
-    // Close previous media and reset state
     CloseMedia(pInstance);
-    pInstance->bEOF = FALSE;
+    pInstance->bEOF.store(false);
     pInstance->videoWidth = pInstance->videoHeight = 0;
-    pInstance->bHasAudio = FALSE;
+    pInstance->bHasAudio = false;
+    pInstance->bHasInitialFrame = false;
+    pInstance->pCachedSample.Reset();
 
-    pInstance->bHasInitialFrame = FALSE;
-    if (pInstance->pCachedSample) {
-        pInstance->pCachedSample->Release();
-        pInstance->pCachedSample = nullptr;
-    }
-
-    HRESULT hr = S_OK;
-
-    // Detect network sources (HTTP/HTTPS — includes HLS .m3u8 streams)
     const bool isNetwork = IsNetworkUrl(url);
-    pInstance->bIsNetworkSource = isNetwork ? TRUE : FALSE;
-    pInstance->bIsLiveStream = FALSE;
+    pInstance->bIsNetworkSource = isNetwork;
+    pInstance->bIsLiveStream = false;
 
-    // HLS streams (.m3u8): use IMFMediaEngine which has native HLS support
-    if (isNetwork && IsHLSUrl(url)) {
+    if (isNetwork && IsHLSUrl(url))
         return OpenMediaHLS(pInstance, url, startPlayback);
-    }
 
-    // 1. Configure and open media source with both audio and video streams
-    // ------------------------------------------------------------------
-    IMFAttributes* pAttributes = nullptr;
-    hr = MFCreateAttributes(&pAttributes, 6);
-    if (FAILED(hr))
-        return hr;
+    // ---- Configure and open source reader ----
+    ComPtr<IMFAttributes> attrs;
+    HRESULT hr = MFCreateAttributes(attrs.GetAddressOf(), 6);
+    if (FAILED(hr)) return hr;
 
-    pAttributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
-    pAttributes->SetUINT32(MF_SOURCE_READER_DISABLE_DXVA, FALSE);
-    pAttributes->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, GetDXGIDeviceManager());
-    pAttributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+    attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
+    attrs->SetUINT32(MF_SOURCE_READER_DISABLE_DXVA, FALSE);
+    attrs->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, GetDXGIDeviceManager());
+    attrs->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+    if (isNetwork) attrs->SetUINT32(MF_LOW_LATENCY, TRUE);
 
-    // For network/HLS sources: hint the pipeline to reduce buffering latency
-    if (isNetwork) {
-        pAttributes->SetUINT32(MF_LOW_LATENCY, TRUE);
-    }
-
-    hr = MFCreateSourceReaderFromURL(url, pAttributes, &pInstance->pSourceReader);
-    SafeRelease(pAttributes);
+    hr = MFCreateSourceReaderFromURL(url, attrs.Get(), pInstance->pSourceReader.ReleaseAndGetAddressOf());
     if (FAILED(hr)) {
-        // Fallback: for network sources that fail with "unsupported byte stream",
-        // try the IMFMediaEngine path (handles HLS and other streaming formats)
-        if (isNetwork && hr == static_cast<HRESULT>(0xC00D36C4)) {
+        if (isNetwork && hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE)
             return OpenMediaHLS(pInstance, url, startPlayback);
-        }
         return hr;
     }
 
-    // 2. Configure video stream (RGB32)
-    // ------------------------------------------
+    // ---- Video stream: RGB32 ----
     hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
     if (SUCCEEDED(hr))
         hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
-    if (FAILED(hr))
-        return hr;
+    if (FAILED(hr)) return hr;
 
-    IMFMediaType* pType = nullptr;
-    hr = MFCreateMediaType(&pType);
-    if (SUCCEEDED(hr)) {
-        hr = pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-        if (SUCCEEDED(hr))
-            hr = pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-        if (SUCCEEDED(hr))
-            hr = pInstance->pSourceReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pType);
-        SafeRelease(pType);
-    }
-    if (FAILED(hr))
-        return hr;
-
-    // Retrieve video dimensions (this is the native resolution of the video)
-    IMFMediaType* pCurrent = nullptr;
-    hr = pInstance->pSourceReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pCurrent);
-    if (SUCCEEDED(hr)) {
-        hr = MFGetAttributeSize(pCurrent, MF_MT_FRAME_SIZE, &pInstance->videoWidth, &pInstance->videoHeight);
-        pInstance->nativeWidth  = pInstance->videoWidth;
-        pInstance->nativeHeight = pInstance->videoHeight;
-        SafeRelease(pCurrent);
+    {
+        ComPtr<IMFMediaType> type;
+        hr = MFCreateMediaType(type.GetAddressOf());
+        if (SUCCEEDED(hr)) {
+            type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+            type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+            hr = pInstance->pSourceReader->SetCurrentMediaType(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, type.Get());
+        }
+        if (FAILED(hr)) return hr;
     }
 
-    // 3. Configure audio stream (if available)
-    // ------------------------------------------
-    hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
-    if (SUCCEEDED(hr)) {
-        // Try native audio params first, fall back to 2ch/48kHz if WASAPI rejects them
-        UINT32 nativeChannels = 0, nativeSampleRate = 0;
-        QueryNativeAudioParams(pInstance->pSourceReader, &nativeChannels, &nativeSampleRate);
+    {
+        ComPtr<IMFMediaType> current;
+        if (SUCCEEDED(pInstance->pSourceReader->GetCurrentMediaType(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, current.GetAddressOf()))) {
+            MFGetAttributeSize(current.Get(), MF_MT_FRAME_SIZE,
+                               &pInstance->videoWidth, &pInstance->videoHeight);
+            pInstance->nativeWidth  = pInstance->videoWidth;
+            pInstance->nativeHeight = pInstance->videoHeight;
+        }
+    }
 
-        // Helper lambda: configure audio on reader, init WASAPI, return success
+    // ---- Audio stream (best effort) ----
+    if (SUCCEEDED(pInstance->pSourceReader->SetStreamSelection(
+            MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE))) {
+
+        UINT32 nativeCh = 0, nativeSr = 0;
+        QueryNativeAudioParams(pInstance->pSourceReader.Get(), &nativeCh, &nativeSr);
+        // ConfigureAudioType normalizes 0/0 to 2/48000 internally, so do the
+        // same here to avoid issuing a redundant fallback attempt with the
+        // exact same parameters.
+        if (nativeCh == 0)   nativeCh = 2;
+        if (nativeSr == 0)   nativeSr = 48000;
+
         auto tryAudioFormat = [&](UINT32 ch, UINT32 sr) -> bool {
-            IMFMediaType* pWantedType = nullptr;
-            HRESULT hrt = MFCreateMediaType(&pWantedType);
-            if (FAILED(hrt)) return false;
-            ConfigureAudioType(pWantedType, ch, sr);
-            hrt = pInstance->pSourceReader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pWantedType);
-            SafeRelease(pWantedType);
-            if (FAILED(hrt)) return false;
+            ComPtr<IMFMediaType> wanted;
+            if (FAILED(MFCreateMediaType(wanted.GetAddressOf()))) return false;
+            ConfigureAudioType(wanted.Get(), ch, sr);
+            if (FAILED(pInstance->pSourceReader->SetCurrentMediaType(
+                    MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, wanted.Get()))) return false;
 
-            IMFMediaType* pActualType = nullptr;
-            hrt = pInstance->pSourceReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pActualType);
-            if (FAILED(hrt) || !pActualType) return false;
+            ComPtr<IMFMediaType> actual;
+            if (FAILED(pInstance->pSourceReader->GetCurrentMediaType(
+                    MF_SOURCE_READER_FIRST_AUDIO_STREAM, actual.GetAddressOf())) || !actual)
+                return false;
 
             WAVEFORMATEX* pWfx = nullptr;
             UINT32 size = 0;
-            hrt = MFCreateWaveFormatExFromMFMediaType(pActualType, &pWfx, &size);
-            SafeRelease(pActualType);
-            if (FAILED(hrt) || !pWfx) return false;
+            if (FAILED(MFCreateWaveFormatExFromMFMediaType(actual.Get(), &pWfx, &size)) || !pWfx)
+                return false;
 
-            hrt = InitWASAPI(pInstance, pWfx);
-            if (FAILED(hrt)) {
-                PrintHR("InitWASAPI failed", hrt);
+            HRESULT hrInit = InitWASAPI(pInstance, pWfx);
+            if (FAILED(hrInit)) {
+                PrintHR("InitWASAPI failed", hrInit);
                 CoTaskMemFree(pWfx);
                 return false;
             }
+            // Transfer ownership of pWfx to the instance — InitWASAPI does
+            // not copy it.
             if (pInstance->pSourceAudioFormat) CoTaskMemFree(pInstance->pSourceAudioFormat);
             pInstance->pSourceAudioFormat = pWfx;
-            pInstance->bHasAudio = TRUE;
+            pInstance->bHasAudio = true;
             return true;
         };
 
-        // First try native format, then fall back to safe stereo 48kHz
-        if (!tryAudioFormat(nativeChannels, nativeSampleRate)) {
-            if (nativeChannels != 2 || nativeSampleRate != 48000) {
-                tryAudioFormat(2, 48000);
-            }
+        if (!tryAudioFormat(nativeCh, nativeSr)) {
+            // Only retry with the canonical fallback if the first attempt
+            // actually differed from it.
+            if (nativeCh != 2 || nativeSr != 48000) tryAudioFormat(2, 48000);
         }
 
-        // Create a dedicated audio SourceReader so the audio thread is never
-        // blocked by video decoding (ReadSample is serialized within a single
-        // reader).  Both readers share the same container timestamps.
-        IMFAttributes* pAudioAttrs = nullptr;
-        hr = MFCreateAttributes(&pAudioAttrs, 2);
-        if (SUCCEEDED(hr)) {
-            if (isNetwork) pAudioAttrs->SetUINT32(MF_LOW_LATENCY, TRUE);
-            hr = MFCreateSourceReaderFromURL(url, pAudioAttrs, &pInstance->pSourceReaderAudio);
-            SafeRelease(pAudioAttrs);
-        }
-        if (SUCCEEDED(hr) && pInstance->pSourceReaderAudio) {
-            pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
-            pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
+        // Dedicated audio SourceReader so the audio thread is never blocked
+        // by the video decoding path (ReadSample serializes within a reader).
+        if (pInstance->bHasAudio) {
+            ComPtr<IMFAttributes> audioAttrs;
+            if (SUCCEEDED(MFCreateAttributes(audioAttrs.GetAddressOf(), 2))) {
+                if (isNetwork) audioAttrs->SetUINT32(MF_LOW_LATENCY, TRUE);
+                HRESULT hrA = MFCreateSourceReaderFromURL(
+                    url, audioAttrs.Get(), pInstance->pSourceReaderAudio.ReleaseAndGetAddressOf());
+                if (SUCCEEDED(hrA) && pInstance->pSourceReaderAudio) {
+                    pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
+                    pInstance->pSourceReaderAudio->SetStreamSelection(MF_SOURCE_READER_FIRST_AUDIO_STREAM, TRUE);
 
-            UINT32 usedCh = pInstance->pSourceAudioFormat ? pInstance->pSourceAudioFormat->nChannels : 2;
-            UINT32 usedSr = pInstance->pSourceAudioFormat ? pInstance->pSourceAudioFormat->nSamplesPerSec : 48000;
-            IMFMediaType* pWantedAudioType = nullptr;
-            if (SUCCEEDED(MFCreateMediaType(&pWantedAudioType))) {
-                ConfigureAudioType(pWantedAudioType, usedCh, usedSr);
-                pInstance->pSourceReaderAudio->SetCurrentMediaType(
-                    MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pWantedAudioType);
-                SafeRelease(pWantedAudioType);
-            }
-        } else {
-            PrintHR("Failed to create audio source reader", hr);
-        }
-    }
-
-    if (pInstance->bUseClockSync) {
-        // 4. Set up presentation clock for synchronization
-        // ----------------------------------------------------------
-        hr = pInstance->pSourceReader->GetServiceForStream(
-            MF_SOURCE_READER_MEDIASOURCE,
-            GUID_NULL,
-            IID_PPV_ARGS(&pInstance->pMediaSource));
-
-        if (SUCCEEDED(hr)) {
-            hr = MFCreatePresentationClock(&pInstance->pPresentationClock);
-            if (SUCCEEDED(hr)) {
-                IMFPresentationTimeSource* pTimeSource = nullptr;
-                hr = MFCreateSystemTimeSource(&pTimeSource);
-                if (SUCCEEDED(hr)) {
-                    hr = pInstance->pPresentationClock->SetTimeSource(pTimeSource);
-                    if (SUCCEEDED(hr)) {
-                        IMFRateControl* pRateControl = nullptr;
-                        hr = pInstance->pPresentationClock->QueryInterface(IID_PPV_ARGS(&pRateControl));
-                        if (SUCCEEDED(hr)) {
-                            hr = pRateControl->SetRate(FALSE, 1.0f);
-                            if (FAILED(hr)) {
-                                PrintHR("Failed to set initial presentation clock rate", hr);
-                            }
-                            pRateControl->Release();
-                        }
-
-                        IMFMediaSink* pMediaSink = nullptr;
-                        hr = pInstance->pMediaSource->QueryInterface(IID_PPV_ARGS(&pMediaSink));
-                        if (SUCCEEDED(hr)) {
-                            IMFClockStateSink* pClockStateSink = nullptr;
-                            hr = pMediaSink->QueryInterface(IID_PPV_ARGS(&pClockStateSink));
-                            if (SUCCEEDED(hr)) {
-                                if (startPlayback) {
-                                    hr = pInstance->pPresentationClock->Start(0);
-                                    if (FAILED(hr)) {
-                                        PrintHR("Failed to start presentation clock", hr);
-                                    }
-                                } else {
-                                    // Keep the player paused until explicitly started
-                                    hr = pInstance->pPresentationClock->Pause();
-                                    if (FAILED(hr)) {
-                                        PrintHR("Failed to pause presentation clock", hr);
-                                    }
-                                }
-                                pClockStateSink->Release();
-                            }
-                            pMediaSink->Release();
-                        } else {
-                            PrintHR("Failed to get media sink from media source", hr);
-                        }
+                    const UINT32 usedCh = pInstance->pSourceAudioFormat->nChannels;
+                    const UINT32 usedSr = pInstance->pSourceAudioFormat->nSamplesPerSec;
+                    ComPtr<IMFMediaType> wanted;
+                    if (SUCCEEDED(MFCreateMediaType(wanted.GetAddressOf()))) {
+                        ConfigureAudioType(wanted.Get(), usedCh, usedSr);
+                        pInstance->pSourceReaderAudio->SetCurrentMediaType(
+                            MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, wanted.Get());
                     }
-                    SafeRelease(pTimeSource);
+                } else {
+                    PrintHR("Failed to create audio source reader", hrA);
                 }
             }
         }
     }
 
-    // 5. Initialize playback timing and start audio thread
-    // ----------------------------------------------------
-    if (startPlayback) {
-        pInstance->llPlaybackStartTime = GetCurrentTimeMs();
-        pInstance->llTotalPauseTime = 0;
-        pInstance->llPauseStart = 0;
+    // ---- Presentation clock ----
+    if (pInstance->bUseClockSync) {
+        if (SUCCEEDED(pInstance->pSourceReader->GetServiceForStream(
+                MF_SOURCE_READER_MEDIASOURCE, GUID_NULL,
+                IID_PPV_ARGS(pInstance->pMediaSource.ReleaseAndGetAddressOf())))) {
 
-        // Pre-fill WASAPI buffer before starting audio thread
-        if (pInstance->bHasAudio && pInstance->bAudioInitialized) {
-            PreFillAudioBuffer(pInstance);
-        }
+            if (SUCCEEDED(MFCreatePresentationClock(pInstance->pPresentationClock.ReleaseAndGetAddressOf()))) {
+                ComPtr<IMFPresentationTimeSource> timeSource;
+                if (SUCCEEDED(MFCreateSystemTimeSource(timeSource.GetAddressOf()))) {
+                    pInstance->pPresentationClock->SetTimeSource(timeSource.Get());
 
-        if (pInstance->bHasAudio && pInstance->bAudioInitialized && pInstance->pSourceReaderAudio) {
-            hr = StartAudioThread(pInstance);
-            if (FAILED(hr)) {
-                PrintHR("StartAudioThread failed", hr);
+                    ComPtr<IMFRateControl> rateControl;
+                    if (SUCCEEDED(pInstance->pPresentationClock.As(&rateControl)))
+                        rateControl->SetRate(FALSE, 1.0f);
+
+                    if (startPlayback) pInstance->pPresentationClock->Start(0);
+                    else               pInstance->pPresentationClock->Pause();
+                }
             }
         }
     }
 
+    // ---- Timing init + audio thread start ----
+    if (startPlayback) {
+        pInstance->llPlaybackStartTime.store(GetCurrentTimeMs(), std::memory_order_relaxed);
+        pInstance->llTotalPauseTime.store(0, std::memory_order_relaxed);
+        pInstance->llPauseStart.store(0, std::memory_order_relaxed);
+
+        if (pInstance->bHasAudio && pInstance->bAudioInitialized) {
+            PreFillAudioBuffer(pInstance);
+            if (pInstance->pSourceReaderAudio) StartAudioThread(pInstance);
+        }
+    } else if (pInstance->bHasAudio && pInstance->bAudioInitialized && pInstance->pSourceReaderAudio) {
+        // Start the thread but leave it suspended until SetPlaybackState(TRUE).
+        StartAudioThread(pInstance);
+        SignalPause(pInstance);
+    }
+
     return S_OK;
 }
 
 // ---------------------------------------------------------------------------
-// ReadVideoFrame — locks a frame buffer and returns a pointer to the caller
-// ---------------------------------------------------------------------------
 NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYTE** pData, DWORD* pDataSize) {
-    if (!pInstance || !pData || !pDataSize)
-        return OP_E_NOT_INITIALIZED;
+    if (!pInstance || !pData || !pDataSize) return OP_E_NOT_INITIALIZED;
 
-    // HLS path — delegate to IMFMediaEngine
-    if (pInstance->pHLSPlayer) {
+    if (pInstance->pHLSPlayer)
         return pInstance->pHLSPlayer->ReadFrame(pData, pDataSize);
-    }
 
-    if (!pInstance->pSourceReader)
-        return OP_E_NOT_INITIALIZED;
+    if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
+    if (pInstance->pLockedBuffer) UnlockVideoFrame(pInstance);
 
-    if (pInstance->pLockedBuffer)
-        UnlockVideoFrame(pInstance);
+    if (pInstance->bEOF.load()) { *pData = nullptr; *pDataSize = 0; return S_FALSE; }
 
-    if (pInstance->bEOF) {
-        *pData = nullptr;
-        *pDataSize = 0;
-        return S_FALSE;
-    }
+    ComPtr<IMFSample> sample;
+    HRESULT hr = AcquireNextSample(pInstance, sample.GetAddressOf());
+    if (hr == S_FALSE) { *pData = nullptr; *pDataSize = 0; return S_FALSE; }
+    if (FAILED(hr)) return hr;
+    if (!sample)    { *pData = nullptr; *pDataSize = 0; return S_OK; }
 
-    IMFSample* pSample = nullptr;
-    HRESULT hr = AcquireNextSample(pInstance, &pSample);
-
-    if (hr == S_FALSE) {
-        // End of stream
-        *pData = nullptr;
-        *pDataSize = 0;
-        return S_FALSE;
-    }
-    if (FAILED(hr))
-        return hr;
-    if (!pSample) {
-        // Frame was skipped or decoder starved
-        *pData = nullptr;
-        *pDataSize = 0;
-        return S_OK;
-    }
-
-    // Lock the buffer and expose its pointer to the caller
-    IMFMediaBuffer* pBuffer = nullptr;
+    ComPtr<IMFMediaBuffer> buffer;
     DWORD bufferCount = 0;
-    hr = pSample->GetBufferCount(&bufferCount);
-    if (SUCCEEDED(hr) && bufferCount == 1) {
-        hr = pSample->GetBufferByIndex(0, &pBuffer);
+    if (SUCCEEDED(sample->GetBufferCount(&bufferCount)) && bufferCount == 1) {
+        hr = sample->GetBufferByIndex(0, buffer.GetAddressOf());
     } else {
-        hr = pSample->ConvertToContiguousBuffer(&pBuffer);
+        hr = sample->ConvertToContiguousBuffer(buffer.GetAddressOf());
     }
-    if (FAILED(hr)) {
-        PrintHR("Failed to get contiguous buffer", hr);
-        pSample->Release();
-        return hr;
-    }
+    if (FAILED(hr)) { PrintHR("GetBuffer failed", hr); return hr; }
 
-    BYTE* pBytes = nullptr;
-    DWORD cbMax = 0, cbCurr = 0;
-    hr = pBuffer->Lock(&pBytes, &cbMax, &cbCurr);
-    if (FAILED(hr)) {
-        PrintHR("Buffer->Lock failed", hr);
-        pBuffer->Release();
-        pSample->Release();
-        return hr;
-    }
+    BYTE* bytes = nullptr;
+    DWORD maxSz = 0, curSz = 0;
+    hr = buffer->Lock(&bytes, &maxSz, &curSz);
+    if (FAILED(hr)) { PrintHR("Lock failed", hr); return hr; }
 
-    // Force alpha byte to 0xFF — MFVideoFormat_RGB32 (X8R8G8B8) leaves the
-    // high byte undefined, which causes washed-out colours when Skia
-    // composites the frame against the window background.
-    {
-        const DWORD pixelCount = cbCurr / 4;
-        DWORD* px = reinterpret_cast<DWORD*>(pBytes);
-        for (DWORD i = 0; i < pixelCount; ++i)
-            px[i] |= 0xFF000000;
-    }
+    ForceAlphaOpaque(bytes, curSz / 4);
 
-    pInstance->pLockedBuffer = pBuffer;
-    pInstance->pLockedBytes = pBytes;
-    pInstance->lockedMaxSize = cbMax;
-    pInstance->lockedCurrSize = cbCurr;
-    *pData = pBytes;
-    *pDataSize = cbCurr;
-    pSample->Release();
+    pInstance->pLockedBuffer   = buffer;
+    pInstance->pLockedBytes    = bytes;
+    pInstance->lockedMaxSize   = maxSz;
+    pInstance->lockedCurrSize  = curSz;
+    *pData = bytes;
+    *pDataSize = curSz;
     return S_OK;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT UnlockVideoFrame(VideoPlayerInstance* pInstance) {
-    if (!pInstance)
-        return E_INVALIDARG;
-    if (pInstance->pHLSPlayer) {
-        pInstance->pHLSPlayer->UnlockFrame();
-        return S_OK;
-    }
+    if (!pInstance) return E_INVALIDARG;
+    if (pInstance->pHLSPlayer) { pInstance->pHLSPlayer->UnlockFrame(); return S_OK; }
+
     if (pInstance->pLockedBuffer) {
         pInstance->pLockedBuffer->Unlock();
-        pInstance->pLockedBuffer->Release();
-        pInstance->pLockedBuffer = nullptr;
+        pInstance->pLockedBuffer.Reset();
     }
     pInstance->pLockedBytes = nullptr;
     pInstance->lockedMaxSize = pInstance->lockedCurrSize = 0;
@@ -747,617 +639,480 @@ NATIVEVIDEOPLAYER_API HRESULT UnlockVideoFrame(VideoPlayerInstance* pInstance) {
 }
 
 // ---------------------------------------------------------------------------
-// ReadVideoFrameInto — copies the decoded frame into a caller-owned buffer
-// ---------------------------------------------------------------------------
-NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(
-    VideoPlayerInstance* pInstance,
-    BYTE* pDst,
-    DWORD dstRowBytes,
-    DWORD dstCapacity,
-    LONGLONG* pTimestamp) {
-
+NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(VideoPlayerInstance* pInstance,
+                                                  BYTE* pDst, DWORD dstRowBytes, DWORD dstCapacity,
+                                                  LONGLONG* pTimestamp) {
     if (!pInstance || !pDst || dstRowBytes == 0 || dstCapacity == 0)
         return OP_E_INVALID_PARAMETER;
-    if (!pInstance->pSourceReader)
-        return OP_E_NOT_INITIALIZED;
-    if (pInstance->pLockedBuffer)
-        UnlockVideoFrame(pInstance);
+    if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
+    if (pInstance->pLockedBuffer) UnlockVideoFrame(pInstance);
 
-    if (pInstance->bEOF) {
-        if (pTimestamp) *pTimestamp = pInstance->llCurrentPosition;
+    if (pInstance->bEOF.load()) {
+        if (pTimestamp) *pTimestamp = pInstance->llCurrentPosition.load(std::memory_order_relaxed);
         return S_FALSE;
     }
 
-    IMFSample* pSample = nullptr;
-    HRESULT hr = AcquireNextSample(pInstance, &pSample);
-
+    ComPtr<IMFSample> sample;
+    HRESULT hr = AcquireNextSample(pInstance, sample.GetAddressOf());
     if (hr == S_FALSE) {
-        if (pTimestamp) *pTimestamp = pInstance->llCurrentPosition;
+        if (pTimestamp) *pTimestamp = pInstance->llCurrentPosition.load(std::memory_order_relaxed);
         return S_FALSE;
     }
-    if (FAILED(hr))
-        return hr;
-    if (!pSample) {
-        if (pTimestamp) *pTimestamp = pInstance->llCurrentPosition;
+    if (FAILED(hr)) return hr;
+    if (!sample) {
+        if (pTimestamp) *pTimestamp = pInstance->llCurrentPosition.load(std::memory_order_relaxed);
         return S_OK;
     }
 
-    if (pTimestamp)
-        *pTimestamp = pInstance->llCurrentPosition;
+    if (pTimestamp) *pTimestamp = pInstance->llCurrentPosition.load(std::memory_order_relaxed);
 
-    const UINT32 width = pInstance->videoWidth;
+    const UINT32 width  = pInstance->videoWidth;
     const UINT32 height = pInstance->videoHeight;
-    if (width == 0 || height == 0) {
-        pSample->Release();
-        return S_FALSE;
-    }
+    if (width == 0 || height == 0) return S_FALSE;
 
     const DWORD requiredDst = dstRowBytes * height;
-    if (dstCapacity < requiredDst) {
-        pSample->Release();
-        return OP_E_INVALID_PARAMETER;
-    }
+    if (dstCapacity < requiredDst) return OP_E_INVALID_PARAMETER;
 
-    // Try to use IMF2DBuffer2 for optimized zero-copy access
-    IMFMediaBuffer* pBuffer = nullptr;
-    hr = pSample->ConvertToContiguousBuffer(&pBuffer);
-    if (FAILED(hr)) {
-        pSample->Release();
-        return hr;
-    }
+    ComPtr<IMFMediaBuffer> buffer;
+    hr = sample->ConvertToContiguousBuffer(buffer.GetAddressOf());
+    if (FAILED(hr)) return hr;
 
-    // Attempt IMF2DBuffer2 for direct 2D access (most efficient)
-    IMF2DBuffer2* p2DBuffer2 = nullptr;
-    IMF2DBuffer* p2DBuffer = nullptr;
-    BYTE* pScanline0 = nullptr;
-    LONG srcPitch = 0;
-    BYTE* pBufferStart = nullptr;
-    DWORD cbBufferLength = 0;
-    bool usedDirect2D = false;
+    const DWORD srcRowBytes = width * 4;
+    bool copied = false;
 
-    hr = pBuffer->QueryInterface(IID_PPV_ARGS(&p2DBuffer2));
-    if (SUCCEEDED(hr) && p2DBuffer2) {
-        hr = p2DBuffer2->Lock2DSize(MF2DBuffer_LockFlags_Read, &pScanline0, &srcPitch, &pBufferStart, &cbBufferLength);
-        if (SUCCEEDED(hr)) {
-            usedDirect2D = true;
-            const DWORD srcRowBytes = width * 4;
-
-            if (static_cast<LONG>(dstRowBytes) == srcPitch && static_cast<LONG>(srcRowBytes) == srcPitch) {
-                memcpy(pDst, pScanline0, srcRowBytes * height);
-            } else {
-                BYTE* pSrc = pScanline0;
-                BYTE* pDstRow = pDst;
-                const DWORD copyBytes = std::min(srcRowBytes, dstRowBytes);
-                for (UINT32 y = 0; y < height; y++) {
-                    memcpy(pDstRow, pSrc, copyBytes);
-                    pSrc += srcPitch;
-                    pDstRow += dstRowBytes;
-                }
-            }
-            p2DBuffer2->Unlock2D();
-        }
-        p2DBuffer2->Release();
-    }
-
-    // Fallback to IMF2DBuffer
-    if (!usedDirect2D) {
-        hr = pBuffer->QueryInterface(IID_PPV_ARGS(&p2DBuffer));
-        if (SUCCEEDED(hr) && p2DBuffer) {
-            hr = p2DBuffer->Lock2D(&pScanline0, &srcPitch);
-            if (SUCCEEDED(hr)) {
-                usedDirect2D = true;
-                const DWORD srcRowBytes = width * 4;
-
-                if (static_cast<LONG>(dstRowBytes) == srcPitch && static_cast<LONG>(srcRowBytes) == srcPitch) {
-                    memcpy(pDst, pScanline0, srcRowBytes * height);
-                } else {
-                    BYTE* pSrc = pScanline0;
-                    BYTE* pDstRow = pDst;
-                    const DWORD copyBytes = std::min(srcRowBytes, dstRowBytes);
-                    for (UINT32 y = 0; y < height; y++) {
-                        memcpy(pDstRow, pSrc, copyBytes);
-                        pSrc += srcPitch;
-                        pDstRow += dstRowBytes;
-                    }
-                }
-                p2DBuffer->Unlock2D();
-            }
-            p2DBuffer->Release();
-        }
-    }
-
-    // Ultimate fallback to standard buffer lock
-    if (!usedDirect2D) {
-        BYTE* pBytes = nullptr;
-        DWORD cbMax = 0, cbCurr = 0;
-        hr = pBuffer->Lock(&pBytes, &cbMax, &cbCurr);
-        if (SUCCEEDED(hr)) {
-            const DWORD srcRowBytes = width * 4;
-            const DWORD requiredSrc = srcRowBytes * height;
-            if (cbCurr >= requiredSrc) {
-                MFCopyImage(pDst, dstRowBytes, pBytes, srcRowBytes, srcRowBytes, height);
-            }
-            pBuffer->Unlock();
-        }
-    }
-
-    // Force alpha byte to 0xFF — same fix as ReadVideoFrame.
-    // MFVideoFormat_RGB32 (X8R8G8B8) leaves the high byte undefined.
+    // Preferred path: IMF2DBuffer2.
     {
-        const DWORD pixelCount = (dstRowBytes * height) / 4;
-        DWORD* px = reinterpret_cast<DWORD*>(pDst);
-        for (DWORD i = 0; i < pixelCount; ++i)
-            px[i] |= 0xFF000000;
+        ComPtr<IMF2DBuffer2> b2;
+        if (SUCCEEDED(buffer.As(&b2))) {
+            BYTE* scan0 = nullptr;
+            LONG  pitch = 0;
+            BYTE* bufStart = nullptr;
+            DWORD cbLen = 0;
+            if (SUCCEEDED(b2->Lock2DSize(MF2DBuffer_LockFlags_Read, &scan0, &pitch, &bufStart, &cbLen))) {
+                CopyPlane(scan0, pitch, pDst, dstRowBytes, srcRowBytes, height);
+                b2->Unlock2D();
+                copied = true;
+            }
+        }
     }
 
-    pBuffer->Release();
-    pSample->Release();
+    // Fallback: IMF2DBuffer.
+    if (!copied) {
+        ComPtr<IMF2DBuffer> b2;
+        if (SUCCEEDED(buffer.As(&b2))) {
+            BYTE* scan0 = nullptr;
+            LONG  pitch = 0;
+            if (SUCCEEDED(b2->Lock2D(&scan0, &pitch))) {
+                CopyPlane(scan0, pitch, pDst, dstRowBytes, srcRowBytes, height);
+                b2->Unlock2D();
+                copied = true;
+            }
+        }
+    }
+
+    // Final fallback: linear Lock.
+    if (!copied) {
+        BYTE* bytes = nullptr;
+        DWORD maxSz = 0, curSz = 0;
+        if (SUCCEEDED(buffer->Lock(&bytes, &maxSz, &curSz))) {
+            if (curSz >= srcRowBytes * height)
+                MFCopyImage(pDst, dstRowBytes, bytes, srcRowBytes, srcRowBytes, height);
+            buffer->Unlock();
+        }
+    }
+
+    ForceAlphaOpaque(pDst, (dstRowBytes * height) / 4);
     return S_OK;
 }
 
 NATIVEVIDEOPLAYER_API BOOL IsEOF(const VideoPlayerInstance* pInstance) {
-    if (!pInstance)
-        return FALSE;
-    if (pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->IsEOF();
-    return pInstance->bEOF;
+    if (!pInstance) return FALSE;
+    if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->IsEOF();
+    return pInstance->bEOF.load();
 }
 
 NATIVEVIDEOPLAYER_API void GetVideoSize(const VideoPlayerInstance* pInstance, UINT32* pWidth, UINT32* pHeight) {
-    if (!pInstance)
-        return;
-    if (pInstance->pHLSPlayer) {
-        pInstance->pHLSPlayer->GetVideoSize(pWidth, pHeight);
-        return;
-    }
-    if (pWidth)  *pWidth = pInstance->videoWidth;
+    if (!pInstance) return;
+    if (pInstance->pHLSPlayer) { pInstance->pHLSPlayer->GetVideoSize(pWidth, pHeight); return; }
+    if (pWidth)  *pWidth  = pInstance->videoWidth;
     if (pHeight) *pHeight = pInstance->videoHeight;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetVideoFrameRate(const VideoPlayerInstance* pInstance, UINT* pNum, UINT* pDenom) {
     if (!pInstance || !pNum || !pDenom) return OP_E_NOT_INITIALIZED;
 
-    // HLS: frame rate is variable, default to 30fps
-    if (pInstance->pHLSPlayer) {
-        *pNum   = 30;
-        *pDenom = 1;
-        return S_OK;
-    }
-
+    if (pInstance->pHLSPlayer) { *pNum = 30; *pDenom = 1; return S_OK; }
     if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
 
-    IMFMediaType* pType = nullptr;
-    HRESULT hr = pInstance->pSourceReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pType);
-    if (SUCCEEDED(hr)) {
-        hr = MFGetAttributeRatio(pType, MF_MT_FRAME_RATE, pNum, pDenom);
-        pType->Release();
-    }
+    ComPtr<IMFMediaType> type;
+    HRESULT hr = pInstance->pSourceReader->GetCurrentMediaType(
+        MF_SOURCE_READER_FIRST_VIDEO_STREAM, type.GetAddressOf());
+    if (SUCCEEDED(hr))
+        hr = MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, pNum, pDenom);
     return hr;
 }
 
-NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG llPositionIn100Ns) {
+// ---------------------------------------------------------------------------
+// SeekMedia — robust seek with full reader / WASAPI synchronization.
+//
+// Contract with the caller: no other thread may call ReadVideoFrame (video
+// reader) while SeekMedia is running. The Kotlin side cancels its producer
+// coroutine before invoking this. The audio reader is protected internally
+// by csAudioFeed.
+//
+// Flow:
+//   1. Snapshot wasPlaying under csClockSync (consistent with timing fields).
+//   2. Raise bSeekInProgress so the audio thread discards any sample it is
+//      currently decoding and stops feeding WASAPI.
+//   3. Stop the presentation clock.
+//   4. Seek the video reader.
+//   5. Under csAudioFeed: Stop WASAPI, seek audio reader, Reset WASAPI buffer.
+//      Holding csAudioFeed for all three ops guarantees the audio thread
+//      (which also takes this lock around ReadSample and GetBuffer) cannot
+//      interleave a stale sample into the freshly reset buffer.
+//   6. Reset timing / audio state atomically.
+//   7. If wasPlaying: pre-fill WASAPI, Start WASAPI (under lock), Start clock.
+//      If paused: leave WASAPI stopped, clock stopped, player quiet.
+//   8. Clear bSeekInProgress (release barrier) and SignalResume if playing.
+// ---------------------------------------------------------------------------
+NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG llPosition) {
     if (!pInstance) return OP_E_NOT_INITIALIZED;
+    if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->Seek(llPosition);
+    if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
 
-    if (pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->Seek(llPositionIn100Ns);
+    if (llPosition < 0) llPosition = 0;
 
-    if (!pInstance->pSourceReader)
-        return OP_E_NOT_INITIALIZED;
-
-    EnterCriticalSection(&pInstance->csClockSync);
-    pInstance->bSeekInProgress = TRUE;
-    LeaveCriticalSection(&pInstance->csClockSync);
-
-    if (pInstance->llPauseStart != 0) {
-        pInstance->llTotalPauseTime += (GetCurrentTimeMs() - pInstance->llPauseStart);
-        pInstance->llPauseStart = GetCurrentTimeMs();
+    // 1. Snapshot current playing state.
+    bool wasPlaying;
+    {
+        ScopedLock lock(pInstance->csClockSync);
+        wasPlaying = (pInstance->llPauseStart.load(std::memory_order_relaxed) == 0)
+                  && (pInstance->llPlaybackStartTime.load(std::memory_order_relaxed) != 0);
     }
 
-    if (pInstance->pLockedBuffer)
-        UnlockVideoFrame(pInstance);
+    // 2. Announce seek. Audio thread will:
+    //    - break out of its feed loop on next inner-loop iteration,
+    //    - drop any post-ReadSample sample as stale.
+    pInstance->bSeekInProgress.store(true, std::memory_order_release);
 
-    // Release cached sample when seeking
-    if (pInstance->pCachedSample) {
-        pInstance->pCachedSample->Release();
-        pInstance->pCachedSample = nullptr;
-    }
-    pInstance->bHasInitialFrame = FALSE;
+    // Defensive cleanups.
+    if (pInstance->pLockedBuffer) UnlockVideoFrame(pInstance);
+    pInstance->pCachedSample.Reset();
+    pInstance->bHasInitialFrame = false;
 
+    // 3. Stop presentation clock.
+    if (pInstance->bUseClockSync && pInstance->pPresentationClock)
+        pInstance->pPresentationClock->Stop();
+
+    // 4. Seek video reader (no concurrent ReadVideoFrame thanks to Kotlin contract).
     PROPVARIANT var;
     PropVariantInit(&var);
     var.vt = VT_I8;
-    var.hVal.QuadPart = llPositionIn100Ns;
-
-    bool wasPlaying = false;
-    if (pInstance->bHasAudio && pInstance->pAudioClient) {
-        wasPlaying = (pInstance->llPauseStart == 0);
-        // Stop WASAPI under csAudioFeed to ensure the audio thread is not
-        // in the middle of GetBuffer/ReleaseBuffer.
-        EnterCriticalSection(&pInstance->csAudioFeed);
-        pInstance->pAudioClient->Stop();
-        LeaveCriticalSection(&pInstance->csAudioFeed);
-    }
-
-    // Stop the presentation clock
-    if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
-        pInstance->pPresentationClock->Stop();
-    }
-
-    // Seek video reader
+    var.hVal.QuadPart = llPosition;
     HRESULT hr = pInstance->pSourceReader->SetCurrentPosition(GUID_NULL, var);
     if (FAILED(hr)) {
-        EnterCriticalSection(&pInstance->csClockSync);
-        pInstance->bSeekInProgress = FALSE;
-        LeaveCriticalSection(&pInstance->csClockSync);
+        pInstance->bSeekInProgress.store(false, std::memory_order_release);
         PropVariantClear(&var);
+        if (wasPlaying) SignalResume(pInstance);
         return hr;
     }
 
-    // Seek audio reader independently — never blocks on video decoding
-    if (pInstance->pSourceReaderAudio) {
-        PROPVARIANT varAudio;
-        PropVariantInit(&varAudio);
-        varAudio.vt = VT_I8;
-        varAudio.hVal.QuadPart = llPositionIn100Ns;
-        pInstance->pSourceReaderAudio->SetCurrentPosition(GUID_NULL, varAudio);
-        PropVariantClear(&varAudio);
-    }
+    // Catch-up is now handled inside AcquireNextSample's internal loop; no
+    // separate fast-forward is needed here.
 
-    // Reset WASAPI buffer under csAudioFeed
-    if (pInstance->bHasAudio && pInstance->pRenderClient && pInstance->pAudioClient) {
-        EnterCriticalSection(&pInstance->csAudioFeed);
-        pInstance->pAudioClient->Reset();
-        LeaveCriticalSection(&pInstance->csAudioFeed);
+    // 5. Atomic audio-side seek: Stop + SetCurrentPosition + Reset under one lock.
+    // Wake any audio-thread wait so it notices bSeekInProgress and bails out
+    // of its feed loop promptly — otherwise it may hold csAudioFeed for up to
+    // 10 ms (hAudioSamplesReadyEvent wait budget) while we're stuck waiting
+    // for the lock below.
+    if (pInstance->bHasAudio) {
+        if (pInstance->hAudioSamplesReadyEvent)
+            SetEvent(pInstance->hAudioSamplesReadyEvent.Get());
+        ScopedLock lock(pInstance->csAudioFeed);
+        if (pInstance->pAudioClient) pInstance->pAudioClient->Stop();
+        if (pInstance->pSourceReaderAudio)
+            pInstance->pSourceReaderAudio->SetCurrentPosition(GUID_NULL, var);
+        if (pInstance->pAudioClient) pInstance->pAudioClient->Reset();
     }
-
     PropVariantClear(&var);
 
-    pInstance->bEOF = FALSE;
+    // 6. Reset state.
+    pInstance->bEOF.store(false, std::memory_order_relaxed);
     pInstance->resampleFracPos = 0.0;
     pInstance->audioLatencyMs.store(0.0, std::memory_order_relaxed);
+    pInstance->llCurrentPosition.store(llPosition, std::memory_order_relaxed);
 
-    // Reset timing for A/V sync after seek.
-    EnterCriticalSection(&pInstance->csClockSync);
-    pInstance->llCurrentPosition = llPositionIn100Ns;
-    if (pInstance->bUseClockSync) {
-        double seekPositionMs = llPositionIn100Ns / 10000.0;
-        double adjustedSeekMs = seekPositionMs / static_cast<double>(pInstance->playbackSpeed.load());
-        pInstance->llPlaybackStartTime = GetCurrentTimeMs() - static_cast<LONGLONG>(adjustedSeekMs);
-        pInstance->llTotalPauseTime = 0;
+    {
+        ScopedLock lock(pInstance->csClockSync);
+        const float speed = pInstance->playbackSpeed.load(std::memory_order_relaxed);
+        const ULONGLONG now = GetCurrentTimeMs();
+        const double posMs = llPosition / 10000.0;
+        const double adjMs = posMs / static_cast<double>(speed);
+        const ULONGLONG startT = (static_cast<ULONGLONG>(adjMs) >= now)
+            ? 0ULL : (now - static_cast<ULONGLONG>(adjMs));
+        pInstance->llPlaybackStartTime.store(startT, std::memory_order_relaxed);
+        pInstance->llTotalPauseTime.store(0, std::memory_order_relaxed);
+        pInstance->llPauseStart.store(wasPlaying ? 0 : now, std::memory_order_relaxed);
+    }
 
-        if (!wasPlaying) {
-            pInstance->llPauseStart = GetCurrentTimeMs();
-        } else {
-            pInstance->llPauseStart = 0;
+    // 7. Resume or stay paused.
+    if (wasPlaying) {
+        if (pInstance->bHasAudio && pInstance->bAudioInitialized) {
+            // Pre-fill runs under csAudioFeed (recursive CS, safe to re-enter).
+            PreFillAudioBuffer(pInstance);
         }
-    }
-    pInstance->bSeekInProgress = FALSE;
-    LeaveCriticalSection(&pInstance->csClockSync);
 
-    // Restart the presentation clock
-    if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
-        hr = pInstance->pPresentationClock->Start(llPositionIn100Ns);
-        if (FAILED(hr)) {
-            PrintHR("Failed to restart presentation clock after seek", hr);
+        if (pInstance->bHasAudio && pInstance->pAudioClient) {
+            ScopedLock lock(pInstance->csAudioFeed);
+            pInstance->pAudioClient->Start();
         }
+        if (pInstance->bUseClockSync && pInstance->pPresentationClock)
+            pInstance->pPresentationClock->Start(llPosition);
     }
 
-    // Pre-fill the WASAPI buffer BEFORE Start() so audio plays immediately
-    // with no gap. This is the key to stutter-free seek: the buffer has
-    // ~100ms of audio ready before the hardware starts consuming.
-    if (pInstance->bHasAudio && pInstance->bAudioInitialized) {
-        PreFillAudioBuffer(pInstance);
-    }
-
-    // Now start the audio client — buffer already has data, no gap
-    if (pInstance->bHasAudio && pInstance->pAudioClient && wasPlaying) {
-        EnterCriticalSection(&pInstance->csAudioFeed);
-        pInstance->pAudioClient->Start();
-        LeaveCriticalSection(&pInstance->csAudioFeed);
-    }
-
-    // Signal audio thread to resume its feed loop
-    if (pInstance->hAudioReadyEvent)
-        SetEvent(pInstance->hAudioReadyEvent);
-    if (pInstance->hAudioSamplesReadyEvent)
-        SetEvent(pInstance->hAudioSamplesReadyEvent);
-
+    // 8. Release barrier.
+    pInstance->bSeekInProgress.store(false, std::memory_order_release);
+    if (wasPlaying) SignalResume(pInstance);
     return S_OK;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetMediaDuration(const VideoPlayerInstance* pInstance, LONGLONG* pDuration) {
     if (!pInstance || !pDuration) return OP_E_NOT_INITIALIZED;
-
-    if (pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->GetDuration(pDuration);
-
-    if (!pInstance->pSourceReader)
-        return OP_E_NOT_INITIALIZED;
+    if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->GetDuration(pDuration);
+    if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
 
     *pDuration = 0;
 
-    IMFMediaSource* pMediaSource = nullptr;
-    IMFPresentationDescriptor* pPresentationDescriptor = nullptr;
-    HRESULT hr = pInstance->pSourceReader->GetServiceForStream(MF_SOURCE_READER_MEDIASOURCE, GUID_NULL, IID_PPV_ARGS(&pMediaSource));
-    if (SUCCEEDED(hr)) {
-        hr = pMediaSource->CreatePresentationDescriptor(&pPresentationDescriptor);
-        if (SUCCEEDED(hr)) {
-            HRESULT hrDur = pPresentationDescriptor->GetUINT64(MF_PD_DURATION, reinterpret_cast<UINT64*>(pDuration));
-            if (FAILED(hrDur)) {
-                // Duration unavailable — live HLS stream or network source
-                *pDuration = 0;
-            }
-            pPresentationDescriptor->Release();
-        }
-        pMediaSource->Release();
+    ComPtr<IMFMediaSource> source;
+    HRESULT hr = pInstance->pSourceReader->GetServiceForStream(
+        MF_SOURCE_READER_MEDIASOURCE, GUID_NULL, IID_PPV_ARGS(source.GetAddressOf()));
+    if (FAILED(hr)) return hr;
+
+    ComPtr<IMFPresentationDescriptor> pd;
+    hr = source->CreatePresentationDescriptor(pd.GetAddressOf());
+    if (FAILED(hr)) return hr;
+
+    UINT64 dur = 0;
+    hr = pd->GetUINT64(MF_PD_DURATION, &dur);
+    if (FAILED(hr)) {
+        // Live / duration-less source — distinguish from a hard error by
+        // returning S_FALSE with pDuration=0 so callers can gate HLS-style
+        // behavior without treating it as a failure.
+        return S_FALSE;
     }
-    // Return S_OK even when duration is 0 (live stream) — caller checks the value
+    *pDuration = static_cast<LONGLONG>(dur);
     return S_OK;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetMediaPosition(const VideoPlayerInstance* pInstance, LONGLONG* pPosition) {
-    if (!pInstance || !pPosition)
-        return OP_E_NOT_INITIALIZED;
-
-    if (pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->GetPosition(pPosition);
-
-    *pPosition = pInstance->llCurrentPosition;
+    if (!pInstance || !pPosition) return OP_E_NOT_INITIALIZED;
+    if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->GetPosition(pPosition);
+    *pPosition = pInstance->llCurrentPosition.load(std::memory_order_relaxed);
     return S_OK;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT SetPlaybackState(VideoPlayerInstance* pInstance, BOOL bPlaying, BOOL bStop) {
-    if (!pInstance)
-        return OP_E_NOT_INITIALIZED;
-
-    if (pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->SetPlaying(bPlaying, bStop);
+    if (!pInstance) return OP_E_NOT_INITIALIZED;
+    if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->SetPlaying(bPlaying, bStop);
 
     HRESULT hr = S_OK;
 
     if (bStop && !bPlaying) {
-        // Stop playback completely
-        if (pInstance->llPlaybackStartTime != 0) {
-            pInstance->llTotalPauseTime = 0;
-            pInstance->llPauseStart = 0;
-            pInstance->llPlaybackStartTime = 0;
+        if (pInstance->llPlaybackStartTime.load(std::memory_order_relaxed) != 0) {
+            pInstance->llTotalPauseTime.store(0, std::memory_order_relaxed);
+            pInstance->llPauseStart.store(0, std::memory_order_relaxed);
+            pInstance->llPlaybackStartTime.store(0, std::memory_order_relaxed);
 
-            if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
+            // Stop the audio thread BEFORE the presentation clock: otherwise
+            // the audio thread keeps calling GetCurrentPadding on an audio
+            // client whose clock was just stopped, yielding spurious errors.
+            if (pInstance->bAudioThreadRunning.load()) StopAudioThread(pInstance);
+
+            if (pInstance->bUseClockSync && pInstance->pPresentationClock)
                 pInstance->pPresentationClock->Stop();
-            }
 
-            if (pInstance->bAudioThreadRunning) {
-                StopAudioThread(pInstance);
-            }
-
-            pInstance->bHasInitialFrame = FALSE;
-
-            if (pInstance->pCachedSample) {
-                pInstance->pCachedSample->Release();
-                pInstance->pCachedSample = nullptr;
-            }
+            pInstance->bHasInitialFrame = false;
+            pInstance->pCachedSample.Reset();
         }
     } else if (bPlaying) {
-        // Start or resume playback
-        if (pInstance->llPlaybackStartTime == 0) {
-            pInstance->llPlaybackStartTime = GetCurrentTimeMs();
-        } else if (pInstance->llPauseStart != 0) {
-            pInstance->llTotalPauseTime += (GetCurrentTimeMs() - pInstance->llPauseStart);
-            pInstance->llPauseStart = 0;
+        if (pInstance->llPlaybackStartTime.load(std::memory_order_relaxed) == 0) {
+            pInstance->llPlaybackStartTime.store(GetCurrentTimeMs(), std::memory_order_relaxed);
+        } else {
+            const ULONGLONG ps = pInstance->llPauseStart.load(std::memory_order_relaxed);
+            if (ps != 0) {
+                pInstance->llTotalPauseTime.fetch_add(GetCurrentTimeMs() - ps, std::memory_order_relaxed);
+                pInstance->llPauseStart.store(0, std::memory_order_relaxed);
+            }
         }
 
-        pInstance->bHasInitialFrame = FALSE;
+        pInstance->bHasInitialFrame = false;
 
-        // Start audio client if available (under csAudioFeed for thread safety)
         if (pInstance->pAudioClient && pInstance->bAudioInitialized) {
-            EnterCriticalSection(&pInstance->csAudioFeed);
+            ScopedLock lock(pInstance->csAudioFeed);
             hr = pInstance->pAudioClient->Start();
-            LeaveCriticalSection(&pInstance->csAudioFeed);
-            if (FAILED(hr)) {
-                PrintHR("Failed to start audio client", hr);
-            }
+            if (FAILED(hr)) PrintHR("Failed to start audio client", hr);
         }
 
-        // Start audio thread if it is not already running
-        // (important when the player was opened in paused state and then play() is called)
         if (pInstance->bHasAudio && pInstance->bAudioInitialized && pInstance->pSourceReaderAudio) {
-            if (!pInstance->bAudioThreadRunning || pInstance->hAudioThread == nullptr) {
-                hr = StartAudioThread(pInstance);
-                if (FAILED(hr)) {
-                    PrintHR("Failed to start audio thread on play", hr);
-                }
+            if (!pInstance->bAudioThreadRunning.load() || !pInstance->hAudioThread) {
+                HRESULT hrT = StartAudioThread(pInstance);
+                if (FAILED(hrT)) PrintHR("Failed to start audio thread", hrT);
             }
         }
 
-        // Start or resume presentation clock from the current stored position
         if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
-            hr = pInstance->pPresentationClock->Start(pInstance->llCurrentPosition);
-            if (FAILED(hr)) {
-                PrintHR("Failed to start presentation clock", hr);
-            }
+            hr = pInstance->pPresentationClock->Start(
+                pInstance->llCurrentPosition.load(std::memory_order_relaxed));
+            if (FAILED(hr)) PrintHR("Failed to start presentation clock", hr);
         }
 
-        if (pInstance->hAudioReadyEvent)
-            SetEvent(pInstance->hAudioReadyEvent);
-        if (pInstance->hAudioSamplesReadyEvent)
-            SetEvent(pInstance->hAudioSamplesReadyEvent);
+        SignalResume(pInstance);
     } else {
-        // Pause playback
-        if (pInstance->llPauseStart == 0) {
-            pInstance->llPauseStart = GetCurrentTimeMs();
-        }
+        if (pInstance->llPauseStart.load(std::memory_order_relaxed) == 0)
+            pInstance->llPauseStart.store(GetCurrentTimeMs(), std::memory_order_relaxed);
 
-        pInstance->bHasInitialFrame = FALSE;
+        pInstance->bHasInitialFrame = false;
 
         if (pInstance->pAudioClient && pInstance->bAudioInitialized) {
-            EnterCriticalSection(&pInstance->csAudioFeed);
+            ScopedLock lock(pInstance->csAudioFeed);
             pInstance->pAudioClient->Stop();
-            LeaveCriticalSection(&pInstance->csAudioFeed);
         }
+        if (pInstance->bUseClockSync && pInstance->pPresentationClock)
+            pInstance->pPresentationClock->Pause();
 
-        if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
-            hr = pInstance->pPresentationClock->Pause();
-            if (FAILED(hr)) {
-                PrintHR("Failed to pause presentation clock", hr);
-            }
-        }
-        // Note: the audio thread is not stopped on pause — it simply waits on sync events
+        SignalPause(pInstance);
     }
     return hr;
 }
 
-NATIVEVIDEOPLAYER_API HRESULT ShutdownMediaFoundation() {
-    return Shutdown();
-}
+NATIVEVIDEOPLAYER_API HRESULT ShutdownMediaFoundation() { return Shutdown(); }
 
 NATIVEVIDEOPLAYER_API void CloseMedia(VideoPlayerInstance* pInstance) {
-    if (!pInstance)
-        return;
+    if (!pInstance) return;
 
-    // Shut down HLS player first (before releasing D3D resources)
     if (pInstance->pHLSPlayer) {
-        pInstance->pHLSPlayer->Close();
-        delete pInstance->pHLSPlayer;
-        pInstance->pHLSPlayer = nullptr;
+        pInstance->pHLSPlayer.Reset(); // dtor handles Close()
     }
 
     StopAudioThread(pInstance);
 
-    if (pInstance->pLockedBuffer) {
-        UnlockVideoFrame(pInstance);
-    }
-
-    if (pInstance->pCachedSample) {
-        pInstance->pCachedSample->Release();
-        pInstance->pCachedSample = nullptr;
-    }
-    pInstance->bHasInitialFrame = FALSE;
-
-    #define SAFE_RELEASE(obj) if (obj) { obj->Release(); obj = nullptr; }
+    if (pInstance->pLockedBuffer) UnlockVideoFrame(pInstance);
+    pInstance->pCachedSample.Reset();
+    pInstance->bHasInitialFrame = false;
 
     if (pInstance->pAudioClient) {
         pInstance->pAudioClient->Stop();
-        SAFE_RELEASE(pInstance->pAudioClient);
+        pInstance->pAudioClient.Reset();
     }
 
     if (pInstance->pPresentationClock) {
         pInstance->pPresentationClock->Stop();
-        SAFE_RELEASE(pInstance->pPresentationClock);
+        pInstance->pPresentationClock.Reset();
     }
 
-    SAFE_RELEASE(pInstance->pMediaSource);
-    SAFE_RELEASE(pInstance->pRenderClient);
-    SAFE_RELEASE(pInstance->pDevice);
-    SAFE_RELEASE(pInstance->pAudioEndpointVolume);
-    SAFE_RELEASE(pInstance->pSourceReader);
-    SAFE_RELEASE(pInstance->pSourceReaderAudio);
+    pInstance->pMediaSource.Reset();
+    pInstance->pRenderClient.Reset();
+    pInstance->pDevice.Reset();
+    pInstance->pAudioEndpointVolume.Reset();
+    pInstance->pSourceReader.Reset();
+    pInstance->pSourceReaderAudio.Reset();
 
     if (pInstance->pSourceAudioFormat) {
         CoTaskMemFree(pInstance->pSourceAudioFormat);
         pInstance->pSourceAudioFormat = nullptr;
     }
 
-    #define SAFE_CLOSE_HANDLE(handle) if (handle) { CloseHandle(handle); handle = nullptr; }
+    pInstance->hAudioSamplesReadyEvent.Reset();
+    pInstance->hAudioResumeEvent.Reset();
 
-    SAFE_CLOSE_HANDLE(pInstance->hAudioSamplesReadyEvent);
-    SAFE_CLOSE_HANDLE(pInstance->hAudioReadyEvent);
-
-    pInstance->bEOF = FALSE;
+    pInstance->bEOF.store(false);
     pInstance->videoWidth = pInstance->videoHeight = 0;
-    pInstance->bHasAudio = FALSE;
-    pInstance->bAudioInitialized = FALSE;
-    pInstance->llPlaybackStartTime = 0;
-    pInstance->llTotalPauseTime = 0;
-    pInstance->llPauseStart = 0;
-    pInstance->llCurrentPosition = 0;
-    pInstance->bSeekInProgress = FALSE;
-    pInstance->playbackSpeed = 1.0f;
+    pInstance->bHasAudio = false;
+    pInstance->bAudioInitialized = false;
+    pInstance->llPlaybackStartTime.store(0, std::memory_order_relaxed);
+    pInstance->llTotalPauseTime.store(0, std::memory_order_relaxed);
+    pInstance->llPauseStart.store(0, std::memory_order_relaxed);
+    pInstance->llCurrentPosition.store(0, std::memory_order_relaxed);
+    pInstance->bSeekInProgress.store(false, std::memory_order_relaxed);
+    pInstance->playbackSpeed.store(1.0f, std::memory_order_relaxed);
     pInstance->resampleFracPos = 0.0;
     pInstance->audioLatencyMs.store(0.0, std::memory_order_relaxed);
-    pInstance->bIsNetworkSource = FALSE;
-    pInstance->bIsLiveStream = FALSE;
-
-    #undef SAFE_RELEASE
-    #undef SAFE_CLOSE_HANDLE
+    pInstance->bIsNetworkSource = false;
+    pInstance->bIsLiveStream = false;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT SetAudioVolume(VideoPlayerInstance* pInstance, float volume) {
-    if (pInstance && pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->SetVolume(volume);
+    if (pInstance && pInstance->pHLSPlayer) return pInstance->pHLSPlayer->SetVolume(volume);
     return SetVolume(pInstance, volume);
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetAudioVolume(const VideoPlayerInstance* pInstance, float* volume) {
-    if (pInstance && pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->GetVolume(volume);
+    if (pInstance && pInstance->pHLSPlayer) return pInstance->pHLSPlayer->GetVolume(volume);
     return GetVolume(pInstance, volume);
 }
 
 NATIVEVIDEOPLAYER_API HRESULT SetPlaybackSpeed(VideoPlayerInstance* pInstance, float speed) {
-    if (!pInstance)
-        return OP_E_NOT_INITIALIZED;
+    if (!pInstance) return OP_E_NOT_INITIALIZED;
+    if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->SetPlaybackSpeed(speed);
 
-    if (pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->SetPlaybackSpeed(speed);
+    speed = std::clamp(speed, NVP_MIN_PLAYBACK_SPEED, NVP_MAX_PLAYBACK_SPEED);
 
-    speed = std::max(0.5f, std::min(speed, 2.0f));
-
-    // Recalibrate the wall-clock reference so that the position accumulated
-    // at the old speed is preserved when switching to the new speed.
-    // Without this, `elapsed * newSpeed` would produce a wrong position.
-    if (pInstance->bUseClockSync && pInstance->llPlaybackStartTime != 0) {
-        float oldSpeed = pInstance->playbackSpeed.load();
-        EnterCriticalSection(&pInstance->csClockSync);
-        LONGLONG now = GetCurrentTimeMs();
-        LONGLONG elapsedMs = now - pInstance->llPlaybackStartTime - pInstance->llTotalPauseTime;
-        double currentPositionMs = elapsedMs * static_cast<double>(oldSpeed);
-        // Solve: (now - newStart - pause) * newSpeed = currentPositionMs
-        pInstance->llPlaybackStartTime = now - pInstance->llTotalPauseTime
-            - static_cast<LONGLONG>(currentPositionMs / speed);
-        LeaveCriticalSection(&pInstance->csClockSync);
+    if (pInstance->bUseClockSync
+        && pInstance->llPlaybackStartTime.load(std::memory_order_relaxed) != 0) {
+        const float oldSpeed = pInstance->playbackSpeed.load(std::memory_order_relaxed);
+        ScopedLock lock(pInstance->csClockSync);
+        const ULONGLONG now = GetCurrentTimeMs();
+        const ULONGLONG startT = pInstance->llPlaybackStartTime.load(std::memory_order_relaxed);
+        const ULONGLONG pauseT = pInstance->llTotalPauseTime.load(std::memory_order_relaxed);
+        const LONGLONG elapsedMs = static_cast<LONGLONG>(now - startT - pauseT);
+        const double currentPosMs = elapsedMs * static_cast<double>(oldSpeed);
+        pInstance->llPlaybackStartTime.store(
+            now - pauseT - static_cast<ULONGLONG>(currentPosMs / speed),
+            std::memory_order_relaxed);
     }
 
-    pInstance->playbackSpeed = speed;
+    pInstance->playbackSpeed.store(speed, std::memory_order_relaxed);
     pInstance->resampleFracPos = 0.0;
 
     if (pInstance->bUseClockSync && pInstance->pPresentationClock) {
-        IMFRateControl* pRateControl = nullptr;
-        HRESULT hr = pInstance->pPresentationClock->QueryInterface(IID_PPV_ARGS(&pRateControl));
-        if (SUCCEEDED(hr)) {
-            hr = pRateControl->SetRate(FALSE, speed);
-            if (FAILED(hr)) {
-                PrintHR("Failed to set presentation clock rate", hr);
-            }
-            pRateControl->Release();
-        }
+        ComPtr<IMFRateControl> rateControl;
+        if (SUCCEEDED(pInstance->pPresentationClock.As(&rateControl)))
+            rateControl->SetRate(FALSE, speed);
     }
-
     return S_OK;
 }
 
 NATIVEVIDEOPLAYER_API HRESULT GetPlaybackSpeed(const VideoPlayerInstance* pInstance, float* pSpeed) {
-    if (!pInstance || !pSpeed)
-        return OP_E_INVALID_PARAMETER;
-
-    if (pInstance->pHLSPlayer)
-        return pInstance->pHLSPlayer->GetPlaybackSpeed(pSpeed);
-
-    *pSpeed = pInstance->playbackSpeed;
+    if (!pInstance || !pSpeed) return OP_E_INVALID_PARAMETER;
+    if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->GetPlaybackSpeed(pSpeed);
+    *pSpeed = pInstance->playbackSpeed.load(std::memory_order_relaxed);
     return S_OK;
 }
 
 // ---------------------------------------------------------------------------
-// GetVideoMetadata — retrieves all available metadata (issue #5: improved)
+// Metadata
 // ---------------------------------------------------------------------------
-NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInstance, VideoMetadata* pMetadata) {
-    if (!pInstance || !pMetadata)
-        return OP_E_INVALID_PARAMETER;
+static const wchar_t* MimeTypeForSubtype(const GUID& s) {
+    if (s == MFVideoFormat_H264)  return L"video/h264";
+    if (s == MFVideoFormat_HEVC)  return L"video/hevc";
+    if (s == MFVideoFormat_MPEG2) return L"video/mpeg2";
+    if (s == MFVideoFormat_WMV3 || s == MFVideoFormat_WMV2 || s == MFVideoFormat_WMV1)
+        return L"video/x-ms-wmv";
+    if (s == MFVideoFormat_VP80)  return L"video/vp8";
+    if (s == MFVideoFormat_VP90)  return L"video/vp9";
+    if (s == MFVideoFormat_MJPG)  return L"video/x-motion-jpeg";
+    if (s == MFVideoFormat_MP4V)  return L"video/mp4v-es";
+    if (s == MFVideoFormat_MP43)  return L"video/x-msmpeg4v3";
+    return L"video/unknown";
+}
 
-    // HLS path: build basic metadata from engine properties
+NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInstance, VideoMetadata* pMetadata) {
+    if (!pInstance || !pMetadata) return OP_E_INVALID_PARAMETER;
+
     if (pInstance->pHLSPlayer) {
         ZeroMemory(pMetadata, sizeof(VideoMetadata));
         pInstance->pHLSPlayer->GetVideoSize(&pMetadata->width, &pMetadata->height);
-        pMetadata->hasWidth = pMetadata->width > 0;
+        pMetadata->hasWidth  = pMetadata->width  > 0;
         pMetadata->hasHeight = pMetadata->height > 0;
         LONGLONG dur = 0;
         if (SUCCEEDED(pInstance->pHLSPlayer->GetDuration(&dur)) && dur > 0) {
@@ -1369,193 +1124,122 @@ NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInsta
         return S_OK;
     }
 
-    if (!pInstance->pSourceReader)
-        return OP_E_NOT_INITIALIZED;
+    if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
 
     ZeroMemory(pMetadata, sizeof(VideoMetadata));
 
-    HRESULT hr = S_OK;
-    IMFMediaSource* pMediaSource = nullptr;
-    IMFPresentationDescriptor* pPresentationDescriptor = nullptr;
+    ComPtr<IMFMediaSource> source;
+    HRESULT hr = pInstance->pSourceReader->GetServiceForStream(
+        MF_SOURCE_READER_MEDIASOURCE, GUID_NULL, IID_PPV_ARGS(source.GetAddressOf()));
 
-    hr = pInstance->pSourceReader->GetServiceForStream(
-        MF_SOURCE_READER_MEDIASOURCE,
-        GUID_NULL,
-        IID_PPV_ARGS(&pMediaSource));
-
-    if (SUCCEEDED(hr) && pMediaSource) {
-        hr = pMediaSource->CreatePresentationDescriptor(&pPresentationDescriptor);
-
-        if (SUCCEEDED(hr) && pPresentationDescriptor) {
-            // Duration
+    if (SUCCEEDED(hr) && source) {
+        ComPtr<IMFPresentationDescriptor> pd;
+        if (SUCCEEDED(source->CreatePresentationDescriptor(pd.GetAddressOf()))) {
             UINT64 duration = 0;
-            if (SUCCEEDED(pPresentationDescriptor->GetUINT64(MF_PD_DURATION, &duration))) {
+            if (SUCCEEDED(pd->GetUINT64(MF_PD_DURATION, &duration))) {
                 pMetadata->duration = static_cast<LONGLONG>(duration);
                 pMetadata->hasDuration = TRUE;
             }
 
-            // ---- Title via IMFMetadataProvider (issue #5) ----
-            IMFMetadataProvider* pMetaProvider = nullptr;
-            hr = MFGetService(pMediaSource, MF_METADATA_PROVIDER_SERVICE,
-                              IID_PPV_ARGS(&pMetaProvider));
-            if (SUCCEEDED(hr) && pMetaProvider) {
-                IMFMetadata* pMeta = nullptr;
-                hr = pMetaProvider->GetMFMetadata(pPresentationDescriptor, 0, 0, &pMeta);
-                if (SUCCEEDED(hr) && pMeta) {
+            // Title
+            ComPtr<IMFMetadataProvider> metaProvider;
+            if (SUCCEEDED(MFGetService(source.Get(), MF_METADATA_PROVIDER_SERVICE,
+                                        IID_PPV_ARGS(metaProvider.GetAddressOf())))) {
+                ComPtr<IMFMetadata> meta;
+                if (SUCCEEDED(metaProvider->GetMFMetadata(pd.Get(), 0, 0, meta.GetAddressOf())) && meta) {
                     PROPVARIANT valTitle;
                     PropVariantInit(&valTitle);
-                    if (SUCCEEDED(pMeta->GetProperty(L"Title", &valTitle)) &&
-                        valTitle.vt == VT_LPWSTR && valTitle.pwszVal) {
+                    if (SUCCEEDED(meta->GetProperty(L"Title", &valTitle))
+                        && valTitle.vt == VT_LPWSTR && valTitle.pwszVal) {
                         wcsncpy_s(pMetadata->title, valTitle.pwszVal, _TRUNCATE);
                         pMetadata->hasTitle = TRUE;
                     }
                     PropVariantClear(&valTitle);
-                    pMeta->Release();
                 }
-                pMetaProvider->Release();
             }
 
-            // Process each stream for video/audio metadata
+            // Streams
             DWORD streamCount = 0;
-            hr = pPresentationDescriptor->GetStreamDescriptorCount(&streamCount);
-
+            pd->GetStreamDescriptorCount(&streamCount);
             LONGLONG totalBitrate = 0;
-            bool hasBitrateInfo = false;
+            bool hasBitrate = false;
 
-            if (SUCCEEDED(hr)) {
-                for (DWORD i = 0; i < streamCount; i++) {
-                    BOOL selected = FALSE;
-                    IMFStreamDescriptor* pStreamDescriptor = nullptr;
+            for (DWORD i = 0; i < streamCount; ++i) {
+                BOOL selected = FALSE;
+                ComPtr<IMFStreamDescriptor> sd;
+                if (FAILED(pd->GetStreamDescriptorByIndex(i, &selected, sd.GetAddressOf()))) continue;
 
-                    if (SUCCEEDED(pPresentationDescriptor->GetStreamDescriptorByIndex(i, &selected, &pStreamDescriptor))) {
-                        IMFMediaTypeHandler* pHandler = nullptr;
-                        if (SUCCEEDED(pStreamDescriptor->GetMediaTypeHandler(&pHandler))) {
-                            GUID majorType;
-                            if (SUCCEEDED(pHandler->GetMajorType(&majorType))) {
-                                if (majorType == MFMediaType_Video) {
-                                    IMFMediaType* pMediaType = nullptr;
-                                    if (SUCCEEDED(pHandler->GetCurrentMediaType(&pMediaType))) {
-                                        // Dimensions
-                                        UINT32 width = 0, height = 0;
-                                        if (SUCCEEDED(MFGetAttributeSize(pMediaType, MF_MT_FRAME_SIZE, &width, &height))) {
-                                            pMetadata->width = width;
-                                            pMetadata->height = height;
-                                            pMetadata->hasWidth = TRUE;
-                                            pMetadata->hasHeight = TRUE;
-                                        }
+                ComPtr<IMFMediaTypeHandler> handler;
+                if (FAILED(sd->GetMediaTypeHandler(handler.GetAddressOf()))) continue;
 
-                                        // Frame rate
-                                        UINT32 numerator = 0, denominator = 1;
-                                        if (SUCCEEDED(MFGetAttributeRatio(pMediaType, MF_MT_FRAME_RATE, &numerator, &denominator))) {
-                                            if (denominator > 0) {
-                                                pMetadata->frameRate = static_cast<float>(numerator) / static_cast<float>(denominator);
-                                                pMetadata->hasFrameRate = TRUE;
-                                            }
-                                        }
+                GUID major{};
+                if (FAILED(handler->GetMajorType(&major))) continue;
 
-                                        // Video bitrate (issue #5)
-                                        UINT32 videoBitrate = 0;
-                                        if (SUCCEEDED(pMediaType->GetUINT32(MF_MT_AVG_BITRATE, &videoBitrate))) {
-                                            totalBitrate += videoBitrate;
-                                            hasBitrateInfo = true;
-                                        }
+                ComPtr<IMFMediaType> mt;
+                if (FAILED(handler->GetCurrentMediaType(mt.GetAddressOf()))) continue;
 
-                                        // MIME type from codec subtype (issue #5: extended mapping)
-                                        GUID subtype;
-                                        if (SUCCEEDED(pMediaType->GetGUID(MF_MT_SUBTYPE, &subtype))) {
-                                            if (subtype == MFVideoFormat_H264) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/h264");
-                                            } else if (subtype == MFVideoFormat_HEVC) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/hevc");
-                                            } else if (subtype == MFVideoFormat_MPEG2) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/mpeg2");
-                                            } else if (subtype == MFVideoFormat_WMV3) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/x-ms-wmv");
-                                            } else if (subtype == MFVideoFormat_WMV2) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/x-ms-wmv");
-                                            } else if (subtype == MFVideoFormat_WMV1) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/x-ms-wmv");
-                                            } else if (subtype == MFVideoFormat_VP80) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/vp8");
-                                            } else if (subtype == MFVideoFormat_VP90) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/vp9");
-                                            } else if (subtype == MFVideoFormat_MJPG) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/x-motion-jpeg");
-                                            } else if (subtype == MFVideoFormat_MP4V) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/mp4v-es");
-                                            } else if (subtype == MFVideoFormat_MP43) {
-                                                wcscpy_s(pMetadata->mimeType, L"video/x-msmpeg4v3");
-                                            } else {
-                                                wcscpy_s(pMetadata->mimeType, L"video/unknown");
-                                            }
-                                            pMetadata->hasMimeType = TRUE;
-                                        }
-
-                                        pMediaType->Release();
-                                    }
-                                }
-                                else if (majorType == MFMediaType_Audio) {
-                                    IMFMediaType* pMediaType = nullptr;
-                                    if (SUCCEEDED(pHandler->GetCurrentMediaType(&pMediaType))) {
-                                        UINT32 channels = 0;
-                                        if (SUCCEEDED(pMediaType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels))) {
-                                            pMetadata->audioChannels = channels;
-                                            pMetadata->hasAudioChannels = TRUE;
-                                        }
-
-                                        UINT32 sampleRate = 0;
-                                        if (SUCCEEDED(pMediaType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate))) {
-                                            pMetadata->audioSampleRate = sampleRate;
-                                            pMetadata->hasAudioSampleRate = TRUE;
-                                        }
-
-                                        // Audio bitrate (issue #5)
-                                        UINT32 audioBytesPerSec = 0;
-                                        if (SUCCEEDED(pMediaType->GetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &audioBytesPerSec))) {
-                                            totalBitrate += static_cast<LONGLONG>(audioBytesPerSec) * 8;
-                                            hasBitrateInfo = true;
-                                        }
-
-                                        pMediaType->Release();
-                                    }
-                                }
-                            }
-                            pHandler->Release();
-                        }
-                        pStreamDescriptor->Release();
+                if (major == MFMediaType_Video) {
+                    UINT32 w = 0, h = 0;
+                    if (SUCCEEDED(MFGetAttributeSize(mt.Get(), MF_MT_FRAME_SIZE, &w, &h))) {
+                        pMetadata->width = w; pMetadata->height = h;
+                        pMetadata->hasWidth = TRUE; pMetadata->hasHeight = TRUE;
+                    }
+                    UINT32 num = 0, den = 1;
+                    if (SUCCEEDED(MFGetAttributeRatio(mt.Get(), MF_MT_FRAME_RATE, &num, &den)) && den > 0) {
+                        pMetadata->frameRate = static_cast<float>(num) / den;
+                        pMetadata->hasFrameRate = TRUE;
+                    }
+                    UINT32 vb = 0;
+                    if (SUCCEEDED(mt->GetUINT32(MF_MT_AVG_BITRATE, &vb))) {
+                        totalBitrate += vb;
+                        hasBitrate = true;
+                    }
+                    GUID sub{};
+                    if (SUCCEEDED(mt->GetGUID(MF_MT_SUBTYPE, &sub))) {
+                        wcscpy_s(pMetadata->mimeType, MimeTypeForSubtype(sub));
+                        pMetadata->hasMimeType = TRUE;
+                    }
+                } else if (major == MFMediaType_Audio) {
+                    UINT32 ch = 0;
+                    if (SUCCEEDED(mt->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &ch))) {
+                        pMetadata->audioChannels = ch;
+                        pMetadata->hasAudioChannels = TRUE;
+                    }
+                    UINT32 sr = 0;
+                    if (SUCCEEDED(mt->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sr))) {
+                        pMetadata->audioSampleRate = sr;
+                        pMetadata->hasAudioSampleRate = TRUE;
+                    }
+                    UINT32 abps = 0;
+                    if (SUCCEEDED(mt->GetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &abps))) {
+                        totalBitrate += static_cast<LONGLONG>(abps) * 8;
+                        hasBitrate = true;
                     }
                 }
             }
 
-            // Report combined bitrate if we gathered any info
-            if (hasBitrateInfo) {
+            if (hasBitrate) {
                 pMetadata->bitrate = totalBitrate;
                 pMetadata->hasBitrate = TRUE;
             }
-
-            pPresentationDescriptor->Release();
         }
-        pMediaSource->Release();
     }
 
-    // Fallback: fill in from instance state if the media source did not provide values
+    // Fallbacks
     if (!pMetadata->hasWidth || !pMetadata->hasHeight) {
         if (pInstance->videoWidth > 0 && pInstance->videoHeight > 0) {
             pMetadata->width = pInstance->videoWidth;
             pMetadata->height = pInstance->videoHeight;
-            pMetadata->hasWidth = TRUE;
-            pMetadata->hasHeight = TRUE;
+            pMetadata->hasWidth = TRUE; pMetadata->hasHeight = TRUE;
         }
     }
-
     if (!pMetadata->hasFrameRate) {
-        UINT numerator = 0, denominator = 1;
-        if (SUCCEEDED(GetVideoFrameRate(pInstance, &numerator, &denominator)) && denominator > 0) {
-            pMetadata->frameRate = static_cast<float>(numerator) / static_cast<float>(denominator);
+        UINT num = 0, den = 1;
+        if (SUCCEEDED(GetVideoFrameRate(pInstance, &num, &den)) && den > 0) {
+            pMetadata->frameRate = static_cast<float>(num) / den;
             pMetadata->hasFrameRate = TRUE;
         }
     }
-
     if (!pMetadata->hasDuration) {
         LONGLONG dur = 0;
         if (SUCCEEDED(GetMediaDuration(pInstance, &dur))) {
@@ -1563,105 +1247,68 @@ NATIVEVIDEOPLAYER_API HRESULT GetVideoMetadata(const VideoPlayerInstance* pInsta
             pMetadata->hasDuration = TRUE;
         }
     }
-
     if (!pMetadata->hasAudioChannels && pInstance->bHasAudio && pInstance->pSourceAudioFormat) {
         pMetadata->audioChannels = pInstance->pSourceAudioFormat->nChannels;
         pMetadata->hasAudioChannels = TRUE;
         pMetadata->audioSampleRate = pInstance->pSourceAudioFormat->nSamplesPerSec;
         pMetadata->hasAudioSampleRate = TRUE;
     }
-
     return S_OK;
 }
 
-// ---------------------------------------------------------------------------
-// SetOutputSize — reconfigure the source reader to produce scaled frames
 // ---------------------------------------------------------------------------
 NATIVEVIDEOPLAYER_API HRESULT SetOutputSize(VideoPlayerInstance* pInstance, UINT32 targetWidth, UINT32 targetHeight) {
     if (!pInstance) return OP_E_NOT_INITIALIZED;
 
     if (pInstance->pHLSPlayer) {
         HRESULT hr = pInstance->pHLSPlayer->SetOutputSize(targetWidth, targetHeight);
-        if (SUCCEEDED(hr)) {
+        if (SUCCEEDED(hr))
             pInstance->pHLSPlayer->GetVideoSize(&pInstance->videoWidth, &pInstance->videoHeight);
-        }
         return hr;
     }
+    if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
 
-    if (!pInstance->pSourceReader)
-        return OP_E_NOT_INITIALIZED;
-
-    // 0,0 means "reset to native resolution"
     if (targetWidth == 0 || targetHeight == 0) {
         targetWidth  = pInstance->nativeWidth;
         targetHeight = pInstance->nativeHeight;
     }
-
-    // Don't scale UP beyond the native resolution
     if (targetWidth > pInstance->nativeWidth || targetHeight > pInstance->nativeHeight) {
         targetWidth  = pInstance->nativeWidth;
         targetHeight = pInstance->nativeHeight;
     }
 
-    // Preserve aspect ratio: fit inside the target bounding box
     if (pInstance->nativeWidth > 0 && pInstance->nativeHeight > 0) {
-        double srcAspect = static_cast<double>(pInstance->nativeWidth) / pInstance->nativeHeight;
-        double dstAspect = static_cast<double>(targetWidth) / targetHeight;
-        if (srcAspect > dstAspect) {
-            // Width-limited
-            targetHeight = static_cast<UINT32>(targetWidth / srcAspect);
-        } else {
-            // Height-limited
-            targetWidth = static_cast<UINT32>(targetHeight * srcAspect);
-        }
+        const double srcAspect = static_cast<double>(pInstance->nativeWidth) / pInstance->nativeHeight;
+        const double dstAspect = static_cast<double>(targetWidth) / targetHeight;
+        if (srcAspect > dstAspect) targetHeight = static_cast<UINT32>(targetWidth / srcAspect);
+        else                       targetWidth  = static_cast<UINT32>(targetHeight * srcAspect);
     }
 
-    // MF requires even dimensions
     targetWidth  = (targetWidth  + 1) & ~1u;
     targetHeight = (targetHeight + 1) & ~1u;
 
-    // Skip if already at this size
-    if (targetWidth == pInstance->videoWidth && targetHeight == pInstance->videoHeight)
-        return S_OK;
+    if (targetWidth == pInstance->videoWidth && targetHeight == pInstance->videoHeight) return S_OK;
+    if (targetWidth < 2 || targetHeight < 2) return E_INVALIDARG;
 
-    // Minimum size guard
-    if (targetWidth < 2 || targetHeight < 2)
-        return E_INVALIDARG;
-
-    // Reconfigure the output media type with the new frame size
-    IMFMediaType* pType = nullptr;
-    HRESULT hr = MFCreateMediaType(&pType);
+    ComPtr<IMFMediaType> type;
+    HRESULT hr = MFCreateMediaType(type.GetAddressOf());
     if (FAILED(hr)) return hr;
 
-    hr = pType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-    if (SUCCEEDED(hr))
-        hr = pType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-    if (SUCCEEDED(hr))
-        hr = MFSetAttributeSize(pType, MF_MT_FRAME_SIZE, targetWidth, targetHeight);
-    if (SUCCEEDED(hr))
-        hr = pInstance->pSourceReader->SetCurrentMediaType(
-            MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, pType);
-    SafeRelease(pType);
+    type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+    MFSetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, targetWidth, targetHeight);
+    hr = pInstance->pSourceReader->SetCurrentMediaType(
+        MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, type.Get());
+    if (FAILED(hr)) return hr;
 
-    if (FAILED(hr))
-        return hr;
-
-    // Verify and update the actual output dimensions
-    IMFMediaType* pActual = nullptr;
-    hr = pInstance->pSourceReader->GetCurrentMediaType(
-        MF_SOURCE_READER_FIRST_VIDEO_STREAM, &pActual);
-    if (SUCCEEDED(hr)) {
-        MFGetAttributeSize(pActual, MF_MT_FRAME_SIZE,
+    ComPtr<IMFMediaType> actual;
+    if (SUCCEEDED(pInstance->pSourceReader->GetCurrentMediaType(
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM, actual.GetAddressOf()))) {
+        MFGetAttributeSize(actual.Get(), MF_MT_FRAME_SIZE,
                            &pInstance->videoWidth, &pInstance->videoHeight);
-        SafeRelease(pActual);
     }
 
-    // Invalidate cached sample since dimensions changed
-    if (pInstance->pCachedSample) {
-        pInstance->pCachedSample->Release();
-        pInstance->pCachedSample = nullptr;
-    }
-    pInstance->bHasInitialFrame = FALSE;
-
+    pInstance->pCachedSample.Reset();
+    pInstance->bHasInitialFrame = false;
     return S_OK;
 }
