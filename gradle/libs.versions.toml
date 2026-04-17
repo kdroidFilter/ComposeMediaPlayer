@@ -58,4 +58,4 @@ vannitktech-maven-publish = {id = "com.vanniktech.maven.publish", version = "0.3
 dokka = { id = "org.jetbrains.dokka" , version = "2.2.0"}
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
-nucleus = { id = "io.github.kdroidfilter.nucleus", version = "1.9.1" }
+nucleus = { id = "io.github.kdroidfilter.nucleus", version = "1.13.0" }
