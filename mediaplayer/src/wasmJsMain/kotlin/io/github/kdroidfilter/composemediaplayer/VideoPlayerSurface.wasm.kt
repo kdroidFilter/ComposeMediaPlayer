@@ -26,7 +26,6 @@ actual fun VideoPlayerSurface(
         // State for CORS mode changes
         var lastPosition by remember { mutableStateOf(0.0) }
         var wasPlaying by remember { mutableStateOf(false) }
-        var lastPlaybackSpeed by remember { mutableStateOf(1.0f) }
 
         // Shared effects
         VideoPlayerEffects(
@@ -36,10 +35,8 @@ actual fun VideoPlayerSurface(
             useCors = useCors,
             onLastPositionChange = { lastPosition = it },
             onWasPlayingChange = { wasPlaying = it },
-            onLastPlaybackSpeedChange = { lastPlaybackSpeed = it },
             lastPosition = lastPosition,
             wasPlaying = wasPlaying,
-            lastPlaybackSpeed = lastPlaybackSpeed,
         )
 
         VideoVolumeAndSpeedEffects(

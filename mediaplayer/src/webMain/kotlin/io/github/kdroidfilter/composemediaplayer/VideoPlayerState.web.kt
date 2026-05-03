@@ -246,7 +246,6 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _isLoading = true // Set initial loading state
         _error = null
         _isPlaying = false
-        _playbackSpeed = 1.0f
 
         // Don't set isLoading to false here - let the video events handle it
         playerScope.launch {

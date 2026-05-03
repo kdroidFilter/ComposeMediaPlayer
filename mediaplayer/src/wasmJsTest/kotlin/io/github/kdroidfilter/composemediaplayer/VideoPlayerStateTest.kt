@@ -23,6 +23,7 @@ class VideoPlayerStateTest {
         assertFalse(playerState.isPlaying)
         assertEquals(0f, playerState.sliderPos)
         assertEquals(1f, playerState.volume)
+        assertEquals(1f, playerState.playbackSpeed)
         assertFalse(playerState.loop)
         assertEquals("00:00", playerState.positionText)
         assertEquals("00:00", playerState.durationText)
@@ -52,6 +53,28 @@ class VideoPlayerStateTest {
 
         playerState.volume = 1.5f
         assertEquals(1f, playerState.volume, "Volume should be clamped to 1")
+
+        // Clean up
+        playerState.dispose()
+    }
+
+    @Test
+    fun `testPlaybackSpeedControl`() {
+        val playerState = createVideoPlayerState()
+
+        // Test initial speed
+        assertEquals(1f, playerState.playbackSpeed)
+
+        // Test setting speed
+        playerState.playbackSpeed = 0.5f
+        assertEquals(0.5f, playerState.playbackSpeed)
+
+        // Test speed bounds
+        playerState.playbackSpeed = -1f
+        assertEquals(0.25f, playerState.playbackSpeed, "Playback speed should be clamped to 0.25")
+
+        playerState.playbackSpeed = 10f
+        assertEquals(2f, playerState.playbackSpeed, "Playback speed should be clamped to 2")
 
         // Clean up
         playerState.dispose()
@@ -184,5 +207,15 @@ class VideoPlayerStateTest {
 
         // Clean up
         playerState.dispose()
+    }
+
+    @Test
+    fun testLoadingVideoDoNotResetPlaybackSpeed() {
+        val playerState = createVideoPlayerState()
+        playerState.playbackSpeed = 2f
+
+        playerState.openUri("file:///path/to/file")
+
+        assertEquals(2f, playerState.playbackSpeed)
     }
 }
