@@ -1,7 +1,7 @@
 [versions]
 
 androidcontextprovider = "1.0.1"
-filekit = "0.13.0"
+filekit = "0.14.0"
 kotlin = "2.3.20"
 agp = "8.13.2"
 kotlinx-coroutines = "1.10.2"
