@@ -256,5 +256,10 @@ mavenPublishing {
     }
 
     publishToMavenCentral()
-    signAllPublications()
+
+    // Only sign publications in CI environments to avoid requiring local GPG signing setup.
+    if (System.getenv("CI") != null) {
+        signAllPublications()
+    }
+
 }
