@@ -87,6 +87,17 @@ interface VideoPlayerState {
     var isFullscreen: Boolean
     val aspectRatio: Float
 
+    /**
+     * Controls whether playback automatically pauses when the app moves to the background
+     * and resumes when returning to the foreground.
+     *
+     * When `true` (default), the player pauses on background and resumes on foreground
+     * if it was playing before. When `false`, playback continues uninterrupted in the background
+     * (audio will keep playing on Android; iOS may still pause video rendering).
+     */
+    var pauseOnBackground: Boolean get() = true
+        set(_) {}
+
     val isPipSupported: Boolean get() = false
     var isPipActive: Boolean get() = false
         set(value) {}
@@ -309,6 +320,7 @@ data class PreviewableVideoPlayerState(
     override var isPipEnabled: Boolean = false,
     override var onPlaybackEnded: (() -> Unit)? = null,
     override var onRestart: (() -> Unit)? = null,
+    override var pauseOnBackground: Boolean = true,
 ) : VideoPlayerState {
     override fun play() {}
 
