@@ -447,6 +447,45 @@ class MacVideoPlayerState : VideoPlayerState {
         macLogger.e { "Unable to retrieve valid dimensions after $maxAttempts attempts" }
     }
 
+    /**
+     * Returns the aspect ratio the video should be displayed at.
+     *
+     * Prefers the display aspect ratio reported by AVFoundation ([MacNativeBridge.nGetDisplayAspectRatio],
+     * i.e. `presentationSize`), which has the pixel aspect ratio and clean aperture applied. Anamorphic /
+     * non-square-pixel videos have a display aspect ratio that differs from the raw decoded pixel-buffer
+     * dimensions; drawing the raw bitmap into a Canvas sized with this display ratio rescales the pixels
+     * back to their intended geometry. Falls back to the raw frame ratio when unavailable.
+     */
+    private fun displayAspectRatio(width: Int, height: Int): Float {
+        val ptr = playerPtr
+        val displayAspect = if (ptr != 0L) MacNativeBridge.nGetDisplayAspectRatio(ptr) else 0.0
+        return if (displayAspect > 0.0) {
+            displayAspect.toFloat()
+        } else {
+            width.toFloat() / height.toFloat()
+        }
+    }
+
+    /**
+     * Aligns the displayed aspect ratio (and reported dimensions) with the live frame.
+     *
+     * Called on every published frame. Both [_aspectRatio] and the [metadata] width/height are
+     * snapshot-backed state, so they can be written safely from the frame-decoding thread, and the
+     * guards keep it a no-op unless a value actually changed. This is what prevents the video from
+     * being stretched when the dimensions known at open time (HLS reports a default/early-variant
+     * size, anamorphic content has non-square pixels) don't match the frames being rendered.
+     */
+    private fun syncAspectRatioToFrame(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+
+        val frameAspect = displayAspectRatio(width, height)
+        if (kotlin.math.abs(frameAspect - _aspectRatio.value) > 0.001f) {
+            _aspectRatio.value = frameAspect
+        }
+        if (metadata.width != width) metadata.width = width
+        if (metadata.height != height) metadata.height = height
+    }
+
     /** Updates the metadata from the native player. */
     private suspend fun updateMetadata() {
         macLogger.d { "updateMetadata()" }
@@ -459,13 +498,12 @@ class MacVideoPlayerState : VideoPlayerState {
             val duration = (MacNativeBridge.nGetVideoDuration(ptr) * 1000).toLong()
             val frameRate = MacNativeBridge.nGetVideoFrameRate(ptr)
 
-            // Calculate aspect ratio
+            // Initial aspect ratio estimate; refined per-frame by syncAspectRatioToFrame().
+            // Keep the previous value if the video isn't ready yet rather than forcing 16:9.
             val newAspectRatio =
                 if (width > 0 && height > 0) {
-                    width.toFloat() / height.toFloat()
+                    displayAspectRatio(width, height)
                 } else {
-                    // Instead of forcing 16f/9f, don’t change the aspect if the video is not ready yet.
-                    // For example, we can keep the previous aspect ratio:
                     _aspectRatio.value
                 }
 
@@ -488,7 +526,6 @@ class MacVideoPlayerState : VideoPlayerState {
                 metadata.audioChannels = if (audioChannels == 0) null else audioChannels
                 metadata.audioSampleRate = if (audioSampleRate == 0) null else audioSampleRate
 
-                // Update the aspect ratio only if width/height are valid
                 _aspectRatio.value = newAspectRatio
             }
 
@@ -621,6 +658,15 @@ class MacVideoPlayerState : VideoPlayerState {
 
                         _currentFrameState.value = targetBitmap.asComposeImageBitmap()
                         framePublished = true
+
+                        // Keep the displayed aspect ratio in sync with the frame we actually draw.
+                        // The dimensions captured by updateMetadata() at open time can be wrong or
+                        // stale (HLS reports a default/early-variant size before the real resolution is
+                        // decoded; anamorphic content has non-square pixels). Since the Canvas is sized
+                        // with aspectRatio and the full bitmap is stretched into it, a mismatch distorts
+                        // the image (e.g. vertical stretch). Re-derive it from the live frame. Cheap:
+                        // only writes snapshot state when the value actually changes.
+                        syncAspectRatioToFrame(width, height)
                     }
                 } finally {
                     MacNativeBridge.nUnlockFrame(ptr)

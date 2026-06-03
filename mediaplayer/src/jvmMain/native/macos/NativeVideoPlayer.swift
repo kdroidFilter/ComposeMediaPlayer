@@ -71,6 +71,13 @@ class MacVideoPlayer {
     private var bufferEmptyObserver: NSKeyValueObservation?
     private var bufferLikelyToKeepUpObserver: NSKeyValueObservation?
     private var bufferFullObserver: NSKeyValueObservation?
+    private var presentationSizeObserver: NSKeyValueObservation?
+
+    // Display aspect ratio (width / height) derived from AVPlayerItem.presentationSize.
+    // Cached here and updated from the KVO callback so getDisplayAspectRatio() can be called
+    // from the frame-decoding thread without touching the live AVPlayerItem off the main thread.
+    private let aspectLock = NSLock()
+    private var cachedDisplayAspectRatio: Double = 0.0
 
     // End-of-playback flag (set by AVPlayerItemDidPlayToEndTime, consumed once by the Kotlin side)
     private var didPlayToEnd: Bool = false
@@ -886,6 +893,13 @@ class MacVideoPlayer {
             self?.handleTimeControlStatus(player.timeControlStatus)
         }
 
+        // Cache the display aspect ratio whenever presentationSize changes (e.g. HLS variant
+        // switches). Reading presentationSize here keeps the live AVPlayerItem access on the
+        // observation thread instead of the frame-decoding thread. .initial seeds the value now.
+        presentationSizeObserver = item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
+            self?.updateCachedDisplayAspectRatio(from: item.presentationSize)
+        }
+
         // Observe end of playback for all media types
         playbackEndObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
@@ -1166,6 +1180,29 @@ class MacVideoPlayer {
     /// Returns the height of the video frame in pixels
     func getFrameHeight() -> Int { return frameHeight }
 
+    /// Recomputes the cached display aspect ratio from a presentationSize. Called on the KVO
+    /// observation thread; the value is read elsewhere from the frame-decoding thread.
+    private func updateCachedDisplayAspectRatio(from size: CGSize) {
+        let ratio = (size.width > 0 && size.height > 0) ? Double(size.width) / Double(size.height) : 0.0
+        aspectLock.lock()
+        cachedDisplayAspectRatio = ratio
+        aspectLock.unlock()
+    }
+
+    /// Returns the correct display aspect ratio (width / height) of the current video.
+    ///
+    /// Derived from `AVPlayerItem.presentationSize`, which AVFoundation computes with the pixel
+    /// aspect ratio and clean aperture already applied. This is the geometry the video should be
+    /// drawn at — it can differ from the raw decoded pixel-buffer dimensions for anamorphic /
+    /// non-square pixel content, which would otherwise be stretched. The value is cached from a
+    /// KVO observer (see setup) so this is safe to call off the main thread; returns 0 when not
+    /// yet available so the caller can fall back to the raw frame dimensions.
+    func getDisplayAspectRatio() -> Double {
+        aspectLock.lock()
+        defer { aspectLock.unlock() }
+        return cachedDisplayAspectRatio
+    }
+
     /// Scales the output to fit within (width, height) while preserving the native aspect ratio.
     /// Never upscales beyond the native resolution. Recreates the pixel buffer output at the new size.
     /// Returns true if dimensions actually changed.
@@ -1310,6 +1347,10 @@ class MacVideoPlayer {
         bufferEmptyObserver?.invalidate()
         bufferLikelyToKeepUpObserver?.invalidate()
         bufferFullObserver?.invalidate()
+        presentationSizeObserver?.invalidate()
+        presentationSizeObserver = nil
+        // Drop the cached aspect ratio so a reopened player can't briefly show the old video's ratio.
+        updateCachedDisplayAspectRatio(from: .zero)
 
         if let observer = playbackEndObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -1418,6 +1459,13 @@ public func getFrameHeight(_ context: UnsafeMutableRawPointer?) -> Int32 {
     guard let context = context else { return 0 }
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return Int32(player.getFrameHeight())
+}
+
+@_cdecl("getDisplayAspectRatio")
+public func getDisplayAspectRatio(_ context: UnsafeMutableRawPointer?) -> Double {
+    guard let context = context else { return 0.0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.getDisplayAspectRatio()
 }
 
 @_cdecl("setOutputSize")

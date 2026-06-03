@@ -65,6 +65,8 @@ internal object MacNativeBridge {
 
     @JvmStatic external fun nGetFrameHeight(handle: Long): Int
 
+    @JvmStatic external fun nGetDisplayAspectRatio(handle: Long): Double
+
     @JvmStatic external fun nSetOutputSize(
         handle: Long,
         width: Int,
