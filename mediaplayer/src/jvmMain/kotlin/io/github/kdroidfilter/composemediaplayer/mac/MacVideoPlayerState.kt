@@ -47,9 +47,11 @@ import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import java.io.File
+import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.ReentrantReadWriteLock
+import kotlin.concurrent.read
 import kotlin.concurrent.write
 
 internal val macLogger = TaggedLogger("MacVideoPlayerState")
@@ -263,6 +265,12 @@ class MacVideoPlayerState : VideoPlayerState {
     // bound to ImageBitmap and the one Compose just finished.
     private val skiaBitmaps = arrayOfNulls<Bitmap>(3)
     private var nextBitmapIndex: Int = 0
+
+    // Bitmap most recently handed to frameChannel (producer-thread only). Excluded as a write
+    // target together with the displayed bitmap: with the drop-oldest channel the consumer can
+    // lag a full slot behind, and blind round-robin would then write into the bitmap currently
+    // bound to Compose (or sitting undelivered in the channel) and tear on screen.
+    private var lastSentBitmap: Bitmap? = null
     @Volatile
     private var lastFrameHash: Int = Int.MIN_VALUE
     private var skiaBitmapWidth: Int = 0
@@ -380,6 +388,10 @@ class MacVideoPlayerState : VideoPlayerState {
                     _hasMedia = false
                     userPaused = false
                     initialFrameRead.set(false)
+                    // Discard any seek latched against the previous media; if the in-flight seek
+                    // loop only drained it after the new media finished opening, the new video
+                    // would jump to the old target.
+                    pendingSeekTarget.set(Long.MIN_VALUE)
 
                     // Validate local files before handing off to the native layer.
                     if (!checkExistsIfLocalFile(uri)) {
@@ -526,18 +538,24 @@ class MacVideoPlayerState : VideoPlayerState {
         return 0.0
     }
 
-    // Handles both URIs with a "file:" scheme and simple filenames; network URIs are assumed reachable.
-    private fun checkExistsIfLocalFile(uri: String): Boolean {
-        val schemeDelimiter = uri.indexOf("://")
-        val scheme = if (schemeDelimiter >= 0) uri.substring(0, schemeDelimiter) else ""
-        return when (scheme) {
-            "", "file" -> {
-                val path = if (scheme == "file") uri.removePrefix("file://") else uri
-                File(path).exists()
+    // Handles plain paths and every file-URI shape (file:/p, file://p, file:///p — naive
+    // "file://" prefix-stripping rejected the single-slash form java.net.URI produces);
+    // URI parsing also undoes percent-encoding so paths with escaped characters are checked
+    // correctly. Network URIs are assumed reachable.
+    private fun checkExistsIfLocalFile(uri: String): Boolean =
+        try {
+            val parsed = URI(uri)
+            when {
+                parsed.scheme == null -> File(uri).exists()
+                parsed.scheme.equals("file", ignoreCase = true) ->
+                    // path is null for opaque URIs like "file:relative/path" — malformed for us.
+                    parsed.path?.let { File(it).exists() } ?: false
+                else -> true
             }
-            else -> true
+        } catch (_: Exception) {
+            // Not parseable as a URI (e.g. a plain path with spaces) — treat as a local path.
+            File(uri).exists()
         }
-    }
 
     // ---------------------------------------------------------------------------------------------
     // Aspect ratio (the deliberate divergence from Windows — display-AR correct)
@@ -685,10 +703,13 @@ class MacVideoPlayerState : VideoPlayerState {
             if (ptr == 0L) break
 
             // End-of-playback: AVFoundation fires AVPlayerItemDidPlayToEndTime, surfaced as a
-            // one-shot flag. Only consume/act on it while genuinely playing and not mid-seek —
-            // otherwise a stray flag observed during a seek or paused thumbnail read could be
-            // swallowed or trigger a spurious end. Mirrors the Windows IsEOF branch.
-            if (_isPlaying && !isSeeking.get() && !seekInFlight.get() && MacNativeBridge.nConsumeDidPlayToEnd(ptr)) {
+            // one-shot flag. Only consume/act on it while genuinely playing and not mid-seek or
+            // mid-drag — otherwise a stray flag observed during a seek or paused thumbnail read
+            // could be swallowed or trigger a spurious end (a drag always ends in a seek, whose
+            // performSeek() drains any flag that became stale). Mirrors the Windows IsEOF branch.
+            if (_isPlaying && !_userDragging && !isSeeking.get() && !seekInFlight.get() &&
+                MacNativeBridge.nConsumeDidPlayToEnd(ptr)
+            ) {
                 if (_duration <= 0.0) {
                     // Live stream — wait and continue.
                     delay(1000)
@@ -723,7 +744,11 @@ class MacVideoPlayerState : VideoPlayerState {
                         if (e is CancellationException) throw e
                     }
                     onPlaybackEnded?.invoke()
-                    break
+                    // Keep the producer alive: consumeFrames/observePosition still run, so
+                    // videoJob stays active and resumePlayback()/performSeek() would never
+                    // relaunch the pipeline if we exited here. Falling through to
+                    // waitForPlaybackState parks this coroutine cheaply until play() resumes.
+                    continue
                 }
             }
 
@@ -830,13 +855,25 @@ class MacVideoPlayerState : VideoPlayerState {
                     skiaBitmapWidth = width
                     skiaBitmapHeight = height
                     nextBitmapIndex = 0
+                    lastSentBitmap = null
                 }
             }
 
             drainPendingCloseBitmaps()
 
-            val targetBitmap = skiaBitmaps[nextBitmapIndex]!!
-            nextBitmapIndex = (nextBitmapIndex + 1) % skiaBitmaps.size
+            // Pick a write target that is neither displayed nor the last frame sent. Three
+            // buffers minus at most two exclusions always leaves a free one.
+            val displayedBitmap = bitmapLock.read { _currentFrame }
+            var candidateIndex = nextBitmapIndex
+            var attempts = 0
+            while (attempts < skiaBitmaps.size - 1 &&
+                (skiaBitmaps[candidateIndex] === displayedBitmap || skiaBitmaps[candidateIndex] === lastSentBitmap)
+            ) {
+                candidateIndex = (candidateIndex + 1) % skiaBitmaps.size
+                attempts++
+            }
+            val targetBitmap = skiaBitmaps[candidateIndex]!!
+            nextBitmapIndex = (candidateIndex + 1) % skiaBitmaps.size
 
             val pixmap = targetBitmap.peekPixels() ?: return ProduceOutcome.SkipIteration
             val pixelsAddr = pixmap.addr
@@ -854,6 +891,7 @@ class MacVideoPlayerState : VideoPlayerState {
             syncAspectRatioToFrame(width, height)
 
             val timestamp = MacNativeBridge.nGetCurrentTime(ptr)
+            lastSentBitmap = targetBitmap
             return ProduceOutcome.Frame(targetBitmap, timestamp)
         } finally {
             MacNativeBridge.nUnlockFrame(ptr)
@@ -923,7 +961,11 @@ class MacVideoPlayerState : VideoPlayerState {
             while (iterator.hasNext()) {
                 val entry = iterator.next()
                 entry.framesLeft -= 1
-                if (entry.framesLeft <= 0) {
+                // The grace counter ticks per *produced* frame; the consumer may not have swapped
+                // the displayed frame yet. Never close the bitmap Compose is still bound to —
+                // keep deferring it until a newer frame replaces it (race-free: _currentFrame is
+                // only written under bitmapLock, which we hold here).
+                if (entry.framesLeft <= 0 && entry.bitmap !== _currentFrame) {
                     try {
                         entry.bitmap.close()
                     } catch (_: Throwable) {
@@ -959,8 +1001,9 @@ class MacVideoPlayerState : VideoPlayerState {
             } catch (_: Exception) {
                 // Only kick off a reload if there's genuinely no media AND no open already in
                 // flight, otherwise a slow open completing near the timeout triggers a redundant
-                // second open (full reload/flicker of the just-loaded video).
-                if (!_hasMedia && !isOpening.get()) {
+                // second open (full reload/flicker of the just-loaded video). This catch also sees
+                // the CancellationException from dispose() cancelling the scope — never reload then.
+                if (!_hasMedia && !isOpening.get() && !isDisposing.get()) {
                     lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
                         openUriInternal(uri, InitialPlayerState.PLAY)
                     }
@@ -1008,7 +1051,11 @@ class MacVideoPlayerState : VideoPlayerState {
         executeMediaOperation(operation = "stop") {
             setPlaybackState(false, "Error while stopping playback")
             playerPtr.takeIf { it != 0L }?.let { ptr ->
-                MacNativeBridge.nSeekTo(ptr, 0.0)
+                // videoReaderMutex serializes nSeekTo against a producer mid-frame-read; lock
+                // order (mediaOperationMutex → videoReaderMutex) matches performSeek().
+                videoReaderMutex.withLock {
+                    MacNativeBridge.nSeekTo(ptr, 0.0)
+                }
             }
             delay(50)
             videoJob?.cancelAndJoin()
@@ -1086,6 +1133,10 @@ class MacVideoPlayerState : VideoPlayerState {
                         clearFrameChannel()
 
                         MacNativeBridge.nSeekTo(ptr, targetSeconds)
+                        // The native seek does not clear didPlayToEnd. An end event that fired
+                        // before (or while) this seek ran refers to the pre-seek position; drain
+                        // it so the producer doesn't later "end" playback at the seek target.
+                        MacNativeBridge.nConsumeDidPlayToEnd(ptr)
                         // Keep showing frames while playing; a paused seek captures one natively.
                         if (_isPlaying) MacNativeBridge.nPlay(ptr)
 
@@ -1337,6 +1388,7 @@ class MacVideoPlayerState : VideoPlayerState {
             skiaBitmapWidth = 0
             skiaBitmapHeight = 0
             nextBitmapIndex = 0
+            lastSentBitmap = null
             lastFrameHash = Int.MIN_VALUE
             pendingCloseBitmaps.clear()
         }
