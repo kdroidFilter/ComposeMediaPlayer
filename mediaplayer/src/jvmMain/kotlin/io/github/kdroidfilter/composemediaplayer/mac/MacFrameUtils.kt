@@ -4,14 +4,27 @@ import java.nio.ByteBuffer
 
 internal fun calculateFrameHash(
     buffer: ByteBuffer,
-    pixelCount: Int,
+    width: Int,
+    height: Int,
+    rowBytes: Int,
 ): Int {
-    if (pixelCount <= 0) return 0
+    if (width <= 0 || height <= 0) return 0
 
+    val pixelCount = width * height
     var hash = 1
-    val step = if (pixelCount <= 200) 1 else pixelCount / 200
-    for (i in 0 until pixelCount step step) {
-        hash = 31 * hash + buffer.getInt(i * 4)
+    var step = if (pixelCount <= 200) 1 else pixelCount / 200
+    // A step that is a multiple of the width would pin every sample to the same x column
+    // (e.g. 720x400 → step 1440 → x always 0); with a static edge (letterboxing, dark scene
+    // border) the hash would never change and the dedup would freeze the video.
+    if (width > 1 && step % width == 0) step++
+    var i = 0
+    while (i < pixelCount) {
+        // Map the linear sample index to its real byte offset, honoring row padding
+        // (rowBytes may exceed width*4) so we sample true pixels rather than padding bytes.
+        val x = i % width
+        val y = i / width
+        hash = 31 * hash + buffer.getInt(y * rowBytes + x * 4)
+        i += step
     }
     return hash
 }
