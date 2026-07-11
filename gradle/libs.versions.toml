@@ -1,10 +1,7 @@
 [versions]
 
 androidcontextprovider = "1.0.1"
-cocoapods = "1.9.0"
 filekit = "0.14.0"
-gst1JavaCore = "1.4.0"
-kermit = "2.0.8"
 kotlin = "2.3.20"
 agp = "8.13.2"
 kotlinx-coroutines = "1.10.2"

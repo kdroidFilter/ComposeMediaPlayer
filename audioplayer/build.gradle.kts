@@ -1,3 +1,7 @@
+@file:OptIn(ExperimentalWasmDsl::class)
+
+import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+
 plugins {
     alias(libs.plugins.multiplatform)
     alias(libs.plugins.android.library)
@@ -34,9 +38,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(compose.runtime)
+            implementation(libs.compose.runtime)
             implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kermit)
             implementation(libs.filekit.core)
         }
 
@@ -81,7 +84,7 @@ kotlin {
 
         webMain.dependencies {
             implementation(libs.kotlinx.browser)
-            implementation(compose.ui)
+            implementation(libs.compose.ui)
         }
     }
 }
