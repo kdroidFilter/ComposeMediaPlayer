@@ -135,4 +135,11 @@ mavenPublishing {
             url.set("https://github.com/kdroidFilter/Compose-Media-Player")
         }
     }
+
+    publishToMavenCentral()
+
+    // Only sign publications in CI environments to avoid requiring local GPG signing setup.
+    if (System.getenv("CI") != null) {
+        signAllPublications()
+    }
 }
