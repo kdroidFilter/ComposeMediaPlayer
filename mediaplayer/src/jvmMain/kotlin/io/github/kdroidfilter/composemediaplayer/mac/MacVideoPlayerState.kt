@@ -711,6 +711,17 @@ class MacVideoPlayerState : VideoPlayerState {
                 MacNativeBridge.nConsumeDidPlayToEnd(ptr)
             ) {
                 if (_duration <= 0.0) {
+                    // The end event is already consumed, but the duration may simply not have
+                    // resolved yet (finite file still reporting NaN at open time). Try one last
+                    // read before writing the event off as a live-stream artifact, otherwise a
+                    // real end-of-playback would be silently swallowed.
+                    val d = readDuration(ptr)
+                    if (d > 0.0) {
+                        _duration = d
+                        metadata.duration = (d * 1000).toLong().takeIf { it > 0 }
+                    }
+                }
+                if (_duration <= 0.0) {
                     // Live stream — wait and continue.
                     delay(1000)
                     continue
@@ -995,6 +1006,14 @@ class MacVideoPlayerState : VideoPlayerState {
         scope.launch {
             try {
                 withTimeout(10_000) { initReady.await() }
+                // No media and no open in flight (e.g. play() after stop()): _hasMedia will never
+                // flip on its own, so reload immediately instead of stalling on the full timeout.
+                if (!_hasMedia && !isOpening.get()) {
+                    lastUri?.takeIf { it.isNotEmpty() }?.let { uri ->
+                        openUriInternal(uri, InitialPlayerState.PLAY)
+                    }
+                    return@launch
+                }
                 withTimeout(10_000) {
                     snapshotFlow { _hasMedia }.filter { it }.first()
                 }
@@ -1266,15 +1285,17 @@ class MacVideoPlayerState : VideoPlayerState {
         surfaceWidth = width
         surfaceHeight = height
 
-        isResizing.set(true)
         resizeJob?.cancel()
+        isResizing.set(true)
         resizeJob =
             scope.launch {
-                delay(120)
                 try {
+                    delay(120)
                     applyOutputScaling()
                 } finally {
-                    isResizing.set(false)
+                    // Only the job that still owns the resize clears the flag: a superseding
+                    // onResized() has already cancelled this job and re-set the flag for its own.
+                    if (resizeJob === coroutineContext[Job]) isResizing.set(false)
                 }
             }
     }
@@ -1420,8 +1441,15 @@ class MacVideoPlayerState : VideoPlayerState {
             Thread {
                 try {
                     runBlocking {
-                        withTimeoutOrNull(500) { jobToJoin?.join() }
-                        withTimeoutOrNull(1000) { videoReaderMutex.withLock { } }
+                        if (jobToJoin != null && withTimeoutOrNull(500) { jobToJoin.join() } == null) {
+                            macLogger.w { "dispose(): video pipeline did not stop within 500 ms" }
+                        }
+                        if (withTimeoutOrNull(1000) { videoReaderMutex.withLock { } } == null) {
+                            macLogger.w {
+                                "dispose(): videoReaderMutex not acquired within 1 s — " +
+                                    "a native frame read may still be in flight"
+                            }
+                        }
                     }
                 } catch (_: Throwable) { /* best effort */ }
                 try {
