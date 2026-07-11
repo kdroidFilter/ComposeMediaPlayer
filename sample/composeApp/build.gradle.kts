@@ -73,6 +73,7 @@ kotlin {
             implementation(libs.compose.ui.tooling.preview)
             implementation(libs.compose.material.icons.extended)
             implementation(project(":mediaplayer"))
+            implementation(project(":audioplayer"))
             implementation(libs.filekit.dialogs.compose)
         }
 
@@ -93,7 +94,11 @@ kotlin {
 
 android {
     namespace = "sample.app"
-    compileSdk = 36
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 0
+        }
+    }
 
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
@@ -137,5 +142,4 @@ nucleus.application {
         )
     }
 }
-
 

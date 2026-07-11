@@ -17,6 +17,7 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        mavenLocal()
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -30,4 +31,5 @@ dependencyResolutionManagement {
     }
 }
 include(":mediaplayer")
+include(":audioplayer")
 include(":sample:composeApp")
