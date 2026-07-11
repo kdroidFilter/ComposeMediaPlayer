@@ -94,7 +94,11 @@ kotlin {
 
 android {
     namespace = "sample.app"
-    compileSdk = 36
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 0
+        }
+    }
 
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
