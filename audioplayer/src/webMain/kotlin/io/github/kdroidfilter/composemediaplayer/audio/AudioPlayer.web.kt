@@ -57,12 +57,13 @@ actual class AudioPlayer actual constructor() {
     }
 
     @OptIn(ExperimentalWasmJsInterop::class)
-    actual fun play(url: String) {
+    actual fun play(url: String, loop: Boolean) {
         release()
         document.body?.appendElement("audio") {
             this as HTMLAudioElement
             this.id = htmlId
             this.src = url
+            this.loop = loop
         }
 
         val playerEl = getPlayerElement()

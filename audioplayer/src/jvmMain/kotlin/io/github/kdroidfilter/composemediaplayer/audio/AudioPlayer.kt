@@ -1,15 +1,19 @@
 package io.github.kdroidfilter.composemediaplayer.audio
 
-import io.github.kdroidfilter.rodio.PlaybackCallback
-import io.github.kdroidfilter.rodio.PlaybackEvent
-import io.github.kdroidfilter.rodio.RodioPlayer
+import dev.nucleusframework.rodio.PlaybackCallback
+import dev.nucleusframework.rodio.PlaybackEvent
+import dev.nucleusframework.rodio.RodioPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.net.URI
+import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentHashMap
 
 @Suppress(names = ["EXPECT_ACTUAL_CLASSIFIERS_ARE_IN_BETA_WARNING"])
 actual class AudioPlayer actual constructor() {
@@ -45,15 +49,15 @@ actual class AudioPlayer actual constructor() {
         player?.setCallback(callback)
     }
 
-    actual fun play(url: String) {
+    actual fun play(url: String, loop: Boolean) {
         val localPlayer = ensurePlayer()
         playbackJob?.cancel()
         playbackJob = scope.launch {
             runCatching {
                 if (isRemoteUrl(url)) {
-                    localPlayer.playUrl(url, loop = false)
+                    localPlayer.playUrl(url, loop = loop)
                 } else {
-                    localPlayer.playFile(resolveFilePath(url), loop = false)
+                    localPlayer.playFile(resolveFilePath(url), loop = loop)
                 }
                 lastVolume?.let { localPlayer.setVolume(it) }
             }.onFailure { error ->
@@ -162,6 +166,7 @@ actual class AudioPlayer actual constructor() {
     }
 
     private fun resolveFilePath(url: String): String {
+        if (url.startsWith("jar:", ignoreCase = true)) return extractToTempFile(url)
         if (!url.startsWith("file:", ignoreCase = true)) return url
         val uri = runCatching { URI(url) }.getOrNull()
         if (uri != null) {
@@ -171,5 +176,26 @@ actual class AudioPlayer actual constructor() {
             if (!uriPath.isNullOrBlank()) return uriPath
         }
         return url.substring(5)
+    }
+
+    /**
+     * Resources bundled inside a jar (e.g. `Res.getUri(...)` in a packaged desktop app) cannot be
+     * read by the native backend directly, so they are extracted once to the temp directory.
+     */
+    private fun extractToTempFile(url: String): String {
+        val cached = extractedResources[url]
+        if (cached != null && Files.exists(cached)) return cached.toString()
+        val fileName = url.substringAfterLast('/').ifBlank { "audio" }
+        val target = Files.createTempFile("composemediaplayer-audio-", "-$fileName")
+        URI(url).toURL().openStream().use { input ->
+            Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING)
+        }
+        target.toFile().deleteOnExit()
+        extractedResources[url] = target
+        return target.toString()
+    }
+
+    private companion object {
+        val extractedResources = ConcurrentHashMap<String, Path>()
     }
 }

@@ -25,9 +25,13 @@ actual class AudioPlayer actual constructor() {
         setup()
     }
 
-    actual fun play(url: String) {
+    actual fun play(url: String, loop: Boolean) {
         if (mediaPlayer.isPlaying) {
             stop()
+        }
+
+        if (mediaPlayer.isCommandAvailable(Player.COMMAND_SET_REPEAT_MODE)) {
+            mediaPlayer.repeatMode = if (loop) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         }
 
         if (mediaPlayer.isCommandAvailable(Player.COMMAND_PREPARE)) mediaPlayer.prepare()

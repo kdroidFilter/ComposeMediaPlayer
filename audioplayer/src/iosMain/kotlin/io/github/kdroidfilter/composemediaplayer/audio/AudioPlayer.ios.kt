@@ -25,8 +25,10 @@ actual class AudioPlayer actual constructor() {
     private var errorListener: ErrorListener? = null
     private var lastVolume: Float? = null
     private var lastRate: Float? = null
+    private var loopEnabled: Boolean = false
 
-    actual fun play(url: String) {
+    actual fun play(url: String, loop: Boolean) {
+        loopEnabled = loop
         release()
         AVAudioSession.sharedInstance().setCategory(AVAudioSessionCategoryPlayback, null)
         val nsUrl = NSURL(string = url)
@@ -159,7 +161,13 @@ actual class AudioPlayer actual constructor() {
                 }
             },
             onAVPlayerEnded = {
-                _state = AudioPlayerState.IDLE
+                if (loopEnabled) {
+                    // AVPlayer has no built-in looping: restart from the beginning manually.
+                    seekTo(0)
+                    player?.play()
+                } else {
+                    _state = AudioPlayerState.IDLE
+                }
             },
             onAVPlayerStalled = {
                 _state = AudioPlayerState.BUFFERING

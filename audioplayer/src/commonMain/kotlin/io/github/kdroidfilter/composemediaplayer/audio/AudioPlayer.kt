@@ -40,8 +40,9 @@ expect class AudioPlayer() {
                 .build().toString()
      * ```
      *
+     * @param loop When `true`, playback restarts from the beginning once the media ends.
      */
-    fun play(url: String)
+    fun play(url: String, loop: Boolean = false)
 
 
     /**
