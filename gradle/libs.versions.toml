@@ -16,7 +16,7 @@ detekt = "1.23.8"
 ktlint = "14.2.0"
 # 2.11.0 requires AGP 9.1.0+; stay on 2.10.0 until the AGP upgrade
 androidx-lifecycle-runtime-ktx = "2.10.0"
-jna = "5.18.1"
+jna = "5.19.1"
 platformtoolsDarkmodedetector = "0.7.4"
 rodio = "1.0.0"
 slf4jSimple = "2.0.17"
