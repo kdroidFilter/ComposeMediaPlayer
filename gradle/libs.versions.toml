@@ -18,7 +18,7 @@ ktlint = "14.2.0"
 androidx-lifecycle-runtime-ktx = "2.10.0"
 jna = "5.18.1"
 platformtoolsDarkmodedetector = "0.7.4"
-rodio = "1.0.0"
+rodio = "1.0.1"
 slf4jSimple = "2.0.17"
 
 # minSdk = 21 failed to compile because the project indirectly depends on the library [androidx.navigationevent:navigationevent-android:1.0.1] which requires minSdk = 23
