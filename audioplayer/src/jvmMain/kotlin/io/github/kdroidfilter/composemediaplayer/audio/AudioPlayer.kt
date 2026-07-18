@@ -166,16 +166,27 @@ actual class AudioPlayer actual constructor() {
     }
 
     private fun resolveFilePath(url: String): String {
-        if (url.startsWith("jar:", ignoreCase = true)) return extractToTempFile(url)
-        if (!url.startsWith("file:", ignoreCase = true)) return url
-        val uri = runCatching { URI(url) }.getOrNull()
-        if (uri != null) {
-            val path = runCatching { Paths.get(uri).toString() }.getOrNull()
-            if (!path.isNullOrBlank()) return path
-            val uriPath = uri.path
-            if (!uriPath.isNullOrBlank()) return uriPath
+        if (url.startsWith("file:", ignoreCase = true)) {
+            val uri = runCatching { URI(url) }.getOrNull()
+            if (uri != null) {
+                val path = runCatching { Paths.get(uri).toString() }.getOrNull()
+                if (!path.isNullOrBlank()) return path
+                val uriPath = uri.path
+                if (!uriPath.isNullOrBlank()) return uriPath
+            }
+            return url.substring(5)
         }
-        return url.substring(5)
+        // Any other URL scheme is not directly openable by the native decoder:
+        // `jar:` in packaged JVM apps, `resource:` in GraalVM native images
+        // (what `Res.getUri` returns there), etc. Extract the stream to a temp
+        // file once. A Windows drive letter ("C:\...") is not a scheme.
+        val scheme = url.substringBefore(':', "")
+        val isScheme =
+            scheme.length > 1 &&
+                scheme.first().isLetter() &&
+                scheme.all { it.isLetterOrDigit() || it == '+' || it == '-' || it == '.' }
+        if (isScheme) return extractToTempFile(url)
+        return url
     }
 
     /**
