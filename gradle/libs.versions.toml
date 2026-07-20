@@ -2,7 +2,7 @@
 
 androidcontextprovider = "1.0.1"
 filekit = "0.14.2"
-kotlin = "2.4.0"
+kotlin = "2.4.10"
 agp = "8.13.2"
 kotlinx-coroutines = "1.11.0"
 kotlinxBrowserWasmJs = "0.5.0"
