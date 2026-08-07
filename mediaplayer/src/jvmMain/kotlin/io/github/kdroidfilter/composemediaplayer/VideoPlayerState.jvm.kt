@@ -108,6 +108,12 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override val currentTime: Double get() = delegate.currentTime
     override val duration: Double get() = delegate.duration
 
+    // Must be forwarded explicitly: these members have interface defaults, so omitting them here
+    // would report "no buffering support" instead of asking the platform delegate.
+    override val isBufferedRangeSupported: Boolean get() = delegate.isBufferedRangeSupported
+    override val bufferedRanges: List<BufferedRange> get() = delegate.bufferedRanges
+    override val bufferedPercentage: Float get() = delegate.bufferedPercentage
+
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,

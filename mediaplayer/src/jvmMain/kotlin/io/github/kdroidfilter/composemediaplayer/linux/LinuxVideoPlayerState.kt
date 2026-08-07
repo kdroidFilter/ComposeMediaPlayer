@@ -137,7 +137,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
      * Turned off permanently if the bundled .so predates [LinuxNativeBridge.nGetBufferedRanges],
      * so a stale native library degrades to "unsupported" instead of throwing on every poll.
      */
-    private var bufferedRangesAvailable = true
+    private var bufferedRangesAvailable by mutableStateOf(true)
 
     override val isBufferedRangeSupported: Boolean get() = bufferedRangesAvailable
     override val bufferedRanges: List<BufferedRange> get() = _bufferedRanges.value

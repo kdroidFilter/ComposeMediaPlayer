@@ -141,7 +141,7 @@ class MacVideoPlayerState : VideoPlayerState {
      * Turned off permanently if the bundled dylib predates [MacNativeBridge.nGetBufferedRanges],
      * so a stale native library degrades to "unsupported" instead of throwing on every poll.
      */
-    private var bufferedRangesAvailable = true
+    private var bufferedRangesAvailable by mutableStateOf(true)
 
     override var sliderPos: Float
         get() = _progress * 1000f
