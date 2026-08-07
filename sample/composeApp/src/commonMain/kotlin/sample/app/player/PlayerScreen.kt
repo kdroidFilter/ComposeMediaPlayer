@@ -408,11 +408,18 @@ private fun ControlsOverlay(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "${playerState.positionText}  /  ${playerState.durationText}",
-                    color = Color.White.copy(alpha = 0.9f),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Column {
+                    Text(
+                        text = "${playerState.positionText}  /  ${playerState.durationText}",
+                        color = Color.White.copy(alpha = 0.9f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        text = bufferedSummary(playerState),
+                        color = Color.White.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     OverlayIconButton(onClick = onSourceClick) {
@@ -441,6 +448,29 @@ private fun OverlayIconButton(onClick: () -> Unit, content: @Composable () -> Un
     IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
         content()
     }
+}
+
+/**
+ * One-line readout of the player's buffering state, e.g. `Buffered 42% · 0:00–1:12`.
+ *
+ * Exists to make the buffered-range API observable while testing: it distinguishes "nothing
+ * buffered yet" from "this backend cannot report buffering" (Windows progressive streams).
+ */
+private fun bufferedSummary(playerState: VideoPlayerState): String {
+    if (!playerState.isBufferedRangeSupported) return "Buffered: not reported on this platform"
+
+    val ranges = playerState.bufferedRanges
+    if (ranges.isEmpty()) return "Buffered: —"
+
+    val detail = ranges.joinToString("  ") { "${formatSeconds(it.start)}–${formatSeconds(it.end)}" }
+    return "Buffered ${playerState.bufferedPercentage.toInt()}%  ·  $detail"
+}
+
+private fun formatSeconds(seconds: Double): String {
+    val total = seconds.toInt().coerceAtLeast(0)
+    val minutes = total / 60
+    val secs = total % 60
+    return "$minutes:${secs.toString().padStart(2, '0')}"
 }
 
 /**
