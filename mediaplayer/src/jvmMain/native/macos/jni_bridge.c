@@ -26,6 +26,7 @@ extern float  getScreenRefreshRate(void* ctx);
 extern float  getCaptureFrameRate(void* ctx);
 extern double getVideoDuration(void* ctx);
 extern double getCurrentTime(void* ctx);
+extern int32_t getBufferedRanges(void* ctx, double* outRanges, int32_t maxRanges);
 extern void   seekTo(void* ctx, double time);
 extern void   disposeVideoPlayer(void* ctx);
 extern void   setPlaybackSpeed(void* ctx, float speed);
@@ -135,6 +136,22 @@ static jdouble JNICALL jni_GetCurrentTime(JNIEnv* env, jclass cls, jlong handle)
     return handle ? getCurrentTime(toCtx(handle)) : 0.0;
 }
 
+// Fills outRanges with [start0, end0, start1, end1, ...] in seconds and returns the number of
+// ranges written. The array length caps how many ranges are reported.
+static jint JNICALL jni_GetBufferedRanges(JNIEnv* env, jclass cls, jlong handle, jdoubleArray outRanges) {
+    if (!handle || !outRanges) return 0;
+
+    jsize capacity = (*env)->GetArrayLength(env, outRanges) / 2;
+    if (capacity <= 0) return 0;
+
+    jdouble* buffer = (*env)->GetDoubleArrayElements(env, outRanges, NULL);
+    if (!buffer) return 0;
+
+    int32_t count = getBufferedRanges(toCtx(handle), (double*)buffer, (int32_t)capacity);
+    (*env)->ReleaseDoubleArrayElements(env, outRanges, buffer, 0);
+    return (jint)count;
+}
+
 static void JNICALL jni_SeekTo(JNIEnv* env, jclass cls, jlong handle, jdouble time) {
     if (handle) seekTo(toCtx(handle), (double)time);
 }
@@ -208,6 +225,7 @@ static const JNINativeMethod g_methods[] = {
     { "nGetCaptureFrameRate",    "(J)F",                        (void*)jni_GetCaptureFrameRate },
     { "nGetVideoDuration",       "(J)D",                        (void*)jni_GetVideoDuration },
     { "nGetCurrentTime",         "(J)D",                        (void*)jni_GetCurrentTime },
+    { "nGetBufferedRanges",      "(J[D)I",                      (void*)jni_GetBufferedRanges },
     { "nSeekTo",                 "(JD)V",                       (void*)jni_SeekTo },
     { "nDisposePlayer",          "(J)V",                        (void*)jni_DisposePlayer },
     { "nSetPlaybackSpeed",       "(JF)V",                       (void*)jni_SetPlaybackSpeed },

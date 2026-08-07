@@ -350,6 +350,35 @@ HRESULT HLSPlayer::GetDuration(LONGLONG* pDuration) const {
     return S_OK;
 }
 
+// IMFMediaEngine exposes buffering with the same shape as HTML5's HTMLMediaElement.buffered:
+// an IMFMediaTimeRange holding zero or more [start, end] pairs, in seconds.
+HRESULT HLSPlayer::GetBufferedRanges(double* pOut, INT32 maxRanges, INT32* pCount) const {
+    if (!pCount) return E_INVALIDARG;
+    *pCount = 0;
+    if (!m_pEngine || !pOut || maxRanges <= 0) return E_INVALIDARG;
+
+    ComPtr<IMFMediaTimeRange> buffered;
+    HRESULT hr = m_pEngine->GetBuffered(buffered.GetAddressOf());
+    if (FAILED(hr) || !buffered) return FAILED(hr) ? hr : E_FAIL;
+
+    DWORD length = buffered->GetLength();
+    INT32 count = 0;
+
+    for (DWORD i = 0; i < length && count < maxRanges; i++) {
+        double start = 0.0, end = 0.0;
+        if (FAILED(buffered->GetStart(i, &start))) continue;
+        if (FAILED(buffered->GetEnd(i, &end)))     continue;
+        if (std::isnan(start) || std::isnan(end) || end <= start) continue;
+
+        pOut[count * 2]     = start;
+        pOut[count * 2 + 1] = end;
+        count++;
+    }
+
+    *pCount = count;
+    return S_OK;
+}
+
 HRESULT HLSPlayer::GetPosition(LONGLONG* pPosition) const {
     if (!m_pEngine || !pPosition) return E_INVALIDARG;
     double pos = m_pEngine->GetCurrentTime();

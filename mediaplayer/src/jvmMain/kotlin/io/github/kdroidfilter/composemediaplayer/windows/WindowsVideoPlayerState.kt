@@ -11,12 +11,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.BufferedRange
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.bufferedPercentageAt
+import io.github.kdroidfilter.composemediaplayer.normalizeBufferedRanges
+import io.github.kdroidfilter.composemediaplayer.util.NATIVE_BUFFERED_RANGES_ARRAY_SIZE
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
+import io.github.kdroidfilter.composemediaplayer.util.decodeNativeBufferedRanges
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.CancellationException
@@ -52,6 +57,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.write
 
 internal val windowsLogger = TaggedLogger("WindowsVideoPlayerState")
+
+/** Cadence (ms) for polling the native buffering state. Matches the macOS/Linux backends. */
+private const val BUFFERED_RANGES_POLL_INTERVAL_MS = 200L
 
 /**
  * Windows implementation of the video player state.
@@ -153,6 +161,15 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
     private var _progress by mutableStateOf(0f)
+
+    // Buffering. Media Foundation only reports buffered ranges for HLS (through IMFMediaEngine);
+    // local files are whole-file "buffered" by definition, and progressive network playback runs
+    // on IMFSourceReader, which exposes nothing — the native layer flags that case and
+    // isBufferedRangeSupported turns false for it.
+    private var _bufferedRanges by mutableStateOf<List<BufferedRange>>(emptyList())
+    private var _bufferedPercentage by mutableStateOf(0f)
+    private var _bufferedRangeSupported by mutableStateOf(false)
+    private val bufferedRangesBuffer = DoubleArray(NATIVE_BUFFERED_RANGES_ARRAY_SIZE)
     override var sliderPos: Float
         get() = _progress * 1000f
         set(value) {
@@ -236,6 +253,10 @@ class WindowsVideoPlayerState : VideoPlayerState {
     override val durationText: String get() = formatTime(_duration)
     override val currentTime: Double get() = _currentTime
     override val duration: Double get() = _duration
+
+    override val isBufferedRangeSupported: Boolean get() = _bufferedRangeSupported
+    override val bufferedRanges: List<BufferedRange> get() = _bufferedRanges
+    override val bufferedPercentage: Float get() = _bufferedPercentage
     private var errorMessage: String? by mutableStateOf(null)
 
     // Fullscreen state
@@ -520,6 +541,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     _currentTime = 0.0
                     _progress = 0f
                     _duration = 0.0
+                    resetBufferedRanges()
                     _metadata = VideoMetadata()
                     _hasMedia = false
                     userPaused = false
@@ -658,6 +680,48 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private fun startVideoPipeline(): Job = scope.launch {
         launch { produceFrames() }
         launch { consumeFrames() }
+        launch { observeBufferedRanges() }
+    }
+
+    /**
+     * Polls the native buffering state on its own coroutine: the buffer keeps growing while
+     * playback is paused, so this cannot ride on the frame pipeline.
+     */
+    private suspend fun observeBufferedRanges() {
+        while (scope.isActive && _hasMedia && !isDisposing.get()) {
+            val instance = videoPlayerInstance
+            if (instance == 0L) break
+            updateBufferedRanges(instance)
+            delay(BUFFERED_RANGES_POLL_INTERVAL_MS)
+        }
+    }
+
+    private fun updateBufferedRanges(instance: Long) {
+        val count =
+            try {
+                player.nGetBufferedRanges(instance, bufferedRangesBuffer)
+            } catch (e: UnsatisfiedLinkError) {
+                windowsLogger.w { "Native library has no buffered-range support: ${e.message}" }
+                resetBufferedRanges()
+                return
+            }
+
+        if (count < 0) {
+            // Progressive network playback — Media Foundation cannot tell us anything.
+            resetBufferedRanges()
+            return
+        }
+
+        val ranges = normalizeBufferedRanges(decodeNativeBufferedRanges(bufferedRangesBuffer, count), _duration)
+        _bufferedRangeSupported = true
+        _bufferedRanges = ranges
+        _bufferedPercentage = ranges.bufferedPercentageAt(_currentTime, _duration)
+    }
+
+    private fun resetBufferedRanges() {
+        _bufferedRangeSupported = false
+        _bufferedRanges = emptyList()
+        _bufferedPercentage = 0f
     }
 
     /**
@@ -1015,6 +1079,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
             _progress = 0f
             _currentTime = 0.0
             _duration = 0.0
+            resetBufferedRanges()
             isLoading = false
             errorMessage = null
             _error = null

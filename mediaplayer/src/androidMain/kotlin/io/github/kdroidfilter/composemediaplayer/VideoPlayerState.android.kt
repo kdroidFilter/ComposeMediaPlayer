@@ -80,6 +80,9 @@ actual fun createVideoPlayerState(
 
 internal val androidVideoLogger = TaggedLogger("AndroidVideoPlayerSurface")
 
+/** Cadence (ms) for polling ExoPlayer's buffer state. Matches the desktop backends. */
+private const val BUFFERED_RANGES_POLL_INTERVAL_MS = 200L
+
 @UnstableApi
 @Stable
 open class DefaultVideoPlayerState(
@@ -106,6 +109,7 @@ open class DefaultVideoPlayerState(
     private val context: Context = ContextProvider.getContext()
     internal var exoPlayer: ExoPlayer? = null
     private var updateJob: Job? = null
+    private var bufferedUpdateJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     // Protection against race conditions
@@ -273,6 +277,14 @@ open class DefaultVideoPlayerState(
     override val currentTime: Double get() = _currentTime
     override val duration: Double get() = _duration
 
+    // Buffering. ExoPlayer exposes a single contiguous buffer starting at the playback position,
+    // so bufferedRanges holds at most one entry.
+    private var _bufferedRanges by mutableStateOf<List<BufferedRange>>(emptyList())
+    private var _bufferedPercentage by mutableFloatStateOf(0f)
+    override val isBufferedRangeSupported: Boolean get() = true
+    override val bufferedRanges: List<BufferedRange> get() = _bufferedRanges
+    override val bufferedPercentage: Float get() = _bufferedPercentage
+
     override val isPipSupported: Boolean
         get() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -289,6 +301,7 @@ open class DefaultVideoPlayerState(
         register(this)
         initializePlayer()
         registerScreenLockReceiver()
+        startBufferedRangeUpdates()
     }
 
     private fun shouldUseConservativeCodecHandling(): Boolean {
@@ -623,6 +636,57 @@ open class DefaultVideoPlayerState(
         updateJob = null
     }
 
+    /**
+     * Polls the buffer state for as long as this state exists. It runs separately from
+     * [startPositionUpdates], which is stopped whenever playback pauses — the buffer, on the other
+     * hand, keeps filling while paused.
+     */
+    private fun startBufferedRangeUpdates() {
+        bufferedUpdateJob?.cancel()
+        bufferedUpdateJob =
+            coroutineScope.launch {
+                while (isActive) {
+                    val player = exoPlayer
+                    if (player != null && !isPlayerReleased && player.playbackState != Player.STATE_IDLE) {
+                        updateBufferedRanges(player)
+                    }
+                    delay(BUFFERED_RANGES_POLL_INTERVAL_MS)
+                }
+            }
+    }
+
+    private fun stopBufferedRangeUpdates() {
+        bufferedUpdateJob?.cancel()
+        bufferedUpdateJob = null
+    }
+
+    /**
+     * Reads ExoPlayer's buffer state. [Player.getBufferedPosition] is the end of the single
+     * contiguous buffer held ahead of the playback position, so the resulting list never holds
+     * more than one range.
+     */
+    private fun updateBufferedRanges(player: Player) {
+        val positionSeconds = player.currentPosition.toDouble() / 1000.0
+        val bufferedSeconds = player.bufferedPosition.toDouble() / 1000.0
+
+        _bufferedRanges =
+            normalizeBufferedRanges(
+                listOf(BufferedRange(positionSeconds, bufferedSeconds)),
+                durationSeconds = _duration,
+            )
+        _bufferedPercentage =
+            if (_duration > 0) {
+                player.bufferedPercentage.toFloat().coerceIn(0f, 100f)
+            } else {
+                0f
+            }
+    }
+
+    private fun resetBufferedRanges() {
+        _bufferedRanges = emptyList()
+        _bufferedPercentage = 0f
+    }
+
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
@@ -871,6 +935,7 @@ open class DefaultVideoPlayerState(
         _aspectRatio = 16f / 9f
         _playbackSpeed = 1.0f
         _metadata = VideoMetadata()
+        resetBufferedRanges()
         exoPlayer?.playbackParameters = PlaybackParameters(_playbackSpeed)
         if (!keepMedia) {
             _hasMedia = false
@@ -881,6 +946,7 @@ open class DefaultVideoPlayerState(
         synchronized(playerInitializationLock) {
             isPlayerReleased = true
             stopPositionUpdates()
+            stopBufferedRangeUpdates()
             coroutineScope.cancel()
             playerView?.player = null
             playerView = null

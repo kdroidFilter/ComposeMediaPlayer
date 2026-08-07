@@ -45,6 +45,8 @@ public:
     BOOL    HasAudio() const { return TRUE; }
     void    GetVideoSize(UINT32* pW, UINT32* pH) const;
     HRESULT GetDuration(LONGLONG* pDuration) const;
+    // Fills pOut with [start0, end0, ...] seconds; writes the range count to pCount.
+    HRESULT GetBufferedRanges(double* pOut, INT32 maxRanges, INT32* pCount) const;
     HRESULT GetPosition(LONGLONG* pPosition) const;
     HRESULT SetVolume(float vol);
     HRESULT GetVolume(float* pVol) const;

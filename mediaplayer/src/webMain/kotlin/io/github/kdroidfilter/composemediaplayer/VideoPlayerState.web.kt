@@ -131,6 +131,13 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override val currentTime: Double get() = _currentTime
     override val duration: Double get() = _currentDuration.toDouble()
 
+    // Buffering, backed by HTMLMediaElement.buffered (which can hold several disjoint ranges)
+    private var _bufferedRanges by mutableStateOf<List<BufferedRange>>(emptyList())
+    private var _bufferedPercentage by mutableStateOf(0f)
+    override val isBufferedRangeSupported: Boolean get() = true
+    override val bufferedRanges: List<BufferedRange> get() = _bufferedRanges
+    override val bufferedPercentage: Float get() = _bufferedPercentage
+
     // Job for handling seek operations
     internal var seekJob: Job? = null
 
@@ -312,6 +319,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         _positionText = "00:00"
         _durationText = "00:00"
         _currentTime = 0.0
+        resetBufferedRanges()
         // Note: We don't clear lastUri, so it can be used to replay the video
     }
 
@@ -390,6 +398,22 @@ open class DefaultVideoPlayerState : VideoPlayerState {
         forceUpdate: Boolean = false,
     ) {
         updatePosition(currentTime, duration, forceUpdate)
+    }
+
+    /**
+     * Updates the buffered ranges read from the media element.
+     *
+     * @param ranges the raw `[start, end]` pairs taken from `HTMLMediaElement.buffered`, in seconds
+     */
+    fun onBufferedRangesUpdate(ranges: List<BufferedRange>) {
+        val normalized = normalizeBufferedRanges(ranges, duration)
+        _bufferedRanges = normalized
+        _bufferedPercentage = normalized.bufferedPercentageAt(_currentTime, duration)
+    }
+
+    internal fun resetBufferedRanges() {
+        _bufferedRanges = emptyList()
+        _bufferedPercentage = 0f
     }
 
     /**

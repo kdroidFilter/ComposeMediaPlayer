@@ -904,6 +904,37 @@ NATIVEVIDEOPLAYER_API HRESULT GetMediaDuration(const VideoPlayerInstance* pInsta
     return S_OK;
 }
 
+// Buffered ranges, in seconds, written to pOut as [start0, end0, start1, end1, ...].
+//
+// Three cases:
+//   * HLS streams run on IMFMediaEngine, which reports real buffered ranges.
+//   * Local files are fully available on disk, so the whole timeline is "buffered".
+//   * Progressive network playback runs on IMFSourceReader, which exposes no buffering
+//     information whatsoever — S_FALSE tells the caller the data is unavailable, which is
+//     surfaced to Kotlin as VideoPlayerState.isBufferedRangeSupported == false.
+NATIVEVIDEOPLAYER_API HRESULT GetBufferedRanges(const VideoPlayerInstance* pInstance,
+                                                double* pOut, INT32 maxRanges, INT32* pCount) {
+    if (!pInstance || !pOut || !pCount || maxRanges <= 0) return OP_E_INVALID_PARAMETER;
+    *pCount = 0;
+
+    if (pInstance->pHLSPlayer)
+        return pInstance->pHLSPlayer->GetBufferedRanges(pOut, maxRanges, pCount);
+
+    if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
+
+    if (!pInstance->bIsNetworkSource) {
+        LONGLONG duration = 0;
+        HRESULT hr = GetMediaDuration(pInstance, &duration);
+        if (FAILED(hr) || duration <= 0) return S_OK; // supported, but nothing to report yet
+        pOut[0] = 0.0;
+        pOut[1] = static_cast<double>(duration) / 10000000.0;
+        *pCount = 1;
+        return S_OK;
+    }
+
+    return S_FALSE;
+}
+
 NATIVEVIDEOPLAYER_API HRESULT GetMediaPosition(const VideoPlayerInstance* pInstance, LONGLONG* pPosition) {
     if (!pInstance || !pPosition) return OP_E_NOT_INITIALIZED;
     if (pInstance->pHLSPlayer) return pInstance->pHLSPlayer->GetPosition(pPosition);

@@ -378,6 +378,12 @@ internal fun setupVideoElement(
             events =
                 mapOf(
                     "timeupdate" to { event -> playerState.onTimeUpdateEvent(event) },
+                    // "progress" fires while data is fetched (including when paused); the others
+                    // catch the buffer changes that follow a seek or a source switch.
+                    "progress" to { event -> playerState.onBufferedRangesEvent(event) },
+                    "seeked" to { event -> playerState.onBufferedRangesEvent(event) },
+                    "loadedmetadata" to { event -> playerState.onBufferedRangesEvent(event) },
+                    "emptied" to { playerState.resetBufferedRanges() },
                     "ended" to {
                         scope.launch {
                             if (playerState.loop) {
@@ -463,7 +469,33 @@ internal fun setupVideoElement(
 internal fun DefaultVideoPlayerState.onTimeUpdateEvent(event: Event) {
     (event.target as? HTMLVideoElement)?.let {
         onTimeUpdate(it.currentTime.toFloat(), it.duration.toFloat())
+        onBufferedRangesUpdate(it.readBufferedRanges())
     }
+}
+
+internal fun DefaultVideoPlayerState.onBufferedRangesEvent(event: Event) {
+    (event.target as? HTMLVideoElement)?.let {
+        onBufferedRangesUpdate(it.readBufferedRanges())
+    }
+}
+
+/**
+ * Reads `HTMLMediaElement.buffered` into plain [BufferedRange]s.
+ *
+ * Indexing a `TimeRanges` object throws when the browser mutates it between the length check and
+ * the accessor call, so the whole read is guarded and simply yields what was collected so far.
+ */
+internal fun HTMLVideoElement.readBufferedRanges(): List<BufferedRange> {
+    val ranges = mutableListOf<BufferedRange>()
+    try {
+        val buffered = buffered
+        for (index in 0 until buffered.length) {
+            ranges.add(BufferedRange(buffered.start(index), buffered.end(index)))
+        }
+    } catch (e: Throwable) {
+        webVideoLogger.d { "Failed to read buffered ranges: ${e.message}" }
+    }
+    return ranges
 }
 
 internal fun HTMLVideoElement.setupMetadataListener(

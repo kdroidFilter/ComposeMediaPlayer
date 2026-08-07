@@ -18,6 +18,7 @@ import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.readValue
 import kotlinx.cinterop.useContents
 import platform.AVFAudio.AVAudioSession
 import platform.AVFAudio.AVAudioSessionCategoryAmbient
@@ -41,6 +42,7 @@ import platform.Foundation.NSKeyValueObservingOptions
 import platform.Foundation.NSKeyValueObservingProtocol
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSURL
+import platform.Foundation.NSValue
 import platform.Foundation.addObserver
 import platform.Foundation.removeObserver
 import platform.UIKit.UIApplication
@@ -156,6 +158,7 @@ open class DefaultVideoPlayerState(
     // KVO Observers
     private var timeControlStatusObserver: NSObject? = null
     private var statusObserver: NSObject? = null
+    private var loadedTimeRangesObserver: NSObject? = null
 
     // End-of-playback notification observer
     private var endObserver: Any? = null
@@ -182,6 +185,13 @@ open class DefaultVideoPlayerState(
     private var _duration: Double = 0.0
     override val currentTime: Double get() = _currentTime
     override val duration: Double get() = _duration
+
+    // Buffering, backed by AVPlayerItem.loadedTimeRanges (which can hold several disjoint ranges)
+    private var _bufferedRanges by mutableStateOf<List<BufferedRange>>(emptyList())
+    private var _bufferedPercentage by mutableStateOf(0f)
+    override val isBufferedRangeSupported: Boolean get() = true
+    override val bufferedRanges: List<BufferedRange> get() = _bufferedRanges
+    override val bufferedPercentage: Float get() = _bufferedPercentage
 
     // Observable video aspect ratio (default to 16:9)
     private var _videoAspectRatio by mutableStateOf(16.0 / 9.0)
@@ -262,6 +272,10 @@ open class DefaultVideoPlayerState(
                     }
                     _positionText = if (currentSeconds.isNaN()) "00:00" else formatTime(currentSeconds.toFloat())
                     _durationText = if (durationSeconds.isNaN()) "00:00" else formatTime(durationSeconds.toFloat())
+
+                    // The buffered percentage is relative to the playhead, so refresh it as the
+                    // position advances and not only when the buffer itself changes.
+                    updateBufferedRanges(item)
 
                     item.presentationSize.useContents {
                         if (width > 0 && height > 0) {
@@ -345,6 +359,15 @@ open class DefaultVideoPlayerState(
                 }
             }
 
+        // KVO for loadedTimeRanges — fires as the buffer grows, including while paused, which the
+        // periodic time observer alone would not cover.
+        loadedTimeRangesObserver =
+            item.observe("loadedTimeRanges") { _ ->
+                dispatch_async(dispatch_get_main_queue()) {
+                    updateBufferedRanges(item)
+                }
+            }
+
         // Periodic Time Observer
         startPositionUpdates(player)
 
@@ -384,6 +407,35 @@ open class DefaultVideoPlayerState(
             player?.removeTimeObserver(it)
         }
         timeObserverToken = null
+    }
+
+    /**
+     * Reads [AVPlayerItem.loadedTimeRanges] into [bufferedRanges]. Each element is an [NSValue]
+     * boxing a `CMTimeRange`. Must be called on the main thread.
+     */
+    private fun updateBufferedRanges(item: AVPlayerItem) {
+        val raw =
+            item.loadedTimeRanges.mapNotNull { value ->
+                (value as? NSValue)?.CMTimeRangeValue?.useContents {
+                    val rangeStart = CMTimeGetSeconds(start.readValue())
+                    val rangeDuration = CMTimeGetSeconds(duration.readValue())
+                    if (rangeStart.isNaN() || rangeDuration.isNaN()) {
+                        null
+                    } else {
+                        BufferedRange(rangeStart, rangeStart + rangeDuration)
+                    }
+                }
+            }
+
+        val durationSeconds = _duration
+        val ranges = normalizeBufferedRanges(raw, durationSeconds)
+        _bufferedRanges = ranges
+        _bufferedPercentage = ranges.bufferedPercentageAt(_currentTime, durationSeconds)
+    }
+
+    private fun resetBufferedRanges() {
+        _bufferedRanges = emptyList()
+        _bufferedPercentage = 0f
     }
 
     private fun setupAppLifecycleObservers() {
@@ -500,6 +552,11 @@ open class DefaultVideoPlayerState(
             statusObserver = null
         }
 
+        loadedTimeRangesObserver?.let {
+            player?.currentItem?.removeObserver(it, forKeyPath = "loadedTimeRanges")
+            loadedTimeRangesObserver = null
+        }
+
         endObserver?.let {
             NSNotificationCenter.defaultCenter.removeObserver(it)
             endObserver = null
@@ -517,7 +574,7 @@ open class DefaultVideoPlayerState(
         player?.pause()
         player?.replaceCurrentItemWithPlayerItem(null)
         player = null
-
+        resetBufferedRanges()
     }
 
     /**

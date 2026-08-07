@@ -4,11 +4,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -51,8 +53,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -380,18 +384,23 @@ private fun ControlsOverlay(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // Seek bar
-            Slider(
-                value = playerState.sliderPos,
-                onValueChange = { playerState.seekStart(it) },
-                onValueChangeFinished = { playerState.seekFinished() },
-                valueRange = 0f..1000f,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.3f),
-                ),
-            )
+            // Seek bar, with the buffered ranges drawn behind the track
+            Box(modifier = Modifier.fillMaxWidth()) {
+                BufferedTrack(playerState)
+
+                Slider(
+                    value = playerState.sliderPos,
+                    onValueChange = { playerState.seekStart(it) },
+                    onValueChangeFinished = { playerState.seekFinished() },
+                    valueRange = 0f..1000f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        // Kept translucent so the buffered ranges underneath stay readable
+                        inactiveTrackColor = Color.White.copy(alpha = 0.15f),
+                    ),
+                )
+            }
 
             // Time + action icons row
             Row(
@@ -431,6 +440,44 @@ private fun ControlsOverlay(
 private fun OverlayIconButton(onClick: () -> Unit, content: @Composable () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
         content()
+    }
+}
+
+/**
+ * Draws the player's buffered ranges as a track behind the seek bar.
+ *
+ * Renders nothing when the platform cannot report buffering (see
+ * [VideoPlayerState.isBufferedRangeSupported]) so an unsupported backend does not look like an
+ * empty buffer. The horizontal padding matches the Slider's thumb radius so both align.
+ */
+@Composable
+private fun BoxScope.BufferedTrack(playerState: VideoPlayerState) {
+    val duration = playerState.duration
+    if (!playerState.isBufferedRangeSupported || duration <= 0.0) return
+
+    val ranges = playerState.bufferedRanges
+    if (ranges.isEmpty()) return
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .align(Alignment.Center)
+            .padding(horizontal = 10.dp),
+    ) {
+        ranges.forEach { range ->
+            val startX = ((range.start / duration).toFloat().coerceIn(0f, 1f)) * size.width
+            val endX = ((range.end / duration).toFloat().coerceIn(0f, 1f)) * size.width
+            if (endX <= startX) return@forEach
+
+            drawLine(
+                color = Color.White.copy(alpha = 0.45f),
+                start = Offset(startX, size.height / 2f),
+                end = Offset(endX, size.height / 2f),
+                strokeWidth = size.height,
+                cap = StrokeCap.Round,
+            )
+        }
     }
 }
 

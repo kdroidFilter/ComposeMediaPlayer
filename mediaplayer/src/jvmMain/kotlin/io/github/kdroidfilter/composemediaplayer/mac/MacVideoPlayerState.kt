@@ -11,12 +11,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.BufferedRange
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.bufferedPercentageAt
+import io.github.kdroidfilter.composemediaplayer.normalizeBufferedRanges
+import io.github.kdroidfilter.composemediaplayer.util.NATIVE_BUFFERED_RANGES_ARRAY_SIZE
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
+import io.github.kdroidfilter.composemediaplayer.util.decodeNativeBufferedRanges
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.CancellationException
@@ -126,6 +131,18 @@ class MacVideoPlayerState : VideoPlayerState {
     private var _currentTime by mutableStateOf(0.0)
     private var _duration by mutableStateOf(0.0)
     private var _progress by mutableStateOf(0f)
+
+    // Buffering, read from AVPlayerItem.loadedTimeRanges through the native bridge.
+    private var _bufferedRanges by mutableStateOf<List<BufferedRange>>(emptyList())
+    private var _bufferedPercentage by mutableStateOf(0f)
+    private val bufferedRangesBuffer = DoubleArray(NATIVE_BUFFERED_RANGES_ARRAY_SIZE)
+
+    /**
+     * Turned off permanently if the bundled dylib predates [MacNativeBridge.nGetBufferedRanges],
+     * so a stale native library degrades to "unsupported" instead of throwing on every poll.
+     */
+    private var bufferedRangesAvailable = true
+
     override var sliderPos: Float
         get() = _progress * 1000f
         set(value) {
@@ -207,6 +224,10 @@ class MacVideoPlayerState : VideoPlayerState {
     override val durationText: String get() = formatTime(_duration)
     override val currentTime: Double get() = _currentTime
     override val duration: Double get() = _duration
+
+    override val isBufferedRangeSupported: Boolean get() = bufferedRangesAvailable
+    override val bufferedRanges: List<BufferedRange> get() = _bufferedRanges
+    override val bufferedPercentage: Float get() = _bufferedPercentage
 
     // Fullscreen state
     override var isFullscreen by mutableStateOf(false)
@@ -384,6 +405,7 @@ class MacVideoPlayerState : VideoPlayerState {
                     _currentTime = 0.0
                     _progress = 0f
                     _duration = 0.0
+                    resetBufferedRanges()
                     resetMetadata()
                     _hasMedia = false
                     userPaused = false
@@ -692,9 +714,35 @@ class MacVideoPlayerState : VideoPlayerState {
                         _progress = (pos / _duration).toFloat().coerceIn(0f, 1f)
                     }
                 }
+                // Buffering advances while paused too, so this is polled outside the play check.
+                updateBufferedRanges(ptr)
             }
             delay(POSITION_POLL_INTERVAL_MS)
         }
+    }
+
+    /** Reads AVPlayerItem.loadedTimeRanges through the native bridge. */
+    private fun updateBufferedRanges(ptr: Long) {
+        if (!bufferedRangesAvailable) return
+
+        val count =
+            try {
+                MacNativeBridge.nGetBufferedRanges(ptr, bufferedRangesBuffer)
+            } catch (e: UnsatisfiedLinkError) {
+                bufferedRangesAvailable = false
+                macLogger.w { "Native library has no buffered-range support: ${e.message}" }
+                resetBufferedRanges()
+                return
+            }
+
+        val ranges = normalizeBufferedRanges(decodeNativeBufferedRanges(bufferedRangesBuffer, count), _duration)
+        _bufferedRanges = ranges
+        _bufferedPercentage = ranges.bufferedPercentageAt(_currentTime, _duration)
+    }
+
+    private fun resetBufferedRanges() {
+        _bufferedRanges = emptyList()
+        _bufferedPercentage = 0f
     }
 
     private suspend fun produceFrames() {
@@ -1083,6 +1131,7 @@ class MacVideoPlayerState : VideoPlayerState {
             _progress = 0f
             _currentTime = 0.0
             _duration = 0.0
+            resetBufferedRanges()
             isLoading = false
             _error = null
             userPaused = false
