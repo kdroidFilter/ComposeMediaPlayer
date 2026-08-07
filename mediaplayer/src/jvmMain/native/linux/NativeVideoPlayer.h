@@ -37,6 +37,9 @@ int32_t nvp_set_output_size(VideoPlayer* p, int32_t width, int32_t height);
 double nvp_get_duration(VideoPlayer* p);
 double nvp_get_current_time(VideoPlayer* p);
 
+// Buffering — fills out with [start0, end0, ...] in seconds, returns the number of ranges written
+int32_t nvp_get_buffered_ranges(VideoPlayer* p, double* out, int32_t max_ranges);
+
 // Metadata (caller must free returned strings with free())
 char*   nvp_get_title(VideoPlayer* p);
 int64_t nvp_get_bitrate(VideoPlayer* p);

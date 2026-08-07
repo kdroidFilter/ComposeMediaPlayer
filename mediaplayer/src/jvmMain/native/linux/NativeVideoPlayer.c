@@ -46,6 +46,7 @@ struct VideoPlayer {
     float   volume;
     float   playback_speed;
     int     did_play_to_end; // atomic flag
+    int     is_local_source; // 1 for file:// URIs, which are never network-buffered
 
     // Bus polling thread
     pthread_t bus_thread;
@@ -328,6 +329,8 @@ int nvp_open_uri(VideoPlayer* p, const char* uri) {
         }
     }
 
+    p->is_local_source = g_str_has_prefix(resolved_uri, "file://") ? 1 : 0;
+
     g_object_set(p->pipeline, "uri", resolved_uri, NULL);
     g_free(resolved_uri);
     g_object_set(p->pipeline, "volume", (gdouble)p->volume, NULL);
@@ -444,6 +447,70 @@ double nvp_get_current_time(VideoPlayer* p) {
         return (double)pos / (double)GST_SECOND;
     }
     return 0.0;
+}
+
+// ---------------------------------------------------------------------------
+// Buffering
+// ---------------------------------------------------------------------------
+
+// Fills `out` with [start0, end0, start1, end1, ...] in seconds and returns the number of ranges
+// written (never more than max_ranges).
+//
+// playbin answers GST_QUERY_BUFFERING through queue2, which is only present for streamed sources
+// and reports its ranges in GST_FORMAT_PERCENT (0..GST_FORMAT_PERCENT_MAX) rather than in time —
+// hence the conversion against the media duration. Local files have no queue2 at all and are fully
+// available by definition, so they short-circuit to a single whole-duration range.
+int32_t nvp_get_buffered_ranges(VideoPlayer* p, double* out, int32_t max_ranges) {
+    if (!p || !out || max_ranges <= 0) return 0;
+
+    double duration = nvp_get_duration(p);
+    if (duration <= 0.0) return 0;
+
+    if (p->is_local_source) {
+        out[0] = 0.0;
+        out[1] = duration;
+        return 1;
+    }
+
+    GstQuery* query = gst_query_new_buffering(GST_FORMAT_PERCENT);
+    if (!query) return 0;
+
+    if (!gst_element_query(p->pipeline, query)) {
+        gst_query_unref(query);
+        return 0;
+    }
+
+    // The element may answer in a different format than the one requested.
+    GstFormat format = GST_FORMAT_UNDEFINED;
+    gst_query_parse_buffering_range(query, &format, NULL, NULL, NULL);
+
+    guint n_ranges = gst_query_get_n_buffering_ranges(query);
+    int32_t count = 0;
+
+    for (guint i = 0; i < n_ranges && count < max_ranges; i++) {
+        gint64 range_start = 0, range_stop = 0;
+        if (!gst_query_parse_nth_buffering_range(query, i, &range_start, &range_stop)) continue;
+        if (range_start < 0 || range_stop <= range_start) continue;
+
+        double start_seconds, stop_seconds;
+        if (format == GST_FORMAT_TIME) {
+            start_seconds = (double)range_start / (double)GST_SECOND;
+            stop_seconds  = (double)range_stop  / (double)GST_SECOND;
+        } else if (format == GST_FORMAT_PERCENT) {
+            start_seconds = (double)range_start / (double)GST_FORMAT_PERCENT_MAX * duration;
+            stop_seconds  = (double)range_stop  / (double)GST_FORMAT_PERCENT_MAX * duration;
+        } else {
+            // BYTES/DEFAULT ranges cannot be mapped onto the timeline reliably.
+            continue;
+        }
+
+        out[count * 2]     = start_seconds;
+        out[count * 2 + 1] = stop_seconds;
+        count++;
+    }
+
+    gst_query_unref(query);
+    return count;
 }
 
 // ---------------------------------------------------------------------------

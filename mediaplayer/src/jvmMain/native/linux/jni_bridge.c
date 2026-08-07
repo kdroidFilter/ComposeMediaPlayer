@@ -78,6 +78,22 @@ static jdouble JNICALL jni_GetCurrentTime(JNIEnv* env, jclass cls, jlong handle)
     return handle ? nvp_get_current_time(toCtx(handle)) : 0.0;
 }
 
+// Fills outRanges with [start0, end0, start1, end1, ...] in seconds and returns the number of
+// ranges written. The array length caps how many ranges are reported.
+static jint JNICALL jni_GetBufferedRanges(JNIEnv* env, jclass cls, jlong handle, jdoubleArray outRanges) {
+    if (!handle || !outRanges) return 0;
+
+    jsize capacity = (*env)->GetArrayLength(env, outRanges) / 2;
+    if (capacity <= 0) return 0;
+
+    jdouble* buffer = (*env)->GetDoubleArrayElements(env, outRanges, NULL);
+    if (!buffer) return 0;
+
+    int32_t count = nvp_get_buffered_ranges(toCtx(handle), (double*)buffer, (int32_t)capacity);
+    (*env)->ReleaseDoubleArrayElements(env, outRanges, buffer, 0);
+    return (jint)count;
+}
+
 static void JNICALL jni_SeekTo(JNIEnv* env, jclass cls, jlong handle, jdouble time) {
     if (handle) nvp_seek_to(toCtx(handle), (double)time);
 }
@@ -150,6 +166,7 @@ static const JNINativeMethod g_methods[] = {
     { "nSetOutputSize",          "(JII)I",                      (void*)jni_SetOutputSize },
     { "nGetVideoDuration",       "(J)D",                        (void*)jni_GetVideoDuration },
     { "nGetCurrentTime",         "(J)D",                        (void*)jni_GetCurrentTime },
+    { "nGetBufferedRanges",      "(J[D)I",                      (void*)jni_GetBufferedRanges },
     { "nSeekTo",                 "(JD)V",                       (void*)jni_SeekTo },
     { "nDisposePlayer",          "(J)V",                        (void*)jni_DisposePlayer },
     { "nSetPlaybackSpeed",       "(JF)V",                       (void*)jni_SetPlaybackSpeed },

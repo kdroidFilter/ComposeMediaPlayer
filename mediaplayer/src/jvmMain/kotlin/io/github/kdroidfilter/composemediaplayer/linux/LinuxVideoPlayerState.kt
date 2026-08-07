@@ -8,12 +8,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import io.github.kdroidfilter.composemediaplayer.BufferedRange
 import io.github.kdroidfilter.composemediaplayer.InitialPlayerState
 import io.github.kdroidfilter.composemediaplayer.SubtitleTrack
 import io.github.kdroidfilter.composemediaplayer.VideoMetadata
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerError
 import io.github.kdroidfilter.composemediaplayer.VideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.bufferedPercentageAt
+import io.github.kdroidfilter.composemediaplayer.normalizeBufferedRanges
+import io.github.kdroidfilter.composemediaplayer.util.NATIVE_BUFFERED_RANGES_ARRAY_SIZE
 import io.github.kdroidfilter.composemediaplayer.util.TaggedLogger
+import io.github.kdroidfilter.composemediaplayer.util.decodeNativeBufferedRanges
 import io.github.kdroidfilter.composemediaplayer.util.formatTime
 import io.github.vinceglb.filekit.PlatformFile
 import kotlinx.coroutines.*
@@ -65,6 +70,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private var playerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var frameUpdateJob: Job? = null
     private var bufferingCheckJob: Job? = null
+    private var bufferedRangesJob: Job? = null
     private var uiUpdateJob: Job? = null
 
     // State tracking
@@ -122,6 +128,21 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private val _aspectRatio = mutableStateOf(16f / 9f)
     override val aspectRatio: Float get() = _aspectRatio.value
 
+    // Buffering, read from GStreamer's buffering query through the native bridge.
+    private val _bufferedRanges = mutableStateOf<List<BufferedRange>>(emptyList())
+    private val _bufferedPercentage = mutableStateOf(0f)
+    private val bufferedRangesBuffer = DoubleArray(NATIVE_BUFFERED_RANGES_ARRAY_SIZE)
+
+    /**
+     * Turned off permanently if the bundled .so predates [LinuxNativeBridge.nGetBufferedRanges],
+     * so a stale native library degrades to "unsupported" instead of throwing on every poll.
+     */
+    private var bufferedRangesAvailable by mutableStateOf(true)
+
+    override val isBufferedRangeSupported: Boolean get() = bufferedRangesAvailable
+    override val bufferedRanges: List<BufferedRange> get() = _bufferedRanges.value
+    override val bufferedPercentage: Float get() = _bufferedPercentage.value
+
     // Volume
     private val _volumeState = mutableStateOf(1.0f)
     override var volume: Float
@@ -156,6 +177,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     private val bufferingCheckInterval = 200L
     private val bufferingTimeoutThreshold = 500L
+    private val bufferedRangesPollInterval = 200L
 
     init {
         linuxLogger.d { "Initializing Linux video player (JNI)" }
@@ -264,6 +286,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     startFrameUpdates()
                     updateFrameAsync()
                     startBufferingCheck()
+                    startBufferedRangesUpdates()
 
                     if (isPlaying) {
                         playInBackground()
@@ -294,6 +317,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
         pauseInBackground()
         stopFrameUpdates()
         stopBufferingCheck()
+        stopBufferedRangesUpdates()
 
         val ptrToDispose =
             withContext(frameDispatcher) {
@@ -466,6 +490,63 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private fun stopBufferingCheck() {
         bufferingCheckJob?.cancel()
         bufferingCheckJob = null
+    }
+
+    /**
+     * Polls the native buffering query on its own job: the buffer keeps filling while playback is
+     * paused, and both the frame loop and the stall check are stopped in that state.
+     */
+    private fun startBufferedRangesUpdates() {
+        stopBufferedRangesUpdates()
+        bufferedRangesJob =
+            ioScope.launch {
+                while (isActive) {
+                    ensureActive()
+                    updateBufferedRangesAsync()
+                    delay(bufferedRangesPollInterval)
+                }
+            }
+    }
+
+    private fun stopBufferedRangesUpdates() {
+        bufferedRangesJob?.cancel()
+        bufferedRangesJob = null
+    }
+
+    private suspend fun updateBufferedRangesAsync() {
+        if (!bufferedRangesAvailable) return
+        val ptr = playerPtr
+        if (ptr == 0L) return
+
+        val count =
+            try {
+                LinuxNativeBridge.nGetBufferedRanges(ptr, bufferedRangesBuffer)
+            } catch (e: UnsatisfiedLinkError) {
+                bufferedRangesAvailable = false
+                linuxLogger.w { "Native library has no buffered-range support: ${e.message}" }
+                resetBufferedRanges()
+                return
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                linuxLogger.e { "Error reading buffered ranges: ${e.message}" }
+                return
+            }
+
+        val duration = getDurationSafely()
+        val position = getPositionSafely()
+        val ranges = normalizeBufferedRanges(decodeNativeBufferedRanges(bufferedRangesBuffer, count), duration)
+
+        withContext(Dispatchers.Main) {
+            _bufferedRanges.value = ranges
+            _bufferedPercentage.value = ranges.bufferedPercentageAt(position, duration)
+        }
+    }
+
+    private suspend fun resetBufferedRanges() {
+        withContext(Dispatchers.Main) {
+            _bufferedRanges.value = emptyList()
+            _bufferedPercentage.value = 0f
+        }
     }
 
     private suspend fun updateFrameAsync() {
@@ -725,6 +806,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     override fun dispose() {
         stopFrameUpdates()
         stopBufferingCheck()
+        stopBufferedRangesUpdates()
         uiUpdateJob?.cancel()
         playerScope.cancel()
 
@@ -838,6 +920,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
             _positionText.value = "00:00"
             _durationText.value = "00:00"
             _aspectRatio.value = 16f / 9f
+            _bufferedRanges.value = emptyList()
+            _bufferedPercentage.value = 0f
             error = null
         }
         _currentFrameState.value = null

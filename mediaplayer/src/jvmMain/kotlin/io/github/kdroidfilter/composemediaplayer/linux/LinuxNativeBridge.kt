@@ -68,6 +68,13 @@ internal object LinuxNativeBridge {
 
     @JvmStatic external fun nGetCurrentTime(handle: Long): Double
 
+    // Buffered ranges — outRanges is filled with [start0, end0, start1, end1, ...] in seconds and
+    // its length caps how many ranges can be reported. Returns the number of ranges written.
+    @JvmStatic external fun nGetBufferedRanges(
+        handle: Long,
+        outRanges: DoubleArray,
+    ): Int
+
     // Metadata
     @JvmStatic external fun nGetVideoTitle(handle: Long): String?
 

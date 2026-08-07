@@ -1281,6 +1281,30 @@ class MacVideoPlayer {
     /// Returns whether the player is currently buffering
     func getIsBuffering() -> Bool { return isBuffering }
 
+    /// Copies the item's loaded (buffered) time ranges into `out` as a flat
+    /// `[start0, end0, start1, end1, ...]` array of seconds.
+    ///
+    /// - Parameters:
+    ///   - out: destination buffer, which must hold at least `maxRanges * 2` doubles
+    ///   - maxRanges: capacity of `out` expressed in ranges
+    /// - Returns: the number of ranges written, `0` when nothing is buffered or no item is loaded.
+    func copyBufferedRanges(into out: UnsafeMutablePointer<Double>?, maxRanges: Int32) -> Int32 {
+        guard let out = out, maxRanges > 0, let item = player?.currentItem else { return 0 }
+
+        var count: Int32 = 0
+        for value in item.loadedTimeRanges {
+            if count >= maxRanges { break }
+            let range = value.timeRangeValue
+            let start = CMTimeGetSeconds(range.start)
+            let length = CMTimeGetSeconds(range.duration)
+            if start.isNaN || length.isNaN || length <= 0 { continue }
+            out[Int(count) * 2] = start
+            out[Int(count) * 2 + 1] = start + length
+            count += 1
+        }
+        return count
+    }
+
     /// Returns network status string
     func getNetworkStatus() -> String { return networkStatus }
 
@@ -1501,6 +1525,17 @@ public func getVideoDuration(_ context: UnsafeMutableRawPointer?) -> Double {
     guard let context = context else { return 0 }
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
     return player.getDuration()
+}
+
+@_cdecl("getBufferedRanges")
+public func getBufferedRanges(
+    _ context: UnsafeMutableRawPointer?,
+    _ outRanges: UnsafeMutablePointer<Double>?,
+    _ maxRanges: Int32
+) -> Int32 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.copyBufferedRanges(into: outRanges, maxRanges: maxRanges)
 }
 
 @_cdecl("getCurrentTime")

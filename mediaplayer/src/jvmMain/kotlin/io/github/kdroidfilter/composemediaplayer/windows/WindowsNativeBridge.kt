@@ -6,7 +6,7 @@ import java.nio.ByteBuffer
 
 internal object WindowsNativeBridge {
     /** Expected native API version — must match NATIVE_VIDEO_PLAYER_VERSION in the DLL. */
-    private const val EXPECTED_NATIVE_VERSION = 2
+    private const val EXPECTED_NATIVE_VERSION = 3
 
     init {
         NativeLibraryLoader.load("NativeVideoPlayer", WindowsNativeBridge::class.java)
@@ -100,6 +100,17 @@ internal object WindowsNativeBridge {
     @JvmStatic external fun nGetMediaPosition(
         handle: Long,
         outPosition: LongArray,
+    ): Int
+
+    /**
+     * Fills [outRanges] with `[start0, end0, start1, end1, ...]` in seconds, capped by the array
+     * length. Returns the number of ranges written, or `-1` when the backend playing this media
+     * cannot report buffering (progressive network playback through the Media Foundation source
+     * reader).
+     */
+    @JvmStatic external fun nGetBufferedRanges(
+        handle: Long,
+        outRanges: DoubleArray,
     ): Int
 
     @JvmStatic external fun nSetPlaybackState(

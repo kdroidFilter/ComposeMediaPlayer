@@ -111,6 +111,28 @@ static jint JNICALL jni_GetMediaPosition(JNIEnv* env, jclass, jlong handle, jlon
     return hr;
 }
 
+// Fills outRanges with [start0, end0, start1, end1, ...] in seconds. Returns the number of ranges
+// written, or -1 when this media's backend cannot report buffering at all (progressive network
+// playback through IMFSourceReader).
+static jint JNICALL jni_GetBufferedRanges(JNIEnv* env, jclass, jlong handle, jdoubleArray outRanges) {
+    if (!handle || !outRanges) return 0;
+
+    jsize capacity = env->GetArrayLength(outRanges) / 2;
+    if (capacity <= 0) return 0;
+
+    jdouble* buffer = env->GetDoubleArrayElements(outRanges, nullptr);
+    if (!buffer) return 0;
+
+    INT32 count = 0;
+    HRESULT hr = GetBufferedRanges(toInstance(handle), static_cast<double*>(buffer),
+                                   static_cast<INT32>(capacity), &count);
+    env->ReleaseDoubleArrayElements(outRanges, buffer, 0);
+
+    if (hr == S_FALSE) return -1;
+    if (FAILED(hr)) return 0;
+    return static_cast<jint>(count);
+}
+
 static jint JNICALL jni_SetPlaybackState(JNIEnv*, jclass, jlong handle, jboolean playing, jboolean stop) {
     return handle ? SetPlaybackState(toInstance(handle), playing ? TRUE : FALSE, stop ? TRUE : FALSE) : E_INVALIDARG;
 }
@@ -217,6 +239,7 @@ static const JNINativeMethod g_methods[] = {
     { const_cast<char*>("nSeekMedia"),           const_cast<char*>("(JJ)I"),                        (void*)jni_SeekMedia },
     { const_cast<char*>("nGetMediaDuration"),    const_cast<char*>("(J[J)I"),                       (void*)jni_GetMediaDuration },
     { const_cast<char*>("nGetMediaPosition"),    const_cast<char*>("(J[J)I"),                       (void*)jni_GetMediaPosition },
+    { const_cast<char*>("nGetBufferedRanges"),   const_cast<char*>("(J[D)I"),                       (void*)jni_GetBufferedRanges },
     { const_cast<char*>("nSetPlaybackState"),    const_cast<char*>("(JZZ)I"),                       (void*)jni_SetPlaybackState },
     { const_cast<char*>("nShutdownMediaFoundation"), const_cast<char*>("()I"),                      (void*)jni_ShutdownMediaFoundation },
     { const_cast<char*>("nSetAudioVolume"),      const_cast<char*>("(JF)I"),                        (void*)jni_SetAudioVolume },

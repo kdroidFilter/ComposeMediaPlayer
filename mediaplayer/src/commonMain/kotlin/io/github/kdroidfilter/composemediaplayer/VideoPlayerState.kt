@@ -87,6 +87,46 @@ interface VideoPlayerState {
     var isFullscreen: Boolean
     val aspectRatio: Float
 
+    // Buffering
+
+    /**
+     * Indicates whether the current platform backend can report buffered ranges for the media
+     * being played.
+     *
+     * When this is `false`, [bufferedRanges] and [bufferedPercentage] stay empty/zero and carry no
+     * meaning — the underlying player simply does not expose the information. Check this before
+     * drawing a buffer indicator, so an unsupported backend renders "unknown" rather than
+     * "nothing buffered".
+     *
+     * This is currently `false` only for progressive (non-HLS) network streams on the Windows
+     * desktop backend, whose Media Foundation source reader exposes no buffering data.
+     */
+    val isBufferedRangeSupported: Boolean get() = false
+
+    /**
+     * The spans of media that are already buffered, in seconds, sorted by [BufferedRange.start]
+     * and free of overlaps.
+     *
+     * Most backends report several disjoint ranges (for instance after seeking ahead in a stream).
+     * Android reports at most one range, starting at the current playback position, because
+     * ExoPlayer only exposes a single contiguous buffer. An empty list means nothing is buffered
+     * yet — or, when [isBufferedRangeSupported] is `false`, that the information is unavailable.
+     */
+    val bufferedRanges: List<BufferedRange> get() = emptyList()
+
+    /**
+     * How far the media is buffered ahead of the current position, as a percentage (`0.0`–`100.0`)
+     * of the total [duration]. Convenient for a single-bar buffer indicator; use [bufferedRanges]
+     * when you want to draw every buffered span.
+     */
+    val bufferedPercentage: Float get() = 0f
+
+    /**
+     * [bufferedPercentage] expressed on the same `0.0`–`1000.0` scale as [sliderPos], so it can be
+     * drawn directly underneath the seek bar.
+     */
+    val bufferedSliderPos: Float get() = bufferedPercentage * 10f
+
     val isPipSupported: Boolean get() = false
     var isPipActive: Boolean get() = false
         set(value) {}
@@ -309,6 +349,9 @@ data class PreviewableVideoPlayerState(
     override var isPipEnabled: Boolean = false,
     override var onPlaybackEnded: (() -> Unit)? = null,
     override var onRestart: (() -> Unit)? = null,
+    override val isBufferedRangeSupported: Boolean = false,
+    override val bufferedRanges: List<BufferedRange> = emptyList(),
+    override val bufferedPercentage: Float = 0f,
 ) : VideoPlayerState {
     override fun play() {}
 

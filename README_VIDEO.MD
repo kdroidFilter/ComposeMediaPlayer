@@ -41,6 +41,7 @@ The video player leverages:
   - [Video Playback via URL or Local Files](#video-playback-via-url-or-local-files)
   - [Full Controls](#full-controls)
   - [Progress Indicators](#progress-indicators)
+  - [Buffered Ranges](#buffered-ranges)
   - [Error Handling](#error-handling)
   - [Loading Indicator](#loading-indicator)
   - [Using Subtitles](#using-subtitles)
@@ -76,6 +77,7 @@ Try the online demo here : [🎥 Live Demo](https://kdroidfilter.github.io/Compo
 - **Picture-in-Picture (PiP)**: Continue watching in a floating window on Android (8.0+) and iOS.
 - **Audio Mode**: Configure audio interruption behavior and iOS silent switch handling.
 - **Video Caching**: Opt-in disk caching for video data on Android and iOS, ideal for scroll-based UIs.
+- **Buffered Ranges**: Report how much of the media has been buffered, so you can draw a buffer indicator on the seek bar.
 - **Error handling** Simple error handling for network or playback issues.
 
 ## ✨ Supported Video Formats
@@ -362,6 +364,42 @@ For programmatic seeking (e.g. skip forward/backward), use `seekTo` directly:
 // Seek to the middle of the video
 playerState.seekTo(500f)
 ```
+
+### Buffered Ranges
+
+`VideoPlayerState` reports how much of the media has already been buffered, so you can draw a
+buffer indicator behind the seek bar.
+
+```kotlin
+if (playerState.isBufferedRangeSupported) {
+    // Single-bar indicator: how far playback can run from the current position, 0f..100f
+    LinearProgressIndicator(progress = { playerState.bufferedPercentage / 100f })
+
+    // Or draw every buffered span — players can hold several disjoint ranges after a seek
+    playerState.bufferedRanges.forEach { range ->
+        println("buffered from ${range.start}s to ${range.end}s")
+    }
+}
+```
+
+| Property | Description |
+|----------|-------------|
+| `isBufferedRangeSupported` | Whether this platform can report buffering for the current media. Check it first: `false` means "unknown", not "nothing buffered". |
+| `bufferedRanges` | The buffered spans in seconds, sorted and free of overlaps. |
+| `bufferedPercentage` | How far the media is buffered ahead of the current position, `0f..100f` of the total duration. |
+| `bufferedSliderPos` | The same value on the `0f..1000f` scale used by `sliderPos`, so it can be drawn directly under the seek bar. |
+
+Platform behaviour:
+
+| Platform | Buffered ranges |
+|----------|-----------------|
+| Android | A single range starting at the playback position — ExoPlayer exposes only one contiguous buffer. |
+| iOS / macOS | Full multi-range support, from `AVPlayerItem.loadedTimeRanges`. |
+| Web (JS / Wasm) | Full multi-range support, from `HTMLMediaElement.buffered`. |
+| Linux | Multi-range for streamed sources (GStreamer buffering query); local files report the whole duration. |
+| Windows — HLS | Full multi-range support, from `IMFMediaEngine`. |
+| Windows — local files | The whole duration, which is always available on disk. |
+| Windows — progressive network | **Not supported.** The Media Foundation source reader exposes no buffering data, so `isBufferedRangeSupported` is `false`. |
 
 ### Error Handling
 
