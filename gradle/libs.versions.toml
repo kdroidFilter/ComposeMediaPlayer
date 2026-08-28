@@ -7,7 +7,7 @@ agp = "8.13.2"
 kotlinx-coroutines = "1.11.0"
 kotlinxBrowserWasmJs = "0.5.0"
 kotlinxDatetime = "0.8.0"
-compose = "1.11.1"
+compose = "1.12.0"
 androidx-activityCompose = "1.13.0"
 # 1.19.0 requires AGP 9.1.0+; stay on 1.18.0 until the AGP upgrade
 androidx-core = "1.18.0"
