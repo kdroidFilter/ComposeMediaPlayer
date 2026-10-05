@@ -109,6 +109,8 @@ kotlin {
             implementation(kotlin("test"))
             implementation(kotlin("test-junit"))
             implementation(libs.kotlinx.coroutines.test)
+            // Real AVFoundation tests render frames through Skia.
+            runtimeOnly(compose.desktop.currentOs)
         }
 
         if (Os.isFamily(Os.FAMILY_MAC)) {
@@ -266,4 +268,14 @@ mavenPublishing {
         signAllPublications()
     }
 
+}
+
+// Enabling native timeout regressions must invalidate an earlier skipped test run.
+tasks.withType<Test>().configureEach {
+    if (name == "jvmTest") {
+        inputs.property(
+            "nativeVideoDimensionsTimeoutTest",
+            providers.environmentVariable("COMPOSE_MEDIA_PLAYER_RUN_NATIVE_TIMEOUT_TEST").orElse("0"),
+        )
+    }
 }

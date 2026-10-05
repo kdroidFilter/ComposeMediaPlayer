@@ -128,6 +128,27 @@ Before using Compose Media Player, you need to create a state for the video play
 val playerState = rememberVideoPlayerState()
 ```
 
+### macOS Video Dimensions Timeout (Desktop JVM)
+
+The macOS backend polls AVFoundation for video dimensions for up to **5 seconds** by default.
+For remote sources whose metadata takes longer to arrive, desktop JVM code can opt into a
+longer window:
+
+```kotlin
+val playerState = rememberVideoPlayerState(macVideoDimensionsTimeoutMillis = 30_000L)
+```
+
+The desktop overload manages disposal automatically. Changing the timeout recreates the player
+state. The value must be positive and is ignored by the Windows and Linux backends. Existing
+`rememberVideoPlayerState()` calls retain the five-second window.
+
+For manually managed states, use `DefaultVideoPlayerState(macVideoDimensionsTimeoutMillis = 30_000L)`
+or, on macOS, `MacVideoPlayerState(videoDimensionsTimeoutMillis = 30_000L)`. Call `dispose()` when a
+manually managed state is no longer needed. Existing no-argument constructors remain available.
+
+This setting controls dimension polling only. Native initialization and the separate duration
+polling window retain their existing timeouts; it does not limit the total media-open time.
+
 ### Displaying the Video Surface
 
 After initializing the player state, you can display the surface of the video using `VideoPlayerSurface`:

@@ -74,8 +74,18 @@ private const val POSITION_POLL_INTERVAL_MS = 200L
  * separate polling loop. The one place macOS deliberately diverges is the aspect ratio: it uses
  * AVFoundation's display aspect ratio (pixel-aspect-ratio / clean-aperture corrected) so
  * anamorphic content renders correctly — see [displayAspectRatio].
+ *
+ * @param videoDimensionsTimeoutMillis Maximum time to poll for video dimensions after opening
+ *   media. Must be positive; defaults to the existing five-second polling window. The separate
+ *   duration polling and native-player initialization timeouts are unchanged.
  */
-class MacVideoPlayerState : VideoPlayerState {
+class MacVideoPlayerState(
+    private val videoDimensionsTimeoutMillis: Long = DEFAULT_MAC_VIDEO_DIMENSIONS_TIMEOUT_MILLIS,
+) : VideoPlayerState {
+    init {
+        require(videoDimensionsTimeoutMillis > 0) { "Video dimensions timeout must be positive." }
+    }
+
     /** Native AVFoundation player. AtomicLong allows lock-free reads from the frame hot path. */
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
@@ -408,7 +418,8 @@ class MacVideoPlayerState : VideoPlayerState {
                 // Phase 2 (UNLOCKED): AVFoundation loads asynchronously, so these polls can take
                 // several seconds. Running them outside mediaOperationMutex keeps volume/other
                 // operations responsive during a slow open.
-                pollDimensionsUntilReady(ptr)
+                pollDimensionsUntilReady(ptr, myToken)
+                if (isDisposing.get() || myToken != openToken.get()) return@launch
                 val resolvedDuration = pollDurationUntilReady(ptr)
                 if (isDisposing.get() || myToken != openToken.get()) return@launch
 
@@ -475,30 +486,28 @@ class MacVideoPlayerState : VideoPlayerState {
                 _hasMedia = false
             } finally {
                 // Only clear the flag if a newer open hasn't taken over.
-                if (myToken == openToken.get()) isOpening.set(false)
-                if (!_hasMedia) isLoading = false
+                if (myToken == openToken.get()) {
+                    isOpening.set(false)
+                    if (!_hasMedia) isLoading = false
+                }
             }
         }
     }
 
-    /**
-     * Loops several times (every 250 ms) until width/height are no longer zero, or until
-     * [maxAttempts] is reached.
-     */
+    /** Polls video dimensions without holding [mediaOperationMutex] during asynchronous loading. */
     private suspend fun pollDimensionsUntilReady(
         ptr: Long,
-        maxAttempts: Int = 20,
+        token: Long,
     ) {
-        for (attempt in 1..maxAttempts) {
-            val width = MacNativeBridge.nGetFrameWidth(ptr)
-            val height = MacNativeBridge.nGetFrameHeight(ptr)
-            if (width > 0 && height > 0) {
-                macLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
-                return
-            }
-            delay(250)
+        val ready =
+            awaitMacVideoDimensions(
+                timeoutMillis = videoDimensionsTimeoutMillis,
+                isCurrentOpen = { !isDisposing.get() && token == openToken.get() && ptr == playerPtr },
+                readDimensions = { MacNativeBridge.nGetFrameWidth(ptr) to MacNativeBridge.nGetFrameHeight(ptr) },
+            )
+        if (!ready && !isDisposing.get() && token == openToken.get()) {
+            macLogger.e { "Unable to retrieve valid dimensions within $videoDimensionsTimeoutMillis ms" }
         }
-        macLogger.e { "Unable to retrieve valid dimensions after $maxAttempts attempts" }
     }
 
     /**
