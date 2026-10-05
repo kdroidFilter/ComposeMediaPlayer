@@ -59,6 +59,40 @@ jobs:
           name: test-reports-jvm
           path: '**/build/reports/tests/'
 
+  macos-video-dimensions-timeout:
+    needs: build-natives
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download macOS native libraries
+        uses: actions/download-artifact@v8
+        with:
+          name: native-macos
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Validate configurable macOS video dimensions timeout
+        run: |
+          ./gradlew :mediaplayer:compileKotlinJvm :mediaplayer:jvmTest \
+            --tests '*MacVideoDimensionsTimeout*Test' --no-daemon --no-configuration-cache
+        env:
+          COMPOSE_MEDIA_PLAYER_RUN_NATIVE_TIMEOUT_TEST: '1'
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-reports-macos-video-dimensions-timeout
+          path: '**/build/reports/tests/'
+
   android:
     runs-on: ubuntu-latest
     steps:

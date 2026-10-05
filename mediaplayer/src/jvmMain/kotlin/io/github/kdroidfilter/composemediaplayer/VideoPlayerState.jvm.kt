@@ -1,9 +1,13 @@
 package io.github.kdroidfilter.composemediaplayer
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.mac.DEFAULT_MAC_VIDEO_DIMENSIONS_TIMEOUT_MILLIS
 import io.github.kdroidfilter.composemediaplayer.mac.MacVideoPlayerState
 import io.github.kdroidfilter.composemediaplayer.util.CurrentPlatform
 import io.github.kdroidfilter.composemediaplayer.windows.WindowsVideoPlayerState
@@ -13,6 +17,25 @@ actual fun createVideoPlayerState(
     audioMode: AudioMode,
     cacheConfig: CacheConfig,
 ): VideoPlayerState = DefaultVideoPlayerState()
+
+/**
+ * Desktop overload with a configurable macOS video-dimensions polling window.
+ *
+ * [macVideoDimensionsTimeoutMillis] must be positive. Windows and Linux keep their existing
+ * behavior. Changing the value creates a new state and disposes the previous state.
+ * Use the common no-argument overload to retain the default five-second macOS window.
+ */
+@Composable
+fun rememberVideoPlayerState(macVideoDimensionsTimeoutMillis: Long): VideoPlayerState {
+    val playerState =
+        remember(macVideoDimensionsTimeoutMillis) {
+            DefaultVideoPlayerState(macVideoDimensionsTimeoutMillis)
+        }
+    DisposableEffect(playerState) {
+        onDispose { playerState.dispose() }
+    }
+    return playerState
+}
 
 /**
  * Represents the state and behavior of a video player. This class provides properties
@@ -35,13 +58,22 @@ actual fun createVideoPlayerState(
  * - `stop()`: Stops playback and resets the player state.
  * - `seekTo(value: Float)`: Seeks to a specific playback position based on the provided normalized value.
  * - `dispose()`: Releases resources used by the video player and disposes of the state.
+ *
+ * @param macVideoDimensionsTimeoutMillis Maximum macOS video-dimensions polling time in
+ *   milliseconds. Must be positive; defaults to 5,000 ms. Ignored by Windows and Linux backends.
  */
 @Stable
-open class DefaultVideoPlayerState : VideoPlayerState {
+open class DefaultVideoPlayerState(
+    macVideoDimensionsTimeoutMillis: Long = DEFAULT_MAC_VIDEO_DIMENSIONS_TIMEOUT_MILLIS,
+) : VideoPlayerState {
+    init {
+        require(macVideoDimensionsTimeoutMillis > 0) { "Video dimensions timeout must be positive." }
+    }
+
     val delegate: VideoPlayerState =
         when (CurrentPlatform.os) {
             CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState()
-            CurrentPlatform.OS.MAC -> MacVideoPlayerState()
+            CurrentPlatform.OS.MAC -> MacVideoPlayerState(macVideoDimensionsTimeoutMillis)
             CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState()
         }
 
