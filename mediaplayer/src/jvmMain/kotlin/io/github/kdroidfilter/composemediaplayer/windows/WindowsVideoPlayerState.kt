@@ -547,16 +547,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     // Get the video dimensions
                     val sizeArr = IntArray(2)
                     player.GetVideoSize(instance, sizeArr)
-                    if (sizeArr[0] <= 0 || sizeArr[1] <= 0) {
-                        setError("Failed to retrieve video size")
-                        player.CloseMedia(instance)
-                        return@withLock
-                    }
+                    // 0 x 0 = audio-only media (the native side opened it without a video stream).
                     videoWidth = sizeArr[0]
                     videoHeight = sizeArr[1]
 
                     // Scale output to match display surface (saves memory for 4K+ video)
-                    if (surfaceWidth > 0 && surfaceHeight > 0) {
+                    if (videoWidth > 0 && surfaceWidth > 0 && surfaceHeight > 0) {
                         val hrScale = player.SetOutputSize(instance, surfaceWidth, surfaceHeight)
                         if (hrScale >= 0) {
                             player.GetVideoSize(instance, sizeArr)
@@ -701,7 +697,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
                     }
                     pause()
                     onPlaybackEnded?.invoke()
-                    break
+                    // Stay alive: a seek clears EOF and play() resumes without restarting this job, so the
+                    // next end of media must be detected here too.
+                    while (scope.isActive && _hasMedia && !isDisposing.get() && player.IsEOF(videoPlayerInstance)) {
+                        delay(100)
+                    }
+                    continue
                 }
             }
 
@@ -724,6 +725,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
             // on videoReaderMutex which the seek flow is holding.
             if (isSeeking.get()) {
                 delay(5)
+                continue
+            }
+
+            // Audio-only: no frames to read; the consumer reports the position.
+            if (videoWidth <= 0) {
+                delay(50)
                 continue
             }
 
@@ -872,6 +879,11 @@ class WindowsVideoPlayerState : VideoPlayerState {
             try {
                 val frameData =
                     frameChannel.tryReceive().getOrNull() ?: run {
+                        if (videoWidth <= 0) {
+                            updateAudioOnlyPosition()
+                            delay(100)
+                            return@run null
+                        }
                         if (isLoading && !frameReceived) {
                             loadingTimeout++
                             if (loadingTimeout > 200) {
@@ -1194,6 +1206,19 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 }
             }
         }
+    }
+
+    /** Audio-only media has no frame timestamps: take the position from the native audio clock. */
+    private fun updateAudioOnlyPosition() {
+        val instance = videoPlayerInstance
+        if (instance == 0L || !_hasMedia || isSeeking.get()) return
+        val posArr = LongArray(1)
+        if (player.GetMediaPosition(instance, posArr) < 0) return
+        _currentTime = posArr[0] / 10000000.0
+        if (!_userDragging) {
+            _progress = if (_duration > 0.0) (_currentTime / _duration).toFloat().coerceIn(0f, 1f) else 0f
+        }
+        isLoading = false
     }
 
     /**

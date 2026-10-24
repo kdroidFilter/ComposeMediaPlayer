@@ -52,18 +52,20 @@ internal object NativeLibraryLoader {
         cacheDir.mkdirs()
         val cachedFile = File(cacheDir, fileName)
 
-        // Validate cache: re-extract if size differs or file is missing
-        val resourceSize = resourceUrl.openConnection().contentLengthLong
-        if (cachedFile.exists() && cachedFile.length() == resourceSize) {
+        // Validate cache: re-extract if the content differs or the file is missing. Comparing only the size would keep
+        // an outdated library after an update that happens to produce a file of the same size.
+        val resourceBytes = resourceUrl.openStream().use { it.readBytes() }
+        if (cachedFile.exists() &&
+            cachedFile.length() == resourceBytes.size.toLong() &&
+            cachedFile.readBytes().contentEquals(resourceBytes)
+        ) {
             return cachedFile
         }
 
         // Atomic extract: write to temp then move
         val tmpFile = File(cacheDir, "$fileName.tmp")
         try {
-            resourceUrl.openStream().use { input ->
-                Files.copy(input, tmpFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            }
+            tmpFile.writeBytes(resourceBytes)
             Files.move(tmpFile.toPath(), cachedFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
             cachedFile.setExecutable(true)
         } finally {

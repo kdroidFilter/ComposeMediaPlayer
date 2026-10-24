@@ -408,6 +408,7 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
     pInstance->bEOF.store(false);
     pInstance->videoWidth = pInstance->videoHeight = 0;
     pInstance->bHasAudio = false;
+    pInstance->bHasVideo = false;
     pInstance->bHasInitialFrame = false;
     pInstance->pCachedSample.Reset();
 
@@ -438,11 +439,11 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
 
     // ---- Video stream: RGB32 ----
     hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
-    if (SUCCEEDED(hr))
-        hr = pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
     if (FAILED(hr)) return hr;
+    // Audio-only media (no video stream) is allowed: it plays through the audio reader below.
+    pInstance->bHasVideo = SUCCEEDED(pInstance->pSourceReader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE));
 
-    {
+    if (pInstance->bHasVideo) {
         ComPtr<IMFMediaType> type;
         hr = MFCreateMediaType(type.GetAddressOf());
         if (SUCCEEDED(hr)) {
@@ -454,7 +455,7 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
         if (FAILED(hr)) return hr;
     }
 
-    {
+    if (pInstance->bHasVideo) {
         ComPtr<IMFMediaType> current;
         if (SUCCEEDED(pInstance->pSourceReader->GetCurrentMediaType(
                 MF_SOURCE_READER_FIRST_VIDEO_STREAM, current.GetAddressOf()))) {
@@ -541,6 +542,8 @@ NATIVEVIDEOPLAYER_API HRESULT OpenMedia(VideoPlayerInstance* pInstance, const wc
         }
     }
 
+    if (!pInstance->bHasVideo && !pInstance->bHasAudio) return MF_E_INVALIDSTREAMNUMBER;
+
     // ---- Presentation clock ----
     if (pInstance->bUseClockSync) {
         if (SUCCEEDED(pInstance->pSourceReader->GetServiceForStream(
@@ -592,7 +595,7 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrame(VideoPlayerInstance* pInstance, BYT
     if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
     if (pInstance->pLockedBuffer) UnlockVideoFrame(pInstance);
 
-    if (pInstance->bEOF.load()) { *pData = nullptr; *pDataSize = 0; return S_FALSE; }
+    if (pInstance->bEOF.load() || !pInstance->bHasVideo) { *pData = nullptr; *pDataSize = 0; return S_FALSE; }
 
     ComPtr<IMFSample> sample;
     HRESULT hr = AcquireNextSample(pInstance, sample.GetAddressOf());
@@ -647,7 +650,7 @@ NATIVEVIDEOPLAYER_API HRESULT ReadVideoFrameInto(VideoPlayerInstance* pInstance,
     if (!pInstance->pSourceReader) return OP_E_NOT_INITIALIZED;
     if (pInstance->pLockedBuffer) UnlockVideoFrame(pInstance);
 
-    if (pInstance->bEOF.load()) {
+    if (pInstance->bEOF.load() || !pInstance->bHasVideo) {
         if (pTimestamp) *pTimestamp = pInstance->llCurrentPosition.load(std::memory_order_relaxed);
         return S_FALSE;
     }
@@ -853,6 +856,13 @@ NATIVEVIDEOPLAYER_API HRESULT SeekMedia(VideoPlayerInstance* pInstance, LONGLONG
         pInstance->llPlaybackStartTime.store(startT, std::memory_order_relaxed);
         pInstance->llTotalPauseTime.store(0, std::memory_order_relaxed);
         pInstance->llPauseStart.store(wasPlaying ? 0 : now, std::memory_order_relaxed);
+    }
+
+    // The audio thread exits at end of stream; restart it so a seek after the end plays again.
+    if (pInstance->bHasAudio && pInstance->bAudioInitialized && pInstance->pSourceReaderAudio &&
+        pInstance->hAudioThread && WaitForSingleObject(pInstance->hAudioThread.Get(), 0) == WAIT_OBJECT_0) {
+        StartAudioThread(pInstance);
+        if (!wasPlaying) SignalPause(pInstance);
     }
 
     // 7. Resume or stay paused.

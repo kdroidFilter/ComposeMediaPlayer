@@ -45,6 +45,7 @@ struct VideoPlayerInstance {
     Microsoft::WRL::ComPtr<IAudioEndpointVolume> pAudioEndpointVolume;
 
     bool bHasAudio         = false;
+    bool bHasVideo         = false; // false for audio-only media (mp3, wav, ogg, ...)
     bool bAudioInitialized = false;
 
     WAVEFORMATEX* pSourceAudioFormat = nullptr; // allocated with CoTaskMemAlloc

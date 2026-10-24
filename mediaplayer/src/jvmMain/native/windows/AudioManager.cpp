@@ -117,8 +117,9 @@ int FeedOneSample(VideoPlayerInstance* inst, IMFSourceReader* audioReader,
             0, nullptr, &flags, &ts100n, mfSample.GetAddressOf());
         if (FAILED(hr)) return -1;
     }
-    if (!mfSample) return 0;
+    // End of stream comes as a null sample with the flag set: check the flag first.
     if (flags & MF_SOURCE_READERF_ENDOFSTREAM) return -1;
+    if (!mfSample) return 0;
 
     // If a seek started while ReadSample was executing, the returned sample
     // may be from the old position — drop it.
@@ -268,7 +269,11 @@ DWORD WINAPI AudioThreadProc(LPVOID lpParam) {
         const float speed = inst->playbackSpeed.load(std::memory_order_relaxed);
         int result = FeedOneSample(inst, audioReader, engineBufferFrames,
                                    blockAlign, channels, formatTag, bitsPerSample, speed);
-        if (result < 0) break; // EOF or fatal error
+        if (result < 0) {
+            // EOF or fatal error. Without a video stream nothing else reports the end.
+            if (!inst->bHasVideo) inst->bEOF.store(true);
+            break;
+        }
     }
 
     {
