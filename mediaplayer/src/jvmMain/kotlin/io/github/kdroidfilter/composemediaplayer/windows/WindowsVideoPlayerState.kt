@@ -61,6 +61,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
     companion object {
         private val isMfBootstrapped = AtomicBoolean(false)
 
+        /** How long dispose() waits for an open/seek in native code before finishing the teardown in the background. */
+        private const val DISPOSE_LOCK_TIMEOUT_NS = 2_000_000_000L
+
         /** Map to store volume settings for each player instance */
         private val instanceVolumes = ConcurrentHashMap<Long, Float>()
 
@@ -338,6 +341,36 @@ class WindowsVideoPlayerState : VideoPlayerState {
             return // Already disposing
         }
 
+        // An open or seek in progress may be inside native code (OpenMedia, SeekMedia) with this instance; destroying
+        // it underneath crashes the process (EXCEPTION_ACCESS_VIOLATION, #249). Tear down only while holding
+        // mediaOperationMutex. Spin rather than suspend: dispose often runs on the EDT.
+        val deadlineNs = System.nanoTime() + DISPOSE_LOCK_TIMEOUT_NS
+        var locked = mediaOperationMutex.tryLock()
+        while (!locked && System.nanoTime() < deadlineNs) {
+            try {
+                Thread.sleep(5)
+            } catch (_: InterruptedException) {
+                break
+            }
+            locked = mediaOperationMutex.tryLock()
+        }
+        if (locked) {
+            try {
+                releaseNativePlayer()
+            } finally {
+                mediaOperationMutex.unlock()
+            }
+            scope.cancel()
+        } else {
+            // Still blocked in native code (e.g. a slow HTTP connect in OpenMedia): finish once it returns.
+            Thread({
+                kotlinx.coroutines.runBlocking { mediaOperationMutex.withLock { releaseNativePlayer() } }
+                scope.cancel()
+            }, "ComposeMediaPlayer-dispose").start()
+        }
+    }
+
+    private fun releaseNativePlayer() {
         // Stop coroutines first. The producer reads native state under
         // videoReaderMutex; we must wait for it to exit its critical section
         // before tearing down the native reader, otherwise CloseMedia can
@@ -371,7 +404,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 // stalls.
                 val deadlineNs = System.nanoTime() + 500_000_000L
                 if (java.awt.EventQueue.isDispatchThread()) {
-                    while (jobToJoin.isActive && System.nanoTime() < deadlineNs) {
+                    // isActive is already false right after cancel(); wait until the job (and the
+                    // producer's native read) has actually finished.
+                    while (!jobToJoin.isCompleted && System.nanoTime() < deadlineNs) {
                         try { Thread.sleep(10) } catch (_: InterruptedException) { break }
                     }
                 } else {
@@ -402,8 +437,6 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 windowsLogger.e { "Exception destroying instance: ${e.message}" }
             }
         }
-
-        scope.cancel()
     }
 
     private fun releaseAllResources() {
