@@ -69,6 +69,9 @@ class LinuxVideoPlayerState : VideoPlayerState {
 
     // State tracking
     private var lastFrameUpdateTime: Long = 0
+
+    // False for audio-only media: no frames will arrive, so frame-based buffering detection doesn't apply.
+    @Volatile private var hasVideo = true
     private var seekInProgress = false
     private var targetSeekTime: Double? = null
 
@@ -272,7 +275,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     linuxLogger.e { "Failed to open URI" }
                     withContext(Dispatchers.Main) {
                         isLoading = false
-                        error = VideoPlayerError.SourceError("Failed to open media source")
+                        // Keep the specific error openMediaUri may have set.
+                        if (error == null) error = VideoPlayerError.SourceError("Failed to open media source")
                     }
                 }
             } catch (e: Exception) {
@@ -355,11 +359,20 @@ class LinuxVideoPlayerState : VideoPlayerState {
         ptr: Long,
         maxAttempts: Int = 20,
     ) {
+        hasVideo = true
         for (attempt in 1..maxAttempts) {
             val width = LinuxNativeBridge.nGetFrameWidth(ptr)
             val height = LinuxNativeBridge.nGetFrameHeight(ptr)
             if (width > 0 && height > 0) {
                 linuxLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
+                return
+            }
+            // A source that fails to preroll (unreachable, unsupported, missing decoder) never gets dimensions either.
+            LinuxNativeBridge.nConsumeError(ptr)?.let { throw IllegalStateException(it) }
+            // Audio-only media never gets dimensions: stop waiting once the pipeline knows there is no video stream.
+            if (LinuxNativeBridge.nGetVideoStreamCount(ptr) == 0) {
+                linuxLogger.d { "Audio-only media (no video stream)" }
+                hasVideo = false
                 return
             }
             linuxLogger.d { "Dimensions not ready yet (attempt $attempt/$maxAttempts)" }
@@ -455,7 +468,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
     }
 
     private suspend fun checkBufferingState() {
-        if (isPlaying && !isLoading) {
+        if (isPlaying && !isLoading && hasVideo) {
             val timeSinceLastFrame = System.currentTimeMillis() - lastFrameUpdateTime
             if (timeSinceLastFrame > bufferingTimeoutThreshold) {
                 withContext(Dispatchers.Main) { isLoading = true }
@@ -539,10 +552,16 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private suspend fun updatePositionAsync() {
         if (!hasMedia || userDragging) return
         try {
-            val duration = getDurationSafely()
-            if (duration <= 0) return
+            if (reportPendingError()) return
 
+            val duration = getDurationSafely()
             val current = getPositionSafely()
+            if (duration <= 0) {
+                // Unknown duration (e.g. raw ADTS AAC): still show the position and detect the end of media.
+                withContext(Dispatchers.Main) { _positionText.value = formatTime(current) }
+                checkLoopingAsync(current, duration)
+                return
+            }
 
             withContext(Dispatchers.Main) {
                 _positionText.value = formatTime(current)
@@ -565,6 +584,19 @@ class LinuxVideoPlayerState : VideoPlayerState {
             if (e is CancellationException) throw e
             linuxLogger.e { "Error in updatePositionAsync: ${e.message}" }
         }
+    }
+
+    /** Surfaces a GStreamer error (e.g. a missing decoder or a network failure) as the player error. */
+    private suspend fun reportPendingError(): Boolean {
+        val ptr = playerPtr
+        if (ptr == 0L) return false
+        val message = LinuxNativeBridge.nConsumeError(ptr) ?: return false
+        linuxLogger.e { "Playback error: $message" }
+        // Set the error before pausing: pausing cancels the frame update job this usually runs in.
+        setPlayerError(VideoPlayerError.SourceError(message))
+        withContext(Dispatchers.Main) { isPlaying = false }
+        pauseInBackground()
+        return true
     }
 
     private suspend fun checkLoopingAsync(

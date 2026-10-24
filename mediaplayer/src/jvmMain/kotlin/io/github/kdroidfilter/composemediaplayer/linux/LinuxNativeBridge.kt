@@ -83,4 +83,12 @@ internal object LinuxNativeBridge {
 
     // Playback completion
     @JvmStatic external fun nConsumeDidPlayToEnd(handle: Long): Boolean
+
+    // Stream info and errors
+
+    /** Number of video streams, or -1 while the media is not prerolled yet (0 = audio-only). */
+    @JvmStatic external fun nGetVideoStreamCount(handle: Long): Int
+
+    /** Last GStreamer error since the previous call, or null. */
+    @JvmStatic external fun nConsumeError(handle: Long): String?
 }

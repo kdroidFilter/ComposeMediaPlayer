@@ -103,6 +103,19 @@ static jstring JNICALL jni_GetVideoTitle(JNIEnv* env, jclass cls, jlong handle) 
     return result;
 }
 
+static jint JNICALL jni_GetVideoStreamCount(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? (jint)nvp_get_video_stream_count(toCtx(handle)) : -1;
+}
+
+static jstring JNICALL jni_ConsumeError(JNIEnv* env, jclass cls, jlong handle) {
+    if (!handle) return NULL;
+    char* s = nvp_consume_error(toCtx(handle));
+    if (!s) return NULL;
+    jstring result = (*env)->NewStringUTF(env, s);
+    free(s);
+    return result;
+}
+
 static jlong JNICALL jni_GetVideoBitrate(JNIEnv* env, jclass cls, jlong handle) {
     return handle ? (jlong)nvp_get_bitrate(toCtx(handle)) : 0L;
 }
@@ -161,6 +174,8 @@ static const JNINativeMethod g_methods[] = {
     { "nGetAudioSampleRate",     "(J)I",                        (void*)jni_GetAudioSampleRate },
     { "nGetFrameRate",           "(J)F",                        (void*)jni_GetFrameRate },
     { "nConsumeDidPlayToEnd",    "(J)Z",                        (void*)jni_ConsumeDidPlayToEnd },
+    { "nGetVideoStreamCount",    "(J)I",                        (void*)jni_GetVideoStreamCount },
+    { "nConsumeError",           "(J)Ljava/lang/String;",       (void*)jni_ConsumeError },
 };
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {

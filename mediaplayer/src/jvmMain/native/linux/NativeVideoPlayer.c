@@ -41,6 +41,7 @@ struct VideoPlayer {
     int32_t audio_channels;
     int32_t audio_sample_rate;
     float   frame_rate;
+    char*   last_error; // pending GStreamer error for Kotlin, consumed by nvp_consume_error
 
     // Playback state
     float   volume;
@@ -105,6 +106,10 @@ static void process_bus_message(VideoPlayer* p, GstMessage* msg) {
         gst_message_parse_error(msg, &err, &debug);
         if (err) {
             g_printerr("GStreamer error: %s\n", err->message);
+            pthread_mutex_lock(&p->meta_lock);
+            free(p->last_error);
+            p->last_error = strdup(err->message);
+            pthread_mutex_unlock(&p->meta_lock);
             g_error_free(err);
         }
         if (debug) g_free(debug);
@@ -273,6 +278,7 @@ void nvp_destroy(VideoPlayer* p) {
     pthread_mutex_lock(&p->meta_lock);
     free(p->title);
     free(p->mime_type);
+    free(p->last_error);
     pthread_mutex_unlock(&p->meta_lock);
     pthread_mutex_destroy(&p->meta_lock);
 
@@ -303,6 +309,7 @@ int nvp_open_uri(VideoPlayer* p, const char* uri) {
     pthread_mutex_lock(&p->meta_lock);
     free(p->title);   p->title = NULL;
     free(p->mime_type); p->mime_type = NULL;
+    free(p->last_error); p->last_error = NULL;
     p->bitrate = 0;
     p->audio_channels = 0;
     p->audio_sample_rate = 0;
@@ -665,4 +672,28 @@ static void update_stream_metadata(VideoPlayer* p) {
             gst_object_unref(apad);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Stream info and errors
+// ---------------------------------------------------------------------------
+
+int32_t nvp_get_video_stream_count(VideoPlayer* p) {
+    if (!p) return -1;
+    GstState state = GST_STATE_NULL;
+    // Timeout 0: the current state; stream counts are only known once prerolled.
+    gst_element_get_state(p->pipeline, &state, NULL, 0);
+    if (state < GST_STATE_PAUSED) return -1;
+    gint n_video = 0;
+    g_object_get(p->pipeline, "n-video", &n_video, NULL);
+    return (int32_t)n_video;
+}
+
+char* nvp_consume_error(VideoPlayer* p) {
+    if (!p) return NULL;
+    pthread_mutex_lock(&p->meta_lock);
+    char* error = p->last_error;
+    p->last_error = NULL;
+    pthread_mutex_unlock(&p->meta_lock);
+    return error;
 }

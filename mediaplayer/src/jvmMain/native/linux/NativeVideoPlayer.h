@@ -48,6 +48,12 @@ float   nvp_get_frame_rate(VideoPlayer* p);
 // End-of-stream notification (consumes the flag)
 int32_t nvp_consume_did_play_to_end(VideoPlayer* p);
 
+// Stream info and errors
+// Number of video streams, or -1 while the pipeline is not prerolled yet (0 = audio-only).
+int32_t nvp_get_video_stream_count(VideoPlayer* p);
+// Last GStreamer error since the previous call (caller frees), or NULL.
+char*   nvp_consume_error(VideoPlayer* p);
+
 #ifdef __cplusplus
 }
 #endif
