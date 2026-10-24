@@ -713,9 +713,8 @@ class LinuxVideoPlayerState : VideoPlayerState {
     }
 
     override fun clearError() {
-        runBlocking {
-            withContext(Dispatchers.Main) { error = null }
-        }
+        // Snapshot state can be written from any thread; blocking on Main deadlocked when called from the UI thread.
+        error = null
     }
 
     override fun toggleFullscreen() {

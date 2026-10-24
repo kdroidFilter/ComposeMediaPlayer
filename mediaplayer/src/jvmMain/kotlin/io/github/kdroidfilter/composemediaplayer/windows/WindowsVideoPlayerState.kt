@@ -194,7 +194,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
             }
         }
 
-    private var _error: VideoPlayerError? = null
+    private var _error: VideoPlayerError? by mutableStateOf(null)
     override val error get() = _error
 
     override fun clearError() {
@@ -498,6 +498,8 @@ class WindowsVideoPlayerState : VideoPlayerState {
             mediaOperationMutex.withLock {
                 try {
                     isLoading = true
+                    // An error from a previous source must not stick to this one.
+                    clearError()
 
                     // Stop playback and release existing resources
                     val wasPlaying = _isPlaying
