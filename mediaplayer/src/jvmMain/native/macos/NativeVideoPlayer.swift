@@ -81,6 +81,8 @@ class MacVideoPlayer {
 
     // End-of-playback flag (set by AVPlayerItemDidPlayToEndTime, consumed once by the Kotlin side)
     private var didPlayToEnd: Bool = false
+    // Set when the item reaches its end, cleared when seekTo rebuilds it (not consumed by the Kotlin side)
+    private var reachedEnd: Bool = false
     private var playbackEndObserver: NSObjectProtocol?
 
     // HLS Error tracking
@@ -907,6 +909,7 @@ class MacVideoPlayer {
             queue: nil
         ) { [weak self] _ in
             self?.didPlayToEnd = true
+            self?.reachedEnd = true
         }
 
         // Configure player for HLS
@@ -1308,6 +1311,7 @@ class MacVideoPlayer {
 
     /// Seeks to the specified time (in seconds).
     func seekTo(time: Double) {
+        if isHLSStream && reachedEnd { reloadEndedItem() }
         guard let player = player else { return }
         let newTime = CMTime(seconds: time, preferredTimescale: 600)
 
@@ -1328,6 +1332,24 @@ class MacVideoPlayer {
                 }
             }
         }
+    }
+
+    /// Rebuilds the player on the same, already loaded asset once the HLS item has played to its end.
+    ///
+    /// Seeked back from its end, an AVPlayerItem of an HLS VOD whose first segment carries no audio sample
+    /// (an fMP4 playlist with EXT-X-DISCONTINUITY between segments, where the camera records audio only
+    /// sparsely) plays that segment and then jumps to the end at the first discontinuity, every time. On first
+    /// play the same boundary goes through, and a fresh item from the same asset plays it through too.
+    private func reloadEndedItem() {
+        guard let asset = player?.currentItem?.asset else { return }
+        let composition = player?.currentItem?.videoComposition
+        reachedEnd = false
+        let wasPlaying = isPlaying
+        stopDisplayLink()
+        player?.pause()
+        cleanupObservers()
+        setupVideoOutputAndPlayer(with: asset, videoComposition: composition)
+        if wasPlaying { play() }
     }
 
     /// Consumes the end-of-playback flag. Returns true once per playback completion.
