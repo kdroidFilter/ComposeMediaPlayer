@@ -183,6 +183,9 @@ class MacVideoPlayerState : VideoPlayerState {
     private val bitmapLock = ReentrantReadWriteLock()
     internal val currentFrameState = mutableStateOf<ImageBitmap?>(null)
 
+    // currentFrameState is cleared on every open (releaseAllResources) and set by the first consumed frame
+    override val hasRenderedFirstFrame: Boolean get() = currentFrameState.value != null
+
     // Aspect ratio — driven by the live frame (see syncAspectRatioToFrame).
     private var _aspectRatio by mutableStateOf(16f / 9f)
     override val aspectRatio: Float get() = _aspectRatio
