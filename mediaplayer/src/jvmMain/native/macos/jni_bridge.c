@@ -36,6 +36,7 @@ extern const char* getVideoMimeType(void* ctx);
 extern int32_t getAudioChannels(void* ctx);
 extern int32_t getAudioSampleRate(void* ctx);
 extern int32_t consumeDidPlayToEnd(void* ctx);
+extern int64_t getFrameGeneration(void* ctx);
 
 // ---------------------------------------------------------------------------
 // Utility
@@ -185,6 +186,10 @@ static jboolean JNICALL jni_ConsumeDidPlayToEnd(JNIEnv* env, jclass cls, jlong h
     return handle ? (jboolean)(consumeDidPlayToEnd(toCtx(handle)) != 0) : JNI_FALSE;
 }
 
+static jlong JNICALL jni_GetFrameGeneration(JNIEnv* env, jclass cls, jlong handle) {
+    return handle ? (jlong)getFrameGeneration(toCtx(handle)) : 0L;
+}
+
 // ---------------------------------------------------------------------------
 // Registration table
 // ---------------------------------------------------------------------------
@@ -218,6 +223,7 @@ static const JNINativeMethod g_methods[] = {
     { "nGetAudioChannels",       "(J)I",                        (void*)jni_GetAudioChannels },
     { "nGetAudioSampleRate",     "(J)I",                        (void*)jni_GetAudioSampleRate },
     { "nConsumeDidPlayToEnd",    "(J)Z",                        (void*)jni_ConsumeDidPlayToEnd },
+    { "nGetFrameGeneration",     "(J)J",                        (void*)jni_GetFrameGeneration },
 };
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
