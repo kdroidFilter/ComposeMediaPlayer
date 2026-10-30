@@ -79,6 +79,9 @@ class MacVideoPlayer {
     private let aspectLock = NSLock()
     private var cachedDisplayAspectRatio: Double = 0.0
 
+    // The asset of an HLS stream lists no tracks: its audio format is read from the item's tracks instead
+    private var tracksObserver: NSKeyValueObservation?
+
     // End-of-playback flag (set by AVPlayerItemDidPlayToEndTime, consumed once by the Kotlin side)
     private var didPlayToEnd: Bool = false
     private var playbackEndObserver: NSObjectProtocol?
@@ -626,6 +629,24 @@ class MacVideoPlayer {
         }
     }
 
+    /// Reads the channel count and sample rate of an audio track
+    private func readAudioFormat(of track: AVAssetTrack) {
+        func apply(_ formatDescriptions: [CMFormatDescription]) {
+            guard let description = formatDescriptions.first,
+                  let basic = CMAudioFormatDescriptionGetStreamBasicDescription(description)
+            else { return }
+            audioChannels = Int(basic.pointee.mChannelsPerFrame)
+            audioSampleRate = Int(basic.pointee.mSampleRate)
+        }
+        if #available(macOS 13.0, *) {
+            Task {
+                if let formatDescriptions = try? await track.load(.formatDescriptions) { apply(formatDescriptions) }
+            }
+        } else if let formatDescriptions = track.formatDescriptions as? [CMFormatDescription] {
+            apply(formatDescriptions)
+        }
+    }
+
     /// Detects the video's native frame rate from its asset
     private func detectVideoFrameRate(from asset: AVAsset) {
         // For HLS streams, default to 30 fps as it's variable
@@ -898,6 +919,16 @@ class MacVideoPlayer {
         // observation thread instead of the frame-decoding thread. .initial seeds the value now.
         presentationSizeObserver = item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
             self?.updateCachedDisplayAspectRatio(from: item.presentationSize)
+        }
+
+        // HLS: the audio channels and sample rate come from the item's tracks, once it has loaded them
+        if isHLSStream {
+            tracksObserver = item.observe(\.tracks, options: [.initial, .new]) { [weak self] item, _ in
+                guard let self = self, self.audioChannels == 0,
+                      let audioTrack = item.tracks.first(where: { $0.assetTrack?.mediaType == .audio })?.assetTrack
+                else { return }
+                self.readAudioFormat(of: audioTrack)
+            }
         }
 
         // Observe end of playback for all media types
@@ -1349,6 +1380,8 @@ class MacVideoPlayer {
         bufferFullObserver?.invalidate()
         presentationSizeObserver?.invalidate()
         presentationSizeObserver = nil
+        tracksObserver?.invalidate()
+        tracksObserver = nil
         // Drop the cached aspect ratio so a reopened player can't briefly show the old video's ratio.
         updateCachedDisplayAspectRatio(from: .zero)
 
