@@ -62,6 +62,9 @@ internal val macLogger = TaggedLogger("MacVideoPlayerState")
  */
 private const val POSITION_POLL_INTERVAL_MS = 200L
 
+// Polls (250 ms apart) without a video size before media with an audio track counts as audio-only.
+private const val AUDIO_ONLY_MIN_POLLS = 8
+
 /**
  * macOS implementation of the video player state.
  *
@@ -418,15 +421,19 @@ class MacVideoPlayerState : VideoPlayerState {
                     try {
                         val w = MacNativeBridge.nGetFrameWidth(ptr)
                         val h = MacNativeBridge.nGetFrameHeight(ptr)
-                        if (w <= 0 || h <= 0) {
+                        // Audio-only media (an mp3, an m4a) has no video size but still plays: only a
+                        // source with neither a picture nor any audio or duration is an error.
+                        val isAudioOnly = (w <= 0 || h <= 0) &&
+                            (resolvedDuration > 0.0 || MacNativeBridge.nGetAudioChannels(ptr) > 0)
+                        if ((w <= 0 || h <= 0) && !isAudioOnly) {
                             setError("Failed to retrieve video size")
                             return@withLock
                         }
-                        videoWidth = w
-                        videoHeight = h
+                        videoWidth = w.coerceAtLeast(0)
+                        videoHeight = h.coerceAtLeast(0)
 
                         // Scale output to match the display surface (saves memory for 4K+ video).
-                        if (surfaceWidth > 0 && surfaceHeight > 0) {
+                        if (!isAudioOnly && surfaceWidth > 0 && surfaceHeight > 0) {
                             videoReaderMutex.withLock {
                                 MacNativeBridge.nSetOutputSize(ptr, surfaceWidth, surfaceHeight)
                                 val sw = MacNativeBridge.nGetFrameWidth(ptr)
@@ -461,6 +468,8 @@ class MacVideoPlayerState : VideoPlayerState {
                             MacNativeBridge.nPlay(ptr)
                         }
                         _isPlaying = startPlayback
+                        // No frame will clear the loading state of audio-only media.
+                        if (isAudioOnly) isLoading = false
 
                         videoJob = startVideoPipeline()
                     } catch (e: Exception) {
@@ -494,6 +503,13 @@ class MacVideoPlayerState : VideoPlayerState {
             val height = MacNativeBridge.nGetFrameHeight(ptr)
             if (width > 0 && height > 0) {
                 macLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
+                return
+            }
+            // Audio-only media never gets dimensions: once the asset reports an audio track and a
+            // while has passed without a video size, stop waiting (a late video size is still
+            // picked up by the frame pipeline, which keeps reading).
+            if (attempt >= AUDIO_ONLY_MIN_POLLS && MacNativeBridge.nGetAudioChannels(ptr) > 0) {
+                macLogger.d { "No video size after $attempt attempts but an audio track: treating as audio-only" }
                 return
             }
             delay(250)
