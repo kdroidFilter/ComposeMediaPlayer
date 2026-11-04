@@ -726,16 +726,25 @@ class MacVideoPlayer {
         // Retrieve the video track to obtain the actual dimensions
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
             guard let videoTrack = tracks?.first, error == nil else {
-                print(
-                    "Error loading video tracks: \(error?.localizedDescription ?? "Unknown")"
-                )
                 // For HLS streams without video track info yet, use default dimensions
                 if isHLSStream {
+                    print("No video track info yet for the HLS stream: \(error?.localizedDescription ?? "none")")
                     frameWidth = 1920
                     frameHeight = 1080
                     nativeVideoWidth = frameWidth
                     nativeVideoHeight = frameHeight
                     setupVideoOutputAndPlayer(with: asset)
+                } else if error == nil {
+                    // Audio-only media (an MP3, an M4A): no video track, but it plays. The player is set up with
+                    // no video output; the Kotlin side reports a 0x0 size as audio-only.
+                    print("No video track: playing as audio-only")
+                    frameWidth = 0
+                    frameHeight = 0
+                    nativeVideoWidth = 0
+                    nativeVideoHeight = 0
+                    setupVideoOutputAndPlayer(with: asset, hasVideo: false)
+                } else {
+                    print("Error loading video tracks: \(error?.localizedDescription ?? "Unknown")")
                 }
                 return
             }
@@ -845,15 +854,20 @@ class MacVideoPlayer {
     }
 
     // Helper method to setup video output and player
-    private func setupVideoOutputAndPlayer(with asset: AVAsset, videoComposition: AVVideoComposition? = nil) {
-        // Create attributes for the CVPixelBuffer (BGRA format) with IOSurface for better performance
-        let pixelBufferAttributes: [String: Any] = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: frameWidth,
-            kCVPixelBufferHeightKey as String: frameHeight,
-            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
-        ]
-        videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: pixelBufferAttributes)
+    private func setupVideoOutputAndPlayer(with asset: AVAsset, videoComposition: AVVideoComposition? = nil, hasVideo: Bool = true) {
+        if hasVideo {
+            // Create attributes for the CVPixelBuffer (BGRA format) with IOSurface for better performance
+            let pixelBufferAttributes: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: frameWidth,
+                kCVPixelBufferHeightKey as String: frameHeight,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            ]
+            videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: pixelBufferAttributes)
+        } else {
+            // Audio-only: no frames to read (captureFrame and captureInitialFrame need an output and return early).
+            videoOutput = nil
+        }
 
         let item = AVPlayerItem(asset: asset)
 
