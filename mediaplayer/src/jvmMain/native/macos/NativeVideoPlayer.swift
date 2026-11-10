@@ -1311,10 +1311,10 @@ class MacVideoPlayer {
         guard let player = player else { return }
         let newTime = CMTime(seconds: time, preferredTimescale: 600)
 
-        // For HLS, use tolerance for more efficient seeking
+        // HLS seeks are exact: a tolerance lets AVPlayer land on the nearest keyframe, up to a second
+        // away from where the user dropped the slider
         if isHLSStream {
-            let tolerance = CMTime(seconds: 1.0, preferredTimescale: 600)
-            player.seek(to: newTime, toleranceBefore: tolerance, toleranceAfter: tolerance)
+            player.seek(to: newTime, toleranceBefore: .zero, toleranceAfter: .zero)
         } else {
             player.seek(to: newTime)
 
