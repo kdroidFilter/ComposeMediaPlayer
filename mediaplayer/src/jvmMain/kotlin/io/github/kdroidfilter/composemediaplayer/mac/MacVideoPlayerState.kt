@@ -671,6 +671,14 @@ class MacVideoPlayerState : VideoPlayerState {
         while (scope.isActive && _hasMedia && !isDisposing.get()) {
             val ptr = playerPtr
             if (ptr != 0L) {
+                // Backfill the audio format of an HLS stream, which the native side only learns once the
+                // item has loaded its tracks (after open)
+                if (metadata.audioChannels == null) {
+                    MacNativeBridge.nGetAudioChannels(ptr).takeIf { it != 0 }?.let { channels ->
+                        metadata.audioChannels = channels
+                        metadata.audioSampleRate = MacNativeBridge.nGetAudioSampleRate(ptr).takeIf { it != 0 }
+                    }
+                }
                 // Backfill a duration that arrived after open (e.g. HLS VOD) regardless of play
                 // state, so the total-time label appears even when the media was opened paused.
                 // metadata.duration is what consumers read for the total-time label.
