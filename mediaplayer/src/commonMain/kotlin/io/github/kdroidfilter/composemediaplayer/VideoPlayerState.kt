@@ -87,6 +87,14 @@ interface VideoPlayerState {
     var isFullscreen: Boolean
     val aspectRatio: Float
 
+    /**
+     * Whether a frame of the current media has been handed to the surface. False until the first frame after
+     * [openUri] / [openFile], so a caller can keep a placeholder or loader up until there is a picture to show.
+     *
+     * Reported by the desktop (JVM) players; false on the other platforms for now.
+     */
+    val hasRenderedFirstFrame: Boolean get() = false
+
     val isPipSupported: Boolean get() = false
     var isPipActive: Boolean get() = false
         set(value) {}

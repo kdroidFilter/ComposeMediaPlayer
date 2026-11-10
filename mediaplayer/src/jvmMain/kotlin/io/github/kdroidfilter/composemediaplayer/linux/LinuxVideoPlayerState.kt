@@ -47,6 +47,10 @@ class LinuxVideoPlayerState : VideoPlayerState {
     private val _currentFrameState = MutableStateFlow<ImageBitmap?>(null)
     internal val currentFrameState: State<ImageBitmap?> = mutableStateOf(null)
 
+    // The last frame stays on the surface across an open, so the first frame of a media is tracked on its own
+    private var _hasRenderedFirstFrame by mutableStateOf(false)
+    override val hasRenderedFirstFrame: Boolean get() = _hasRenderedFirstFrame
+
     // Double-buffered Skia bitmaps
     private var skiaBitmapWidth: Int = 0
     private var skiaBitmapHeight: Int = 0
@@ -174,6 +178,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                     ensureActive()
                     withContext(Dispatchers.Main) {
                         (currentFrameState as MutableState).value = newFrame
+                    if (newFrame != null) _hasRenderedFirstFrame = true
                     }
                 }
             }
@@ -235,6 +240,7 @@ class LinuxVideoPlayerState : VideoPlayerState {
                 isLoading = true
                 error = null
                 playbackSpeed = 1.0f
+                _hasRenderedFirstFrame = false
             }
 
             try {

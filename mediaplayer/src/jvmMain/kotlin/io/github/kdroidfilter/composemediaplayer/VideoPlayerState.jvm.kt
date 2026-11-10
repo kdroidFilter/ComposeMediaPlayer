@@ -84,6 +84,7 @@ open class DefaultVideoPlayerState : VideoPlayerState {
 
     override val metadata: VideoMetadata get() = delegate.metadata
     override val aspectRatio: Float get() = delegate.aspectRatio
+    override val hasRenderedFirstFrame: Boolean get() = delegate.hasRenderedFirstFrame
 
     override var subtitlesEnabled = delegate.subtitlesEnabled
     override var currentSubtitleTrack: SubtitleTrack? = delegate.currentSubtitleTrack

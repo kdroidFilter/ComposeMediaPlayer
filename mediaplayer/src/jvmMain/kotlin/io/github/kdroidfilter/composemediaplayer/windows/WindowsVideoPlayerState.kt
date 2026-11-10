@@ -207,6 +207,9 @@ class WindowsVideoPlayerState : VideoPlayerState {
     private val bitmapLock = ReentrantReadWriteLock()
     internal val currentFrameState = mutableStateOf<ImageBitmap?>(null)
 
+    // currentFrameState is cleared on every open (releaseAllResources) and set by the first consumed frame
+    override val hasRenderedFirstFrame: Boolean get() = currentFrameState.value != null
+
     // Aspect ratio property
     override val aspectRatio: Float
         get() =
