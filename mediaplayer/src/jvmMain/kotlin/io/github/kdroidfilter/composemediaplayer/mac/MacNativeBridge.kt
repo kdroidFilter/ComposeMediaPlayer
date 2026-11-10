@@ -97,4 +97,7 @@ internal object MacNativeBridge {
 
     // Playback completion
     @JvmStatic external fun nConsumeDidPlayToEnd(handle: Long): Boolean
+
+    // Changes each time the native side retains a new frame
+    @JvmStatic external fun nGetFrameGeneration(handle: Long): Long
 }

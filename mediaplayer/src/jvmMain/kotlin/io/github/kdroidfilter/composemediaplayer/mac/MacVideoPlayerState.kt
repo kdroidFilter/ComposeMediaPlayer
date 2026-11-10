@@ -290,6 +290,13 @@ class MacVideoPlayerState : VideoPlayerState {
     /** Flag to track whether we've read at least one frame while paused (for the paused thumbnail). */
     private val initialFrameRead = AtomicBoolean(false)
 
+    /**
+     * The native frame generation last seen while paused. The native side captures a frame after a paused seek
+     * or a paused open, asynchronously: a new generation earns the paused producer one more read.
+     */
+    @Volatile
+    private var pausedFrameGeneration: Long = Long.MIN_VALUE
+
     // Last opened URI, for play()-without-media reload.
     private var lastUri: String? = null
 
@@ -388,6 +395,7 @@ class MacVideoPlayerState : VideoPlayerState {
                     _hasMedia = false
                     userPaused = false
                     initialFrameRead.set(false)
+                    pausedFrameGeneration = Long.MIN_VALUE
                     // Discard any seek latched against the previous media; if the in-flight seek
                     // loop only drained it after the new media finished opening, the new video
                     // would jump to the old target.
@@ -1216,6 +1224,7 @@ class MacVideoPlayerState : VideoPlayerState {
 
         while (scope.isActive && _hasMedia && !isDisposing.get()) {
             if (_isPlaying) return true
+            if (userPaused && allowInitialFrame) rearmOnNewPausedFrame()
             if (userPaused && allowInitialFrame && !initialFrameRead.getAndSet(true)) return true
             try {
                 delay(40)
@@ -1224,6 +1233,17 @@ class MacVideoPlayerState : VideoPlayerState {
             }
         }
         return false
+    }
+
+    /** A frame the native side captured while paused (after a seek, at open) earns one more read. */
+    private fun rearmOnNewPausedFrame() {
+        val ptr = playerPtr
+        if (ptr == 0L) return
+        val generation = MacNativeBridge.nGetFrameGeneration(ptr)
+        if (generation != pausedFrameGeneration) {
+            pausedFrameGeneration = generation
+            initialFrameRead.set(false)
+        }
     }
 
     private var resizeWaitCount = 0

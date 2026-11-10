@@ -79,6 +79,11 @@ class MacVideoPlayer {
     private let aspectLock = NSLock()
     private var cachedDisplayAspectRatio: Double = 0.0
 
+    // Incremented each time a new frame is retained, so the Kotlin side can tell a frame captured while
+    // paused (after a seek, at open) from the one it already holds.
+    private var frameGeneration: Int64 = 0
+    private var statusObserver: NSKeyValueObservation?
+
     // End-of-playback flag (set by AVPlayerItemDidPlayToEndTime, consumed once by the Kotlin side)
     private var didPlayToEnd: Bool = false
     private var playbackEndObserver: NSObjectProtocol?
@@ -809,6 +814,7 @@ class MacVideoPlayer {
         }
         bufferLock.lock()
         latestPixelBuffer = pixelBuffer
+        frameGeneration += 1
         bufferLock.unlock()
     }
 
@@ -898,6 +904,14 @@ class MacVideoPlayer {
         // observation thread instead of the frame-decoding thread. .initial seeds the value now.
         presentationSizeObserver = item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
             self?.updateCachedDisplayAspectRatio(from: item.presentationSize)
+        }
+
+        // An HLS item opened paused shows its first frame too (non-HLS media get captureInitialFrame)
+        if isHLSStream {
+            statusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+                guard item.status == .readyToPlay else { return }
+                DispatchQueue.main.async { self?.capturePausedFrame() }
+            }
         }
 
         // Observe end of playback for all media types
@@ -1106,14 +1120,30 @@ class MacVideoPlayer {
         player?.pause()
         stopDisplayLink()
 
-        // Capture the current frame to display while paused (not for HLS)
-        if !isHLSStream, let output = videoOutput, let item = player?.currentItem {
+        // Capture the current frame to display while paused
+        if isHLSStream {
+            capturePausedFrame()
+        } else if let output = videoOutput, let item = player?.currentItem {
             let currentTime = item.currentTime()
             if output.hasNewPixelBuffer(forItemTime: currentTime),
                let pixelBuffer = output.copyPixelBuffer(
                    forItemTime: currentTime, itemTimeForDisplay: nil)
             {
                 retainLatestPixelBuffer(pixelBuffer)
+            }
+        }
+    }
+
+    /// Retains the frame at the current time while paused, for HLS streams. AVPlayerItemVideoOutput decodes it
+    /// asynchronously after a seek or an open, so this polls for up to a second until it is there.
+    private func capturePausedFrame(attemptsLeft: Int = 50) {
+        guard !isPlaying, let output = videoOutput, let item = player?.currentItem else { return }
+        let currentTime = item.currentTime()
+        if let pixelBuffer = output.copyPixelBuffer(forItemTime: currentTime, itemTimeForDisplay: nil) {
+            retainLatestPixelBuffer(pixelBuffer)
+        } else if attemptsLeft > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
+                self?.capturePausedFrame(attemptsLeft: attemptsLeft - 1)
             }
         }
     }
@@ -1269,6 +1299,13 @@ class MacVideoPlayer {
     /// Returns true if this is an HLS stream
     func getIsHLSStream() -> Bool { return isHLSStream }
 
+    /// Changes each time a new frame is retained
+    func getFrameGeneration() -> Int64 {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+        return frameGeneration
+    }
+
     /// Returns available bitrates for HLS streams
     func getAvailableBitrates() -> [Float] { return availableBitrates }
 
@@ -1314,7 +1351,11 @@ class MacVideoPlayer {
         // For HLS, use tolerance for more efficient seeking
         if isHLSStream {
             let tolerance = CMTime(seconds: 1.0, preferredTimescale: 600)
-            player.seek(to: newTime, toleranceBefore: tolerance, toleranceAfter: tolerance)
+            // Once the seek has landed while paused, show the frame it landed on
+            player.seek(to: newTime, toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] finished in
+                guard finished else { return }
+                DispatchQueue.main.async { self?.capturePausedFrame() }
+            }
         } else {
             player.seek(to: newTime)
 
@@ -1349,6 +1390,8 @@ class MacVideoPlayer {
         bufferFullObserver?.invalidate()
         presentationSizeObserver?.invalidate()
         presentationSizeObserver = nil
+        statusObserver?.invalidate()
+        statusObserver = nil
         // Drop the cached aspect ratio so a reopened player can't briefly show the old video's ratio.
         updateCachedDisplayAspectRatio(from: .zero)
 
@@ -1595,6 +1638,13 @@ public func consumeDidPlayToEnd(_ context: UnsafeMutableRawPointer?) -> Int32 {
 }
 
 // HLS-specific C exports
+@_cdecl("getFrameGeneration")
+public func getFrameGeneration(_ context: UnsafeMutableRawPointer?) -> Int64 {
+    guard let context = context else { return 0 }
+    let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()
+    return player.getFrameGeneration()
+}
+
 @_cdecl("getIsHLSStream")
 public func getIsHLSStream(_ context: UnsafeMutableRawPointer?) -> Bool {
     guard let context = context else { return false }
