@@ -69,6 +69,11 @@ static void  update_stream_metadata(VideoPlayer* p);
 static pthread_once_t gst_init_once = PTHREAD_ONCE_INIT;
 
 static void gst_init_func(void) {
+    // GStreamer's segfault trap swaps in its own SIGSEGV handler while it loads a plugin. Inside a JVM that
+    // handler catches the JVM's own deliberate SIGSEGVs (stack banging, implicit null checks, safepoint polls)
+    // and calls exit(-1), killing the whole app. The JVM handles those signals itself, so turn the trap off.
+    // Must run before gst_init().
+    gst_segtrap_set_enabled(FALSE);
     gst_init(NULL, NULL);
 }
 
